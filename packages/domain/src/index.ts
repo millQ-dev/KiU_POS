@@ -56,6 +56,12 @@ export {
   type CostStreamState,
 } from './moving-average.js';
 export {
+  replayStreamBefore,
+  issueCostQuoteFromStream,
+  mergeCertainty,
+  type MovementReplayRow,
+} from './issue-cost.js';
+export {
   findCompositionCycle,
   assertAcyclicComposition,
   computeNormativeYieldRatio,
