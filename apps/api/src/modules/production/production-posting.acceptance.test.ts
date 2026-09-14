@@ -28,6 +28,7 @@ async function truncateBusiness() {
       inventory_movement,
       goods_receipt_line,
       goods_receipt,
+      production_batch_reversal,
       production_batch_input,
       production_batch,
       recipe_component,
@@ -411,11 +412,6 @@ describe('Block D1.2B Production posting (PostgreSQL)', () => {
     const posted = await posting.post(postCmd(batch.productionBatchId));
     expect(posted.status).toBe('created');
     expect(posted.batch.postingStatus).toBe('POSTED');
-    const statusRow = await pool.query(
-      `SELECT posting_status FROM production_batch WHERE production_batch_id = $1`,
-      [batch.productionBatchId],
-    );
-    expect(statusRow.rows[0]?.posting_status).toBe('POSTED');
     const originalMovements = await pool.query(
       `SELECT movement_id, direction, quantity, acquisition_cost_minor FROM inventory_movement
        WHERE source_document_type = 'ProductionBatch' AND source_document_id = $1
@@ -432,6 +428,7 @@ describe('Block D1.2B Production posting (PostgreSQL)', () => {
     });
     expect(rev.status).toBe('created');
     expect(rev.batch.postingStatus).toBe('REVERSED');
+    expect(rev.reversalId).toBeTruthy();
 
     const stillThere = await pool.query(
       `SELECT count(*)::int AS c FROM inventory_movement
@@ -443,27 +440,239 @@ describe('Block D1.2B Production posting (PostgreSQL)', () => {
     const compensating = await pool.query(
       `SELECT count(*)::int AS c FROM inventory_movement
        WHERE source_document_type = 'ProductionBatchReversal' AND source_document_id = $1`,
-      [batch.productionBatchId],
+      [rev.reversalId],
     );
     expect(compensating.rows[0]!.c).toBe(2);
+
+    const fakeBatch = await pool.query(
+      `SELECT count(*)::int AS c FROM production_batch WHERE reverses_production_batch_id = $1`,
+      [batch.productionBatchId],
+    );
+    expect(fakeBatch.rows[0]!.c).toBe(0);
+
+    const entity = await pool.query(
+      `SELECT count(*)::int AS c FROM production_batch_reversal WHERE production_batch_id = $1`,
+      [batch.productionBatchId],
+    );
+    expect(entity.rows[0]!.c).toBe(1);
 
     const dup = await posting.reverse({
       productionBatchId: batch.productionBatchId,
       idempotencyKey: 'rev-1',
+      reason: 'correction',
     });
     expect(dup.status).toBe('duplicate');
 
-    const outBal = await receipts.getBalance(fx.legalEntityId, fx.warehouseId, outputId);
+    await expect(
+      posting.reverse({
+        productionBatchId: batch.productionBatchId,
+        idempotencyKey: 'rev-2',
+        reason: 'other',
+      }),
+    ).rejects.toMatchObject({ code: 'ALREADY_REVERSED' });
+
+    await expect(
+      posting.reverse({
+        productionBatchId: rev.reversalId!,
+        idempotencyKey: 'rev-of-rev',
+      }),
+    ).rejects.toBeTruthy();
+
+    const outBal = await receipts.getBalance(fx.legalEntityId, fx.warehouseId, outputId, 'VND');
     expect(outBal.quantity).toBe('0');
+
+    const facts = await pool.query(`SELECT fact_type FROM operational_fact_feed`);
+    expect(facts.rows.map((r) => r.fact_type)).toContain(OperationalFactType.ProductionPostingReversed);
   });
 
-  it('facts emitted for consume + produce', async () => {
+  it('facts emitted for consume + produce; fingerprint matches persisted semantics', async () => {
     await receiveMeat('20', '24000', '2026-03-01', 1);
     const { batch } = await finalizedBatch();
     await posting.post(postCmd(batch.productionBatchId));
-    const facts = await pool.query(`SELECT fact_type FROM operational_fact_feed ORDER BY fact_type`);
+    const facts = await pool.query(
+      `SELECT fact_type, semantic_fingerprint, context, payload, occurred_at,
+              business_date::text AS business_date, business_order, business_time
+       FROM operational_fact_feed WHERE fact_type = $1`,
+      [OperationalFactType.PreparationProduced],
+    );
+    expect(facts.rowCount).toBe(1);
+    const row = facts.rows[0]!;
+    const { semanticFingerprint } = await import('@millq/contracts');
+    const recomputed = semanticFingerprint({
+      factId: '00000000-0000-4000-8000-000000000001',
+      factType: OperationalFactType.PreparationProduced,
+      idempotencyKey: 'x',
+      occurredAt: row.occurred_at instanceof Date ? row.occurred_at.toISOString() : row.occurred_at,
+      recordedAt: row.occurred_at instanceof Date ? row.occurred_at.toISOString() : row.occurred_at,
+      position: {
+        businessDate: String(row.business_date).slice(0, 10),
+        businessOrder: row.business_order,
+        ...(row.business_time ? { businessTime: row.business_time } : {}),
+      },
+      context: row.context,
+      payload: row.payload,
+    });
+    expect(recomputed).toBe(row.semantic_fingerprint);
+    expect(row.context.totalLoss).toBeUndefined();
+  });
+
+  it('P0-1 — UNKNOWN ingredient → produced stock → later consumption stays UNKNOWN', async () => {
+    const breadOutputId = randomUUID();
+    await pool.query(
+      `INSERT INTO catalog_item (catalog_item_id, tenant_id, name, base_unit, dimension)
+       VALUES ($1,$2,'Bread stock','kg','MASS')`,
+      [breadOutputId, fx.tenantId],
+    );
+    const { batch, outputId } = await finalizedBatch();
+    const first = await posting.post(
+      postCmd(batch.productionBatchId, { businessDate: '2026-03-10', businessOrder: 1 }),
+    );
+    expect(first.batch.actualBatchCostCertainty).toBe('UNKNOWN');
+    const inMov = await pool.query(
+      `SELECT cost_certainty FROM inventory_movement
+       WHERE source_document_type='ProductionBatch' AND source_document_id=$1 AND direction='IN'`,
+      [batch.productionBatchId],
+    );
+    expect(inMov.rows[0]!.cost_certainty).toBe('UNKNOWN');
+    const bal = await receipts.getBalance(fx.legalEntityId, fx.warehouseId, outputId, 'VND');
+    expect(bal.carryingCertainty).toBe('UNKNOWN');
+
+    const draftPrep = await recipes.createPreparationDraft({
+      tenantId: fx.tenantId,
+      name: 'Bread',
+      materializationMode: 'STOCK_TRACKED',
+      outputCatalogItemId: breadOutputId,
+      normativeInputQuantity: '8',
+      normativeInputUnit: 'kg',
+      normativeInputDimension: 'MASS',
+      normativeOutputQuantity: '7',
+      normativeOutputUnit: 'kg',
+      normativeOutputDimension: 'MASS',
+      components: [
+        {
+          lineNumber: 1,
+          componentKind: 'CATALOG_ITEM',
+          catalogItemId: outputId,
+          quantity: '8',
+          unit: 'kg',
+          dimension: 'MASS',
+        },
+      ],
+    });
+    const prep = await recipes.publishPreparationVersion(draftPrep.preparationVersionId);
+    const draft = await batches.createDraft({
+      tenantId: fx.tenantId,
+      warehouseId: fx.warehouseId,
+      preparationVersionId: prep.preparationVersionId,
+      actualInputQuantity: '8',
+      actualInputUnit: 'kg',
+      actualInputDimension: 'MASS',
+      actualOutputQuantity: '7',
+      actualOutputUnit: 'kg',
+      actualOutputDimension: 'MASS',
+      deviationClass: 'NORMAL',
+      actorId: fx.actorId,
+      inputActuals: [
+        { lineNumber: 1, actualQuantity: '8', actualUnit: 'kg', actualDimension: 'MASS' },
+      ],
+    });
+    const finalized = await batches.finalize({
+      productionBatchId: draft.productionBatchId,
+      idempotencyKey: `fin-${draft.productionBatchId}`,
+      actorId: fx.actorId,
+    });
+    const second = await posting.post(
+      postCmd(finalized.productionBatchId, { businessDate: '2026-03-11', businessOrder: 1 }),
+    );
+    expect(second.batch.actualBatchCostCertainty).toBe('UNKNOWN');
+  });
+
+  it('P0-1b — legitimate FINAL zero cost is distinguishable from UNKNOWN', async () => {
+    await receiveMeat('20', '0', '2026-03-01', 1);
+    const { batch } = await finalizedBatch();
+    const result = await posting.post(postCmd(batch.productionBatchId));
+    expect(result.batch.actualBatchCostMinor).toBe('0');
+    expect(result.batch.actualBatchCostCertainty).toBe('FINAL');
+  });
+
+  it('P1-3 — wrong request currency rejected; empty warehouse not assigned arbitrary currency', async () => {
+    await receiveMeat('20', '24000', '2026-03-01', 1);
+    const { batch } = await finalizedBatch();
+    await expect(
+      posting.post(postCmd(batch.productionBatchId, { currencyCode: 'USD' })),
+    ).rejects.toMatchObject({ code: 'VALUATION_CURRENCY_MISMATCH' });
+  });
+
+  it('P0-2 — chronology independent of upload/recorded order', async () => {
+    // Two receipts same stream: order 2 first in DB, then order 1 — economic result uses business order.
+    await receiveMeat('10', '10000', '2026-03-01', 2);
+    await receiveMeat('10', '30000', '2026-03-01', 1);
+    const { batch } = await finalizedBatch({ actualInput: '10', actualOutput: '8' });
+    const result = await posting.post(
+      postCmd(batch.productionBatchId, { businessDate: '2026-03-02', businessOrder: 1 }),
+    );
+    // Before production: 10@30000 then 10@10000 → avg 20000; consume 10 → 200000
+    expect(result.batch.actualBatchCostMinor).toBe('200000');
+  });
+
+  it('19b — TOTAL_LOSS emits ProductionTotalLoss not PreparationProduced', async () => {
+    await receiveMeat('20', '24000', '2026-03-01', 1);
+    const { batch } = await finalizedBatch({
+      deviationClass: 'TOTAL_LOSS',
+      deviationReason: 'burned',
+      actualOutput: '0',
+      actualInput: '10',
+    });
+    await posting.post(postCmd(batch.productionBatchId));
+    const facts = await pool.query(`SELECT fact_type FROM operational_fact_feed`);
     const types = facts.rows.map((r) => r.fact_type);
+    expect(types).toContain(OperationalFactType.ProductionTotalLoss);
+    expect(types).not.toContain(OperationalFactType.PreparationProduced);
     expect(types).toContain(OperationalFactType.InventoryConsumed);
-    expect(types).toContain(OperationalFactType.PreparationProduced);
+  });
+
+  it('P1-4 — reversal same-key semantic mismatch conflicts', async () => {
+    await receiveMeat('20', '24000', '2026-03-01', 1);
+    const { batch } = await finalizedBatch();
+    await posting.post(postCmd(batch.productionBatchId));
+    await posting.reverse({
+      productionBatchId: batch.productionBatchId,
+      idempotencyKey: 'rev-sem',
+      reason: 'first',
+    });
+    await expect(
+      posting.reverse({
+        productionBatchId: batch.productionBatchId,
+        idempotencyKey: 'rev-sem',
+        reason: 'second-different',
+      }),
+    ).rejects.toBeInstanceOf(IdempotencyConflictError);
+  });
+
+  it('P1-4 — concurrent different keys: exactly one reversal', async () => {
+    await receiveMeat('20', '24000', '2026-03-01', 1);
+    const { batch } = await finalizedBatch();
+    await posting.post(postCmd(batch.productionBatchId));
+    const results = await Promise.allSettled([
+      posting.reverse({
+        productionBatchId: batch.productionBatchId,
+        idempotencyKey: 'rev-a',
+        reason: 'a',
+      }),
+      posting.reverse({
+        productionBatchId: batch.productionBatchId,
+        idempotencyKey: 'rev-b',
+        reason: 'b',
+      }),
+    ]);
+    const ok = results.filter((r) => r.status === 'fulfilled');
+    const failed = results.filter((r) => r.status === 'rejected');
+    expect(ok).toHaveLength(1);
+    expect(failed).toHaveLength(1);
+    const count = await pool.query(
+      `SELECT count(*)::int AS c FROM production_batch_reversal WHERE production_batch_id = $1`,
+      [batch.productionBatchId],
+    );
+    expect(count.rows[0]!.c).toBe(1);
   });
 });

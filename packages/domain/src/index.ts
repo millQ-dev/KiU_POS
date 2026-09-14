@@ -51,14 +51,17 @@ export {
   lineAcquisitionCost,
   compareBusinessPosition,
   assertBusinessChronologyLess,
+  mergeCertainty,
+  orderMovementsForEconomicReplay,
+  isReversalDocumentType,
   type CostCertainty,
+  type CostBasis,
   type CostQuote,
   type CostStreamState,
 } from './moving-average.js';
 export {
   replayStreamBefore,
   issueCostQuoteFromStream,
-  mergeCertainty,
   type MovementReplayRow,
 } from './issue-cost.js';
 export {

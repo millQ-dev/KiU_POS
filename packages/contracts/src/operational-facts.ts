@@ -18,10 +18,18 @@ const quantityPayload = z.object({
   dimension: z.enum(['MASS', 'VOLUME', 'COUNT']),
 });
 
+const costCertaintySchema = z.enum([
+  'FINAL',
+  'ESTIMATED_FROM_LAST_KNOWN',
+  'UNKNOWN',
+  'ORDER_UNRESOLVED',
+]);
+
 const costPayload = z.object({
   amountMinorUnits: z.string(),
   currencyCode: z.string().length(3),
   minorUnitExponent: z.number().int().min(0).max(4),
+  certainty: costCertaintySchema.optional(),
 });
 
 /**
@@ -61,6 +69,21 @@ export const preparationProducedPayloadSchema = z.object({
   /** Derived input carrying cost — CostValue semantics (ADR-0002), not posted Money */
   actualInputCost: costPayload,
   actualOutputQuantity: quantityPayload,
+});
+
+/** TOTAL_LOSS posting: inputs consumed, no preparation stock produced (ADR-0003 §3). */
+export const productionTotalLossPayloadSchema = z.object({
+  preparationSpecVersionId: z.string().uuid(),
+  productionBatchId: z.string().uuid(),
+  actualInputCost: costPayload,
+  deviationReason: z.string().min(1).optional(),
+});
+
+/** Compensating operational fact for production posting reversal (original facts remain immutable). */
+export const productionPostingReversedPayloadSchema = z.object({
+  productionBatchId: z.string().uuid(),
+  productionBatchReversalId: z.string().uuid(),
+  reason: z.string().min(1).optional(),
 });
 
 export const inventoryAdjustedPayloadSchema = z.object({
@@ -124,6 +147,8 @@ export const operationalFactPayloadSchemas = {
   [OperationalFactType.PurchasePriceRecorded]: purchasePriceRecordedPayloadSchema,
   [OperationalFactType.RecipeVersionActivated]: recipeVersionActivatedPayloadSchema,
   [OperationalFactType.PreparationProduced]: preparationProducedPayloadSchema,
+  [OperationalFactType.ProductionTotalLoss]: productionTotalLossPayloadSchema,
+  [OperationalFactType.ProductionPostingReversed]: productionPostingReversedPayloadSchema,
   [OperationalFactType.InventoryAdjusted]: inventoryAdjustedPayloadSchema,
   [OperationalFactType.InventoryConsumed]: inventoryConsumedPayloadSchema,
   [OperationalFactType.OrderOpened]: orderOpenedPayloadSchema,

@@ -32,7 +32,7 @@
 | ADR-0022 / ADR-0023 / ADR-0024 | **Accepted** (PR #23 → `3590147`) |
 | Block D1.1 Recipes & Preparations foundation | **Merged** (PR #25 → `3ff79a2`; no ProductionBatch / sale write-off) |
 | Block D1.2A ProductionBatch domain foundation | **Merged** (PR #27 → `4546dbe`; FINALIZED facts; **no** inventory posting) |
-| Block D1.2B Production posting / inventory / costing | **In review** (FINALIZED→POSTED; shared Block C rebuild) |
+| Block D1.2B Production posting / inventory / costing | **In remediation review** (PR #29; certainty/chronology/currency/reversal) |
 | New application verticals beyond D1.2B | **STOP** until PO launches next slice |
 | Origin CI | **Attached** — Depot |
 | GitHub Actions | Dormant copies only |
