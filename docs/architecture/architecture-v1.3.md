@@ -15,7 +15,7 @@ Architecture v1.3 **extends** v1.2 with boundaries that must be frozen **before*
 ```text
 v1.2 domain boundaries (Accepted)
         +
-v1.3 deltas (this document + ADR-0011…0024 Accepted)
+v1.3 deltas (this document + ADR-0011…0025 Accepted)
         =
 Architecture v1.3 baseline for resumed implementation
 ```
