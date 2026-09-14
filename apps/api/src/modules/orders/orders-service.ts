@@ -481,8 +481,41 @@ export class OrdersService {
       await client.query('BEGIN');
       const order = await this.lockOrder(client, cmd.orderId);
       if (order.status === 'COMPLETED') {
-        await client.query('COMMIT');
-        return { status: 'duplicate' as const, order: await this.getOrder(cmd.orderId) };
+        if (
+          order.complete_idempotency_key === cmd.idempotencyKey &&
+          order.complete_semantic_fingerprint
+        ) {
+          const linesLocked = await this.loadLines(client, cmd.orderId);
+          const plan = await client.query<{
+            provenance_hash: string;
+            resolved_issue_warehouse_id: string;
+          }>(
+            `SELECT provenance_hash, resolved_issue_warehouse_id FROM consumption_plan_snapshot
+             WHERE consumption_plan_id = $1`,
+            [order.consumption_plan_id],
+          );
+          const p = plan.rows[0];
+          if (!p) {
+            throw new NotFoundError('ConsumptionPlanSnapshot missing for completed order');
+          }
+          const lockedFp = completeFingerprint({
+            orderId: cmd.orderId,
+            businessDate: cmd.businessDate,
+            businessTime: cmd.businessTime ?? null,
+            businessOrder: cmd.businessOrder,
+            lineIds: linesLocked.map((l) => l.order_line_id),
+            provenanceHash: p.provenance_hash,
+            warehouseId: p.resolved_issue_warehouse_id,
+          });
+          if (order.complete_semantic_fingerprint === lockedFp) {
+            await client.query('COMMIT');
+            return { status: 'duplicate' as const, order: await this.getOrder(cmd.orderId) };
+          }
+        }
+        throw new IdempotencyConflictError(
+          cmd.idempotencyKey,
+          'Concurrent completion conflict: already COMPLETED with different key or semantics',
+        );
       }
       if (order.status !== 'OPEN') {
         throw new OrderImmutableError('Only OPEN orders can be completed');
