@@ -36,11 +36,13 @@ Orders must **not** write Inventory tables directly.
 
 ### 2. Automatic write-off trigger
 
-Authoritative sale/write-off trigger:
+Authoritative sale/write-off trigger command:
 
 ```text
-CompleteOrder → OrderCompleted
+CompleteOrder
 ```
+
+Successful completion yields the business fact **OrderCompleted** and, in the same atomic orchestration (see §4), the Inventory-owned sale GoodsIssue.
 
 Inventory is written off **exactly once** as part of successful Order completion.
 
@@ -50,7 +52,8 @@ Write-off is **not** triggered by:
 - an individual Payment;
 - a partial Payment;
 - arbitrary server arrival / upload order;
-- a manual operator `PostGoodsIssue` workflow as the normal sale path.
+- a manual operator `PostGoodsIssue` workflow as the normal sale path;
+- an asynchronous subscriber reacting to a published `OrderCompleted` feed fact.
 
 Future POS/Settlement orchestration may require settlement coverage before allowing `CompleteOrder` in paid flows. **Settlement does not own inventory semantics** (ADR-0016: Order ≠ Settlement).
 
@@ -69,17 +72,19 @@ Physical consumption and issue cost are determined at the actual `CompleteOrder`
 Sale inventory write-off is an Inventory-owned typed **`GoodsIssue`** (ADR-0010).
 
 - GoodsIssue references its source Order / OrderLines.
-- Orders coordinates completion through an application/domain orchestration boundary.
-- Orders does not mutate Inventory tables.
+- Orders coordinates completion through an application/domain **synchronous orchestration** boundary.
+- Orders does not mutate Inventory tables; it invokes Inventory posting ports/commands inside the same transaction.
+- Write-off is **not** an async reaction to a published `OrderCompleted` operational-fact mirror.
 
-Target modular-monolith transaction:
+Target modular-monolith transaction (normative execution order):
 
 ```text
 validate / freeze Order completion
-  → create + POST GoodsIssue
+  → persist ConsumptionPlanSnapshot (Orders)
+  → create + POST GoodsIssue (Inventory; lines from frozen snapshot — never live re-resolve)
   → immutable InventoryMovement OUT effects
-  → Order COMPLETED
-  → operational fact mirrors
+  → mark Order COMPLETED
+  → operational fact mirrors (OrderCompleted, InventoryConsumed, …)
 ```
 
 Commit atomically, or none commit.
@@ -175,8 +180,11 @@ Partial settlement coverage never creates a sale GoodsIssue.
 Future standard paid POS flow:
 
 ```text
-Settlement complete → permits/causes CompleteOrder → OrderCompleted causes GoodsIssue
+Settlement complete → permits CompleteOrder
+CompleteOrder (atomic orchestration in §4) → GoodsIssue + Order COMPLETED
 ```
+
+Here “causes” means **permission/gating to invoke `CompleteOrder`**, not an Inventory reaction to Settlement or to a published `OrderCompleted` fact.
 
 Settlement implementation itself is deferred from D1.3A/B unless an already accepted interface contract strictly requires a stub.
 
@@ -266,18 +274,22 @@ These scenarios must remain consistent with this ADR (implementation later in D1
 | Multiple warehouses | Default outlet issue warehouse only in D1.3B; no client-chosen truth |
 | Later recipe publication | Completed Order snapshot unchanged |
 | Retry / concurrent CompleteOrder | Idempotent one economic GoodsIssue |
+| CompleteOrder fails mid-GoodsIssue | Full transaction rollback; Order not COMPLETED |
 | Offline command later with real business chronology | Chronology from business position, not upload order; runtime deferred |
+| Nested mixed VIRTUAL / STOCK_TRACKED | Per-node exclusive path; still exactly one physical write-off overall |
 
 ## Contradictions checked
 
 | Potential tension | Resolution in this ADR |
 | --- | --- |
-| Charter “Sale” vs Orders SoT | Sale = OrderCompleted economically; no Sale aggregate |
-| ADR-0016 settlement completion vs write-off | Settlement may gate CompleteOrder; write-off owned by OrderCompleted → GoodsIssue |
+| Charter “Sale” vs Orders SoT | Sale = economic completion of Order; no Sale aggregate |
+| ADR-0016 settlement completion vs write-off | Settlement may **permit** CompleteOrder; write-off is synchronous inside CompleteOrder (§4), not owned by Settlement |
+| “OrderCompleted causes GoodsIssue” wording | Normative meaning = part of CompleteOrder atomic orchestration; **not** async feed subscriber |
 | OrderLine snapshot at add vs ADR-0003 cost-at-sale | Commercial snapshot may exist earlier; **consumption** pinned only at CompleteOrder |
 | Manual GoodsIssue vs automatic sale path | Manual GoodsIssue remains a typed inventory capability; **not** the normal sale write-off trigger |
 | D1.2B reverse stub anti-pattern | Explicit Order reversal + GoodsIssue reversal entities; no fake Orders/GoodsIssues |
 | Effective Recipe needed for modifiers | Explicitly deferred; base graph only in D1.3A/B |
+| D1.3B expansion source | GoodsIssue leaves/quantities derive **only** from frozen ConsumptionPlanSnapshot |
 
 No unresolved contradiction with Accepted ADRs was found for these binding decisions. Remaining work is implementation sequencing (D1.3A then D1.3B), not re-decision.
 

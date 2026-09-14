@@ -34,7 +34,7 @@
 | Block D1.1 Recipes & Preparations foundation | **Merged** (PR #25 → `3ff79a2`) |
 | Block D1.2A ProductionBatch domain foundation | **Merged** (PR #27 → `4546dbe`) |
 | Block D1.2B Production posting / inventory / costing | **Merged** (PR #29 → `57499df`) |
-| ADR-0025 Order Completion & Sale Inventory Write-off | **In review** (architecture-only; enables D1.3A then D1.3B) |
+| ADR-0025 Order Completion & Sale Inventory Write-off | **Accepted (this PR)** — architecture-only; D1.3A/B STOP until PO launch |
 | D1.3A / D1.3B / Food Cost | **STOP** until ADR-0025 Accept + explicit PO launch per block |
 | Origin CI | **Attached** — Depot |
 | GitHub Actions | Dormant copies only |
