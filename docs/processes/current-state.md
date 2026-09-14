@@ -1,8 +1,9 @@
 # MillQ Current State
 
-**Checkpoint:** Block D1.2B Production posting **Merged** — Origin `main` @ `57499df` (2026-09-14)  
+**Checkpoint:** ADR-0025 Order Completion & Sale Inventory Write-off **Accepted / Merged** — Origin `main` @ `8844ccb` (2026-09-14)  
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)  
 **Backup host:** GitHub `https://github.com/millQ-dev/MillQ.git` (mirror only)  
+**Accept PR #30:** ADR-0025 @ `8844ccb`  
 **Block D1.2B PR #29:** merged @ `57499df`  
 **Block D1.2A PR #27:** merged @ `4546dbe`  
 **Block D1.1 PR #25:** merged @ `3ff79a2`  
@@ -34,8 +35,8 @@
 | Block D1.1 Recipes & Preparations foundation | **Merged** (PR #25 → `3ff79a2`) |
 | Block D1.2A ProductionBatch domain foundation | **Merged** (PR #27 → `4546dbe`) |
 | Block D1.2B Production posting / inventory / costing | **Merged** (PR #29 → `57499df`) |
-| ADR-0025 Order Completion & Sale Inventory Write-off | **Accepted (this PR)** — architecture-only; D1.3A/B STOP until PO launch |
-| D1.3A / D1.3B / Food Cost | **STOP** until ADR-0025 Accept + explicit PO launch per block |
+| ADR-0025 Order Completion & Sale Inventory Write-off | **Accepted / Merged** (PR #30 → `8844ccb`) — architecture-only |
+| D1.3A / D1.3B / Food Cost | **STOP** until explicit PO launch per block |
 | Origin CI | **Attached** — Depot |
 | GitHub Actions | Dormant copies only |
 | GitHub backup | Post-merge Origin→GitHub via **MillQ Origin Backup** App |
@@ -67,11 +68,11 @@
 | ADR-0022 | Accepted | Professional Account & Cross-Business Access |
 | ADR-0023 | Accepted | Workforce / Recruiting / Learning / Assessment |
 | ADR-0024 | Accepted | Allergen & Dietary Constraint Resolution |
-| ADR-0025 | **Accepted (this PR)** | Order Completion & Sale Inventory Write-off Semantics |
+| ADR-0025 | **Accepted** | Order Completion & Sale Inventory Write-off Semantics |
 
 ## Proposed
 
-_None remaining for this Accept PR._
+_None._
 
 ### Settlement / non-custody invariant (ADR-0013 + ADR-0016)
 
@@ -139,8 +140,8 @@ Charter “Sale” = OrderCompleted. Write-off via Inventory-owned GoodsIssue on
 4. ~~Block D1.1~~ **Merged**  
 5. ~~Block D1.2A~~ **Merged**  
 6. ~~Block D1.2B~~ **Merged** (PR #29 → `57499df`)  
-7. **ADR-0025** Accept (this PR)  
+7. ~~ADR-0025~~ **Accepted / Merged** (PR #30 → `8844ccb`)  
 8. **STOP** — D1.3A only after explicit PO launch  
 9. D1.3B after D1.3A  
 10. Food Cost only after D1.3B + PO launch  
-11. Review policy: next substantive application PR after D1.2B requires **COMPLETE FULL-DIFF REVIEW**
+11. Review policy: next substantive application PR (D1.3A+) requires **COMPLETE FULL-DIFF REVIEW**
