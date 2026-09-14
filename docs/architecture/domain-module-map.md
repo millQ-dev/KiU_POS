@@ -92,12 +92,12 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 
 | | |
 | --- | --- |
-| **Owns** | ProductionBatch DRAFT→FINALIZED recording foundation (D1.2A): pinned PreparationVersion, expected vs actual I/O/yield, deviation classification, input line snapshots |
-| **Does not own** | Inventory movements/balances from production (D1.2B / Inventory), recipe/preparation specification truth (Recipes), costing valuation |
-| **Key concepts** | ProductionBatch, ProductionBatchInput; FINALIZED = immutable production fact (not inventory POSTED) |
-| **Commands in** | CreateProductionBatchDraft, UpdateProductionBatchDraft, FinalizeProductionBatch |
-| **Facts out** | ProductionBatchFinalized (audit today; operational feed mirror deferred with D1.2B posting) |
-| **Depends on** | Recipes (PUBLISHED STOCK_TRACKED PreparationVersion), Catalog, Organization (warehouse/tenant) |
+| **Owns** | ProductionBatch DRAFT→FINALIZED recording foundation (D1.2A); coordinates posting commands with Inventory (D1.2B) |
+| **Does not own** | Inventory movements/balances (Inventory), recipe/preparation specification truth (Recipes), costing valuation engine |
+| **Key concepts** | ProductionBatch, ProductionBatchInput; FINALIZED = immutable production fact (not inventory POSTED); posting_status UNPOSTED/POSTED/REVERSED |
+| **Commands in** | CreateProductionBatchDraft, UpdateProductionBatchDraft, FinalizeProductionBatch, PostProductionBatch, ReverseProductionBatchPosting |
+| **Facts out** | PreparationProduced, InventoryConsumed (via posting); audit PRODUCTION_BATCH_POSTED / REVERSED |
+| **Depends on** | Recipes (PUBLISHED STOCK_TRACKED PreparationVersion), Catalog, Organization (warehouse/tenant), Inventory apply |
 
 ### Menu Configuration
 
@@ -158,10 +158,10 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 
 | | |
 | --- | --- |
-| **Owns** | InventoryMovement, balances (projection), ProductionBatch **stock effects** (D1.2B+), StockAdjustment, count posting effects |
-| **Does not own** | Purchasing source documents (GoodsReceipt header lives with Purchasing posting coordination — see Block C contract), derived unit cost, ProductionBatch recording foundation without posting (Production / D1.2A) |
-| **Key concepts** | InventoryMovement, warehouse stock projection, explain-balance chain |
-| **Commands in** | ApplyPostedMovements, AdjustStock, CompleteProductionBatch (posting — D1.2B) |
+| **Owns** | InventoryMovement, balances (projection), ProductionBatch **stock effects** (D1.2B posting), StockAdjustment, count posting effects |
+| **Does not own** | Purchasing source documents (GoodsReceipt header lives with Purchasing posting coordination — see Block C contract), derived unit cost presentation, ProductionBatch recording foundation without posting (Production / D1.2A) |
+| **Key concepts** | InventoryMovement, warehouse stock projection, explain-balance chain; shared `rebuildInventoryBalance` |
+| **Commands in** | ApplyPostedMovements, AdjustStock, CompleteProductionBatch / PostProductionBatch (D1.2B) |
 | **Facts out** | InventoryAdjusted, InventoryConsumed, PreparationProduced |
 | **Depends on** | Catalog, Units, Recipes (expansion rules), Organization, Production (finalized batch refs) |
 

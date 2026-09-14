@@ -1,11 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import {
-  applyPositiveInbound,
-  applyCompensatingOutbound,
-  emptyCostStream,
   costQuoteFromStream,
-  createCostValue,
   compareBusinessPosition,
   type CostQuote,
 } from '@millq/domain';
@@ -14,6 +10,7 @@ import {
   parseOperationalFact,
   semanticFingerprint as factSemanticFingerprint,
 } from '@millq/contracts';
+import { rebuildInventoryBalance, lockValuationStream } from '../inventory/rebuild-balance.js';
 import { DomainValidationError, IdempotencyConflictError, NotFoundError, PostedImmutableError } from './errors.js';
 import { fingerprintFromDraft } from './fingerprint.js';
 import {
@@ -55,6 +52,11 @@ export class GoodsReceiptService {
   async createDraft(raw: unknown) {
     const input = createDraftSchema.parse(raw);
     await this.validateBoundary(input.legalEntityId, input.warehouseId, input.tenantId);
+    await this.validateValuationCurrency(
+      input.legalEntityId,
+      input.currencyCode,
+      input.minorUnitExponent,
+    );
     await this.validateSupplier(input.supplierId, input.tenantId);
     for (const line of input.lines) {
       await this.validateLine(line, input.currencyCode, input.minorUnitExponent, input.tenantId);
@@ -267,8 +269,9 @@ export class GoodsReceiptService {
             movement_id, tenant_id, legal_entity_id, warehouse_id, catalog_item_id,
             direction, quantity, base_unit, dimension, acquisition_cost_minor,
             currency_code, minor_unit_exponent, business_date, business_time, business_order,
-            source_document_type, source_document_id, source_document_line_id, actor_id
-          ) VALUES ($1,$2,$3,$4,$5,'IN',$6,$7,$8,$9,$10,$11,$12,$13,$14,'GoodsReceipt',$15,$16,$17)`,
+            source_document_type, source_document_id, source_document_line_id, actor_id,
+            cost_certainty, cost_basis
+          ) VALUES ($1,$2,$3,$4,$5,'IN',$6,$7,$8,$9,$10,$11,$12,$13,$14,'GoodsReceipt',$15,$16,$17,'FINAL','SUPPLIER_PRICE')`,
           [
             movementId,
             existing.tenantId,
@@ -292,9 +295,24 @@ export class GoodsReceiptService {
       }
 
       // Replay cost streams for all affected items (chronology-correct)
-      const itemIds = [...new Set(existing.lines.map((l) => l.catalogItemId))];
+      const itemIds = [...new Set(existing.lines.map((l) => l.catalogItemId))].sort();
       for (const catalogItemId of itemIds) {
-        await this.rebuildBalance(client, existing.legalEntityId, existing.warehouseId, catalogItemId);
+        await lockValuationStream(
+          client,
+          existing.legalEntityId,
+          existing.warehouseId,
+          catalogItemId,
+          existing.currencyCode,
+          existing.minorUnitExponent,
+        );
+        await this.rebuildBalance(
+          client,
+          existing.legalEntityId,
+          existing.warehouseId,
+          catalogItemId,
+          existing.currencyCode,
+          existing.minorUnitExponent,
+        );
       }
 
       await this.mirrorGoodsReceivedFacts(client, existing, cmd);
@@ -397,8 +415,9 @@ export class GoodsReceiptService {
             movement_id, tenant_id, legal_entity_id, warehouse_id, catalog_item_id,
             direction, quantity, base_unit, dimension, acquisition_cost_minor,
             currency_code, minor_unit_exponent, business_date, business_time, business_order,
-            source_document_type, source_document_id, source_document_line_id, actor_id
-          ) VALUES ($1,$2,$3,$4,$5,'OUT',$6,$7,$8,$9,$10,$11,$12,$13,$14,'GoodsReceiptReversal',$15,$16,$17)`,
+            source_document_type, source_document_id, source_document_line_id, actor_id,
+            cost_certainty, cost_basis
+          ) VALUES ($1,$2,$3,$4,$5,'OUT',$6,$7,$8,$9,$10,$11,$12,$13,$14,'GoodsReceiptReversal',$15,$16,$17,'FINAL','SUPPLIER_PRICE')`,
           [
             randomUUID(),
             existing.tenantId,
@@ -421,9 +440,24 @@ export class GoodsReceiptService {
         );
       }
 
-      const itemIds = [...new Set(existing.lines.map((l) => l.catalogItemId))];
+      const itemIds = [...new Set(existing.lines.map((l) => l.catalogItemId))].sort();
       for (const catalogItemId of itemIds) {
-        await this.rebuildBalance(client, existing.legalEntityId, existing.warehouseId, catalogItemId);
+        await lockValuationStream(
+          client,
+          existing.legalEntityId,
+          existing.warehouseId,
+          catalogItemId,
+          existing.currencyCode,
+          existing.minorUnitExponent,
+        );
+        await this.rebuildBalance(
+          client,
+          existing.legalEntityId,
+          existing.warehouseId,
+          catalogItemId,
+          existing.currencyCode,
+          existing.minorUnitExponent,
+        );
       }
 
       await this.writeAudit(client, {
@@ -444,11 +478,23 @@ export class GoodsReceiptService {
     return { status: 'created' as const, receipt: await this.get(id), reverseDocumentId: reverseId };
   }
 
-  async getBalance(legalEntityId: string, warehouseId: string, catalogItemId: string) {
-    const r = await this.pool.query(
-      `SELECT * FROM inventory_balance WHERE legal_entity_id = $1 AND warehouse_id = $2 AND catalog_item_id = $3`,
-      [legalEntityId, warehouseId, catalogItemId],
-    );
+  async getBalance(
+    legalEntityId: string,
+    warehouseId: string,
+    catalogItemId: string,
+    currencyCode?: string,
+  ) {
+    const r = currencyCode
+      ? await this.pool.query(
+          `SELECT * FROM inventory_balance
+           WHERE legal_entity_id = $1 AND warehouse_id = $2 AND catalog_item_id = $3 AND currency_code = $4`,
+          [legalEntityId, warehouseId, catalogItemId, currencyCode],
+        )
+      : await this.pool.query(
+          `SELECT * FROM inventory_balance
+           WHERE legal_entity_id = $1 AND warehouse_id = $2 AND catalog_item_id = $3`,
+          [legalEntityId, warehouseId, catalogItemId],
+        );
     if (!r.rowCount) {
       return {
         legalEntityId,
@@ -456,14 +502,22 @@ export class GoodsReceiptService {
         catalogItemId,
         quantity: '0',
         carryingValueMinor: '0',
+        carryingCertainty: 'FINAL' as const,
         costQuote: null as CostQuote | null,
       };
+    }
+    if (!currencyCode && r.rowCount > 1) {
+      throw new DomainValidationError(
+        'AMBIGUOUS_VALUATION_STREAM',
+        'Multiple valuation-currency balances exist; currencyCode is required',
+      );
     }
     const row = r.rows[0] as {
       quantity: string;
       carrying_value_minor: string;
       currency_code: string;
       minor_unit_exponent: number;
+      carrying_certainty: 'FINAL' | 'ESTIMATED_FROM_LAST_KNOWN' | 'UNKNOWN' | 'ORDER_UNRESOLVED';
     };
     const quote = costQuoteFromStream(
       {
@@ -471,6 +525,7 @@ export class GoodsReceiptService {
         carryingValueMinor: row.carrying_value_minor,
         currencyCode: row.currency_code,
         minorUnitExponent: row.minor_unit_exponent,
+        carryingCertainty: row.carrying_certainty,
       },
       new Date().toISOString().slice(0, 10),
       0,
@@ -483,6 +538,7 @@ export class GoodsReceiptService {
       carryingValueMinor: row.carrying_value_minor,
       currencyCode: row.currency_code,
       minorUnitExponent: row.minor_unit_exponent,
+      carryingCertainty: row.carrying_certainty,
       costQuote: quote,
     };
   }
@@ -503,60 +559,43 @@ export class GoodsReceiptService {
     legalEntityId: string,
     warehouseId: string,
     catalogItemId: string,
+    currencyCode: string,
+    minorUnitExponent: number,
   ): Promise<void> {
-    const movements = await client.query(
-      `SELECT direction, quantity, acquisition_cost_minor, currency_code, minor_unit_exponent,
-              business_date, business_order
-       FROM inventory_movement
-       WHERE legal_entity_id = $1 AND warehouse_id = $2 AND catalog_item_id = $3
-       ORDER BY business_date ASC, business_order ASC, recorded_at ASC`,
-      [legalEntityId, warehouseId, catalogItemId],
+    await rebuildInventoryBalance(
+      client,
+      legalEntityId,
+      warehouseId,
+      catalogItemId,
+      currencyCode,
+      minorUnitExponent,
     );
+  }
 
-    let currency = 'VND';
-    let exponent = 0;
-    if (movements.rows[0]) {
-      currency = movements.rows[0].currency_code as string;
-      exponent = movements.rows[0].minor_unit_exponent as number;
-    }
-    let state = emptyCostStream(currency, exponent);
-
-    for (const m of movements.rows as Array<{
-      direction: string;
-      quantity: string;
-      acquisition_cost_minor: string;
-      currency_code: string;
-      minor_unit_exponent: number;
-    }>) {
-      const cost = createCostValue(m.acquisition_cost_minor, m.currency_code, m.minor_unit_exponent);
-      if (m.direction === 'IN') {
-        state = applyPositiveInbound(state, m.quantity, cost);
-      } else {
-        state = applyCompensatingOutbound(state, m.quantity, cost);
-      }
-    }
-
-    await client.query(
-      `INSERT INTO inventory_balance (
-        legal_entity_id, warehouse_id, catalog_item_id, quantity, carrying_value_minor,
-        currency_code, minor_unit_exponent, updated_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
-      ON CONFLICT (legal_entity_id, warehouse_id, catalog_item_id)
-      DO UPDATE SET quantity = EXCLUDED.quantity,
-                    carrying_value_minor = EXCLUDED.carrying_value_minor,
-                    currency_code = EXCLUDED.currency_code,
-                    minor_unit_exponent = EXCLUDED.minor_unit_exponent,
-                    updated_at = NOW()`,
-      [
-        legalEntityId,
-        warehouseId,
-        catalogItemId,
-        state.quantity,
-        state.carryingValueMinor,
-        state.currencyCode,
-        state.minorUnitExponent,
-      ],
+  private async validateValuationCurrency(
+    legalEntityId: string,
+    currencyCode: string,
+    minorUnitExponent: number,
+  ) {
+    const r = await this.pool.query<{
+      valuation_currency_code: string;
+      valuation_minor_unit_exponent: number;
+    }>(
+      `SELECT valuation_currency_code, valuation_minor_unit_exponent
+       FROM legal_entity WHERE legal_entity_id = $1`,
+      [legalEntityId],
     );
+    const row = r.rows[0];
+    if (!row) throw new NotFoundError(`Legal entity not found: ${legalEntityId}`);
+    if (
+      row.valuation_currency_code !== currencyCode ||
+      row.valuation_minor_unit_exponent !== minorUnitExponent
+    ) {
+      throw new DomainValidationError(
+        'VALUATION_CURRENCY_MISMATCH',
+        `Request currency ${currencyCode}/${minorUnitExponent} does not match legal entity valuation ${row.valuation_currency_code}/${row.valuation_minor_unit_exponent}`,
+      );
+    }
   }
 
   private async mirrorGoodsReceivedFacts(

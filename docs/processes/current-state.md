@@ -32,7 +32,8 @@
 | ADR-0022 / ADR-0023 / ADR-0024 | **Accepted** (PR #23 → `3590147`) |
 | Block D1.1 Recipes & Preparations foundation | **Merged** (PR #25 → `3ff79a2`; no ProductionBatch / sale write-off) |
 | Block D1.2A ProductionBatch domain foundation | **Merged** (PR #27 → `4546dbe`; FINALIZED facts; **no** inventory posting) |
-| New application verticals beyond D1.2A (incl. D1.2B) | **STOP** until PO launches next slice |
+| Block D1.2B Production posting / inventory / costing | **In remediation review** (PR #29; certainty/chronology/currency/reversal) |
+| New application verticals beyond D1.2B | **STOP** until PO launches next slice |
 | Origin CI | **Attached** — Depot |
 | GitHub Actions | Dormant copies only |
 | GitHub backup | Post-merge Origin→GitHub via **MillQ Origin Backup** App |
@@ -97,18 +98,19 @@ Structured Effective Recipe resolution; `UNKNOWN` never silently SAFE; AI/voice 
 - [`docs/architecture/block-c-implementation.md`](../architecture/block-c-implementation.md)
 - [`docs/architecture/block-d1.1-recipes-preparations.md`](../architecture/block-d1.1-recipes-preparations.md)
 - [`docs/architecture/block-d1.2a-production-batch.md`](../architecture/block-d1.2a-production-batch.md)
+- [`docs/architecture/block-d1.2b-production-posting.md`](../architecture/block-d1.2b-production-posting.md)
 
 ## What exists in code
 
 - Block C: Goods Receipt → movements → balance → CostQuote → GoodsReceived fact mirror
 - Block D1.1 **Merged**: RecipeSpecification / RecipeVersion / PreparationSpecification with VIRTUAL|STOCK_TRACKED, nested graph validation, normative yield — **no** ProductionBatch / sale write-off
 - Block D1.2A **Merged**: ProductionBatch DRAFT→FINALIZED with pinned PreparationVersion, normative vs actual I/O/yield, deviation classification — **no** inventory movements / costing
+- Block D1.2B (this PR): ProductionBatch posting FINALIZED→POSTED with Inventory OUT/IN, moving-average rebuild, facts, reversal — shared Block C engine
 - No Migration adapters, fiscal providers, POS/FloorPlan, Grab/Shopee, ModelGateway, ASR/TTS, or GPU runtime
 - No Professional Account / Workforce recruiting / Allergen Resolver application code
 
 ## Explicitly not started (implementation)
 
-- **D1.2B** production inventory posting / balance / costing / reversal mechanics — **not started**
 - Next vertical slices after PO: **Sale write-off → Food Cost**
 - Migration Core scaffolding & source adapters
 - Fiscal provider adapters
@@ -126,6 +128,7 @@ Structured Effective Recipe resolution; `UNKNOWN` never silently SAFE; AI/voice 
 3. ~~ADR-0011…0024~~ **Accepted**  
 4. ~~Block D1.1 Recipes & Preparations foundation~~ **Merged** (PR #25 → `3ff79a2`)  
 5. ~~Block D1.2A ProductionBatch domain foundation~~ **Merged** (PR #27 → `4546dbe`)  
-6. Further application slices (incl. **D1.2B**) remain **STOP** until PO launch  
-7. Review policy: next substantive PR uses standard handoff review (full-diff if ambiguity / scope / CI suspicion)  
+6. Block D1.2B Production posting — **await handoff review #2 / merge**  
+7. Further application slices remain **STOP** until PO launch  
+8. Review policy: **NEXT substantive PR after D1.2B requires COMPLETE FULL-DIFF REVIEW**  
 

@@ -51,10 +51,19 @@ export {
   lineAcquisitionCost,
   compareBusinessPosition,
   assertBusinessChronologyLess,
+  mergeCertainty,
+  orderMovementsForEconomicReplay,
+  isReversalDocumentType,
   type CostCertainty,
+  type CostBasis,
   type CostQuote,
   type CostStreamState,
 } from './moving-average.js';
+export {
+  replayStreamBefore,
+  issueCostQuoteFromStream,
+  type MovementReplayRow,
+} from './issue-cost.js';
 export {
   findCompositionCycle,
   assertAcyclicComposition,

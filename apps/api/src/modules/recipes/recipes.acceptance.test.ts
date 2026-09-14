@@ -22,6 +22,7 @@ async function truncateBusiness() {
       inventory_movement,
       goods_receipt_line,
       goods_receipt,
+      production_batch_reversal,
       production_batch_input,
       production_batch,
       recipe_component,
