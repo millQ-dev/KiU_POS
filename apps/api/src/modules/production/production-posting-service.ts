@@ -376,7 +376,7 @@ export class ProductionPostingService {
         touched.add(prep.output_catalog_item_id);
       }
 
-      for (const catalogItemId of touched) {
+      for (const catalogItemId of [...touched].sort()) {
         await lockValuationStream(
           client,
           warehouse.legal_entity_id,
@@ -704,7 +704,7 @@ export class ProductionPostingService {
         touched.add(m.catalog_item_id);
       }
 
-      for (const catalogItemId of touched) {
+      for (const catalogItemId of [...touched].sort()) {
         await lockValuationStream(
           client,
           leId,

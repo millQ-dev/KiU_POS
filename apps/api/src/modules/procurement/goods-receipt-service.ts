@@ -295,7 +295,7 @@ export class GoodsReceiptService {
       }
 
       // Replay cost streams for all affected items (chronology-correct)
-      const itemIds = [...new Set(existing.lines.map((l) => l.catalogItemId))];
+      const itemIds = [...new Set(existing.lines.map((l) => l.catalogItemId))].sort();
       for (const catalogItemId of itemIds) {
         await lockValuationStream(
           client,
@@ -440,7 +440,7 @@ export class GoodsReceiptService {
         );
       }
 
-      const itemIds = [...new Set(existing.lines.map((l) => l.catalogItemId))];
+      const itemIds = [...new Set(existing.lines.map((l) => l.catalogItemId))].sort();
       for (const catalogItemId of itemIds) {
         await lockValuationStream(
           client,
