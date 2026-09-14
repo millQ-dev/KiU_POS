@@ -125,12 +125,12 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 
 | | |
 | --- | --- |
-| **Owns** | Order, OrderLine, commercial/order snapshots, lifecycle; SettlementGroup / Check / CheckLineAllocation coordination (ADR-0016); **ConsumptionPlanSnapshot** at CompleteOrder (ADR-0025) |
+| **Owns** | Order, OrderLine, commercial/order snapshots, lifecycle; SettlementGroup / Check / CheckLineAllocation coordination (ADR-0016); **ConsumptionPlanSnapshot** at CompleteOrder (ADR-0025; persisted in D1.3B) |
 | **Does not own** | Payments, FiscalDocument, kitchen ticket state, inventory movements / GoodsIssue tables, FloorPlan geometry, TableAssignment / TableRuntimeState |
-| **Key concepts** | Order (table optional), OrderLine snapshot, CompleteOrder → OrderCompleted (sale write-off trigger — ADR-0025), ConsumptionPlanSnapshot, SettlementGroup, Check, CheckLineAllocation, PaymentAllocation (Order ≠ Settlement) |
-| **Commands in** | OpenOrder, AddOrderLine, CancelOrder, CompleteOrder, ReverseCompletedOrder (ADR-0025); SendToProduction / OpenSettlement / SplitCheck (deferred beyond D1.3A MVP surface) |
-| **Facts out** | OrderOpened, OrderItemAdded, OrderCancelled, OrderCompleted, OrderCompletionReversed (names exact in D1.3A); OrderPaid remains payment signal owned by Payments |
-| **Depends on** | Menu/Pricing resolvers, Catalog, Recipes (graph resolution), Organization (default issue warehouse), Identity; **synchronous** Inventory posting ports for GoodsIssue inside CompleteOrder (does not write Inventory tables; does not async-subscribe to OrderCompleted feed) |
+| **Key concepts** | Order (table optional), OrderLine snapshot, CompleteOrder → OrderCompleted (sale write-off trigger — ADR-0025; D1.3B), ConsumptionPlanSnapshot, CatalogItem RecipeProfile binding (ADR-0009), SettlementGroup, Check, CheckLineAllocation, PaymentAllocation (Order ≠ Settlement) |
+| **Commands in** | OpenOrder, AddOrderLine, CancelOrder, CompleteOrder (requires Inventory port — D1.3B), ReverseCompletedOrder (ADR-0025); SendToProduction / OpenSettlement / SplitCheck (deferred beyond D1.3A MVP surface) |
+| **Facts out** | OrderOpened, OrderItemAdded, OrderCancelled, OrderCompleted (D1.3B), OrderCompletionReversed (D1.3B); OrderPaid remains payment signal owned by Payments |
+| **Depends on** | Menu/Pricing resolvers, Catalog (RecipeProfile), Recipes (graph resolution), Organization (default issue warehouse), Identity; **synchronous** Inventory posting ports for GoodsIssue inside CompleteOrder (D1.3B; does not write Inventory tables; does not async-subscribe to OrderCompleted feed) |
 
 ### Payments
 

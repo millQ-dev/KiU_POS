@@ -1,19 +1,20 @@
 # MillQ Current State
 
-**Checkpoint:** Block D1.2B Production posting **Merged** — Origin `main` @ `57499df` (2026-09-14)  
-**Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)  
-**Backup host:** GitHub `https://github.com/millQ-dev/MillQ.git` (mirror only)  
-**Block D1.2B PR #29:** merged @ `57499df`  
-**Block D1.2A PR #27:** merged @ `4546dbe`  
-**Block D1.1 PR #25:** merged @ `3ff79a2`  
-**Accept PR #23:** ADR-0022 / ADR-0023 / ADR-0024 @ `3590147`  
-**Accept PR #21:** ADR-0011 @ `cf5398a`  
-**Accept PR #19:** ADR-0017 @ `1f683dc`  
-**Accept PR #17:** ADR-0018 @ `be58388`  
-**Accept PR #15:** ADR-0014 / ADR-0016 @ `f764599`  
-**Accept PR #13:** ADR-0015 / ADR-0019 @ `4510092`  
-**Accept PR #11:** ADR-0012 / ADR-0013 @ `cf3375f`  
-**Architecture v1.3 PR:** https://cursor.com/codebase/millqdev/MillQ/pull/9 — **merged** @ `77c6949`  
+**Checkpoint:** Block D1.3A Orders Foundation & Consumption Plan **in review** — branch from Origin `main` @ `8844ccb` (2026-09-14)
+**Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)
+**Backup host:** GitHub `https://github.com/millQ-dev/MillQ.git` (mirror only)
+**Accept PR #30:** ADR-0025 @ `8844ccb`
+**Block D1.2B PR #29:** merged @ `57499df`
+**Block D1.2A PR #27:** merged @ `4546dbe`
+**Block D1.1 PR #25:** merged @ `3ff79a2`
+**Accept PR #23:** ADR-0022 / ADR-0023 / ADR-0024 @ `3590147`
+**Accept PR #21:** ADR-0011 @ `cf5398a`
+**Accept PR #19:** ADR-0017 @ `1f683dc`
+**Accept PR #17:** ADR-0018 @ `be58388`
+**Accept PR #15:** ADR-0014 / ADR-0016 @ `f764599`
+**Accept PR #13:** ADR-0015 / ADR-0019 @ `4510092`
+**Accept PR #11:** ADR-0012 / ADR-0013 @ `cf3375f`
+**Architecture v1.3 PR:** https://cursor.com/codebase/millqdev/MillQ/pull/9 — **merged** @ `77c6949`
 **Updated:** 2026-09-14
 
 ## Runtime / CI / backup
@@ -34,8 +35,9 @@
 | Block D1.1 Recipes & Preparations foundation | **Merged** (PR #25 → `3ff79a2`) |
 | Block D1.2A ProductionBatch domain foundation | **Merged** (PR #27 → `4546dbe`) |
 | Block D1.2B Production posting / inventory / costing | **Merged** (PR #29 → `57499df`) |
-| ADR-0025 Order Completion & Sale Inventory Write-off | **Accepted (this PR)** — architecture-only; D1.3A/B STOP until PO launch |
-| D1.3A / D1.3B / Food Cost | **STOP** until ADR-0025 Accept + explicit PO launch per block |
+| ADR-0025 Order Completion & Sale Inventory Write-off | **Accepted / Merged** (PR #30 → `8844ccb`) |
+| Block D1.3A Orders Foundation & Consumption Plan | **This PR** — no GoodsIssue; CompleteOrder unwired until D1.3B |
+| D1.3B / Food Cost | **STOP** until explicit PO launch per block |
 | Origin CI | **Attached** — Depot |
 | GitHub Actions | Dormant copies only |
 | GitHub backup | Post-merge Origin→GitHub via **MillQ Origin Backup** App |
@@ -67,11 +69,11 @@
 | ADR-0022 | Accepted | Professional Account & Cross-Business Access |
 | ADR-0023 | Accepted | Workforce / Recruiting / Learning / Assessment |
 | ADR-0024 | Accepted | Allergen & Dietary Constraint Resolution |
-| ADR-0025 | **Accepted (this PR)** | Order Completion & Sale Inventory Write-off Semantics |
+| ADR-0025 | **Accepted** | Order Completion & Sale Inventory Write-off Semantics |
 
 ## Proposed
 
-_None remaining for this Accept PR._
+_None._
 
 ### Settlement / non-custody invariant (ADR-0013 + ADR-0016)
 
@@ -95,7 +97,7 @@ Structured Effective Recipe resolution; `UNKNOWN` never silently SAFE; AI/voice 
 
 ### Sale write-off invariant (ADR-0025)
 
-Charter “Sale” = OrderCompleted. Write-off via Inventory-owned GoodsIssue on CompleteOrder. Exactly one physical path (VIRTUAL explode XOR STOCK_TRACKED consume). ConsumptionPlanSnapshot frozen at completion. Food Cost deferred after D1.3B.
+Charter “Sale” = OrderCompleted. Write-off via Inventory-owned GoodsIssue on CompleteOrder. Exactly one physical path (VIRTUAL explode XOR STOCK_TRACKED consume). ConsumptionPlanSnapshot frozen at completion. Food Cost deferred after D1.3B. D1.3A does not persist COMPLETED without Inventory port.
 
 ## Architecture baseline
 
@@ -106,6 +108,7 @@ Charter “Sale” = OrderCompleted. Write-off via Inventory-owned GoodsIssue on
 - [`docs/architecture/block-d1.1-recipes-preparations.md`](../architecture/block-d1.1-recipes-preparations.md)
 - [`docs/architecture/block-d1.2a-production-batch.md`](../architecture/block-d1.2a-production-batch.md)
 - [`docs/architecture/block-d1.2b-production-posting.md`](../architecture/block-d1.2b-production-posting.md)
+- [`docs/architecture/block-d1.3a-orders-consumption-plan.md`](../architecture/block-d1.3a-orders-consumption-plan.md)
 - [`docs/decisions/ADR-0025-order-completion-sale-inventory-write-off.md`](../decisions/ADR-0025-order-completion-sale-inventory-write-off.md)
 
 ## What exists in code
@@ -114,13 +117,13 @@ Charter “Sale” = OrderCompleted. Write-off via Inventory-owned GoodsIssue on
 - Block D1.1 **Merged**: RecipeSpecification / RecipeVersion / PreparationSpecification with VIRTUAL|STOCK_TRACKED
 - Block D1.2A **Merged**: ProductionBatch DRAFT→FINALIZED
 - Block D1.2B **Merged**: ProductionBatch posting FINALIZED→POSTED with Inventory OUT/IN, shared costing stream, reversal entity
-- No Orders / GoodsIssue sale path yet
+- Block D1.3A **This PR**: Orders OPEN/CANCELLED, CatalogItem RecipeProfile binding, consumption resolver preview, CompleteOrder boundary unwired (no GoodsIssue)
+- No GoodsIssue sale path yet (D1.3B)
 - No Migration adapters, fiscal providers, POS/FloorPlan, Grab/Shopee, ModelGateway, ASR/TTS, or GPU runtime
 
 ## Explicitly not started (implementation)
 
-- **D1.3A** Orders Foundation & Consumption Plan (after ADR-0025 Accept + PO launch)
-- **D1.3B** GoodsIssue & Automatic Sale Write-off (after D1.3A)
+- **D1.3B** GoodsIssue & Automatic Sale Write-off (after D1.3A merge + PO launch)
 - **Food Cost** (after D1.3B + PO launch)
 - Migration Core scaffolding & source adapters
 - Fiscal provider adapters
@@ -133,14 +136,14 @@ Charter “Sale” = OrderCompleted. Write-off via Inventory-owned GoodsIssue on
 
 ## Next recommended sequence
 
-1. ~~Block C~~ done  
-2. ~~Architecture v1.3 alignment~~ merged  
-3. ~~ADR-0011…0024~~ **Accepted**  
-4. ~~Block D1.1~~ **Merged**  
-5. ~~Block D1.2A~~ **Merged**  
-6. ~~Block D1.2B~~ **Merged** (PR #29 → `57499df`)  
-7. **ADR-0025** Accept (this PR)  
-8. **STOP** — D1.3A only after explicit PO launch  
-9. D1.3B after D1.3A  
-10. Food Cost only after D1.3B + PO launch  
-11. Review policy: next substantive application PR after D1.2B requires **COMPLETE FULL-DIFF REVIEW**
+1. ~~Block C~~ done
+2. ~~Architecture v1.3 alignment~~ merged
+3. ~~ADR-0011…0024~~ **Accepted**
+4. ~~Block D1.1~~ **Merged**
+5. ~~Block D1.2A~~ **Merged**
+6. ~~Block D1.2B~~ **Merged** (PR #29 → `57499df`)
+7. ~~ADR-0025~~ **Accepted / Merged** (PR #30 → `8844ccb`)
+8. **D1.3A** this PR
+9. **STOP** — D1.3B only after explicit PO launch
+10. Food Cost only after D1.3B + PO launch
+11. Review policy: this substantive application PR requires **COMPLETE FULL-DIFF REVIEW**

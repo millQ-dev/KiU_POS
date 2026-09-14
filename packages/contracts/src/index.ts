@@ -18,6 +18,7 @@ export {
   preparationProducedPayloadSchema,
   orderOpenedPayloadSchema,
   orderCancelledPayloadSchema,
+  orderCompletedPayloadSchema,
   UnknownOperationalFactTypeError,
   OperationalFactPayloadMismatchError,
   type OperationalFact,
