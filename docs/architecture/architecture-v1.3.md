@@ -339,10 +339,17 @@ OutputEndpoint (KDS/Printer/…) remains Production Routing. Device gateway / pr
 ## 23. Work sequence after v1.3 acceptance
 
 ```text
-Architecture v1.3 accepted (+ ADR-0022…0024 Accepted)
+Architecture v1.3 accepted (+ ADR-0011…0025 Accepted)
         ↓
-PO launches next application vertical
-(current candidate: Recipes → Sale write-off → Food Cost)
+~~Block D1.1 / D1.2A / D1.2B~~ Merged
+        ↓
+~~ADR-0025~~ Accepted / Merged (sale write-off event model)
+        ↓
+PO launches D1.3A — Orders Foundation & Consumption Plan
+        ↓
+D1.3B — GoodsIssue & Automatic Sale Write-off
+        ↓
+Food Cost (only after D1.3B + explicit PO launch)
         ↓
 Migration Core scaffolding when scheduled (adapters later)
         ↓
@@ -354,7 +361,7 @@ POS / FloorPlan / Fiscal provider / Grab / Voice·AI runtime — only after thei
 - No Migration adapter implementations
 - No fiscal provider adapter
 - No POS / FloorPlan / Grab / Shopee code
-- No Recipes / Sale write-off implementation
+- No D1.3A/B Orders / GoodsIssue sale write-off **implementation** (ADR-0025 records semantics only)
 - No ModelGateway / ASR / TTS / GPU / vLLM / Qwen install
 - No Professional / Workforce / Allergen application implementation
 - No dozens of empty future SQL tables
