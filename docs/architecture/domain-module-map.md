@@ -3,7 +3,7 @@
 - **Status:** Proposed reference with Architecture v1.3
 - **Date:** 2026-09-04
 - **Supersedes:** Architecture v1.2 module map naming for extended modules
-- **Authority:** [`architecture-v1.3.md`](architecture-v1.3.md), ADR-0008 (Accepted), ADR-0011…0021 (Accepted)
+- **Authority:** [`architecture-v1.3.md`](architecture-v1.3.md), ADR-0008 (Accepted), ADR-0011…0025 (ADR-0025 Proposed→Accept on architecture track)
 - **Note:** Origin hosting ADR-0004 is unrelated.
 
 Each row is an internal module boundary inside the **modular monolith**.
@@ -81,7 +81,7 @@ LegalEntity is fiscal/legal — **not** part of menu inheritance.
 | --- | --- |
 | **Owns** | RecipeVersion graph, RecipeLine, RecipeVariantBinding, Preparation specs, materialization mode; **derived** cost revisions / CostQuote artifacts |
 | **Does not own** | ProductionBatch stock effects (Inventory), ProductionBatch recording foundation (Production / D1.2A), sale prices; Allergen resolution results (Allergen Resolver consumes this graph — ADR-0024) |
-| **Key concepts** | RecipeSpecification, RecipeVersion, RecipeLine/component; PreparationSpecification + VIRTUAL/STOCK_TRACKED; normative yield; acyclic nested graph (D1.1); RecipeGraphResolver (future), Effective Recipe (for modifiers), CostQuote |
+| **Key concepts** | RecipeSpecification, RecipeVersion, RecipeLine/component; PreparationSpecification + VIRTUAL/STOCK_TRACKED; normative yield; acyclic nested graph (D1.1); RecipeGraphResolver (D1.3A sale consumption — base graph; ADR-0025), Effective Recipe (modifiers — deferred), CostQuote |
 | **Commands in** | CreateRecipeDraft, PublishRecipeVersion, CreatePreparationDraft, PublishPreparationVersion, ActivateRecipeVersion (future), RecalculateCost (derived, future) |
 | **Facts out** | RecipeVersionActivated (future publish mirror), CostRevisionRecorded (future) |
 | **Depends on** | Catalog, Units, Inventory facts (read for valuation) |
@@ -125,12 +125,12 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 
 | | |
 | --- | --- |
-| **Owns** | Order, OrderLine, modifiers on lines, commercial snapshots, lifecycle; SettlementGroup / Check / CheckLineAllocation coordination |
-| **Does not own** | Payments, FiscalDocument, kitchen ticket state, inventory movements, FloorPlan geometry, TableAssignment / TableRuntimeState |
-| **Key concepts** | Order (table optional), OrderLine snapshot, SettlementGroup, Check, CheckLineAllocation, PaymentAllocation (ADR-0016 **Accepted**: Order ≠ Settlement; completion = allocated coverage; no cross-LE SettlementGroup) |
-| **Commands in** | OpenOrder, AddLine, CancelOrder, SendToProduction, OpenSettlement, SplitCheck |
-| **Facts out** | OrderOpened, OrderItemAdded, OrderCancelled, OrderPaid (signal; payment owned by Payments) |
-| **Depends on** | Menu/Pricing resolvers, Catalog, Organization, Identity |
+| **Owns** | Order, OrderLine, commercial/order snapshots, lifecycle; SettlementGroup / Check / CheckLineAllocation coordination (ADR-0016); **ConsumptionPlanSnapshot** at CompleteOrder (ADR-0025) |
+| **Does not own** | Payments, FiscalDocument, kitchen ticket state, inventory movements / GoodsIssue tables, FloorPlan geometry, TableAssignment / TableRuntimeState |
+| **Key concepts** | Order (table optional), OrderLine snapshot, CompleteOrder → OrderCompleted (sale write-off trigger — ADR-0025), ConsumptionPlanSnapshot, SettlementGroup, Check, CheckLineAllocation, PaymentAllocation (Order ≠ Settlement) |
+| **Commands in** | OpenOrder, AddOrderLine, CancelOrder, CompleteOrder, ReverseCompletedOrder (ADR-0025); SendToProduction / OpenSettlement / SplitCheck (deferred beyond D1.3A MVP surface) |
+| **Facts out** | OrderOpened, OrderItemAdded, OrderCancelled, OrderCompleted, OrderCompletionReversed (names exact in D1.3A); OrderPaid remains payment signal owned by Payments |
+| **Depends on** | Menu/Pricing resolvers, Catalog, Recipes (graph resolution), Organization (default issue warehouse), Identity; Inventory orchestration boundary for GoodsIssue (does not write Inventory tables) |
 
 ### Payments
 
@@ -158,12 +158,12 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 
 | | |
 | --- | --- |
-| **Owns** | InventoryMovement, balances (projection), ProductionBatch **stock effects** (D1.2B posting), StockAdjustment, count posting effects |
-| **Does not own** | Purchasing source documents (GoodsReceipt header lives with Purchasing posting coordination — see Block C contract), derived unit cost presentation, ProductionBatch recording foundation without posting (Production / D1.2A) |
-| **Key concepts** | InventoryMovement, warehouse stock projection, explain-balance chain; shared `rebuildInventoryBalance` |
-| **Commands in** | ApplyPostedMovements, AdjustStock, CompleteProductionBatch / PostProductionBatch (D1.2B) |
+| **Owns** | InventoryMovement, balances (projection), ProductionBatch **stock effects** (D1.2B posting), **GoodsIssue** (sale write-off — ADR-0025), StockAdjustment, count posting effects |
+| **Does not own** | Purchasing source documents (GoodsReceipt header lives with Purchasing posting coordination — see Block C contract), derived unit cost presentation, ProductionBatch recording foundation without posting (Production / D1.2A), Order truth |
+| **Key concepts** | InventoryMovement, warehouse stock projection, explain-balance chain; shared `rebuildInventoryBalance`; sale GoodsIssue references Order / OrderLines |
+| **Commands in** | ApplyPostedMovements, AdjustStock, CompleteProductionBatch / PostProductionBatch (D1.2B), PostGoodsIssue / ReverseGoodsIssue (sale path orchestrated from CompleteOrder — ADR-0025) |
 | **Facts out** | InventoryAdjusted, InventoryConsumed, PreparationProduced |
-| **Depends on** | Catalog, Units, Recipes (expansion rules), Organization, Production (finalized batch refs) |
+| **Depends on** | Catalog, Units, Recipes (expansion rules), Organization, Production (finalized batch refs), Orders (source refs only) |
 
 ### Production Routing
 
