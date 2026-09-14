@@ -4,7 +4,7 @@
 - **Date:** 2026-09-04
 - **Canonical host:** Cursor Origin
 - **Base:** Architecture [v1.2](architecture-v1.2.md) (Accepted) + Block C merged @ `a5e84b0` / main tip at alignment start `46f01ec`
-- **Related ADRs:** ADR-0001…0004, 0006…0024 (Accepted)
+- **Related ADRs:** ADR-0001…0004, 0006…0025 (Accepted)
 - **Module map:** [`domain-module-map.md`](domain-module-map.md)
 - **Authority command:** KiU correcting command after gap-analysis (PO / strategic architecture); PO ACCEPT ADR-0022 / ADR-0023 / ADR-0024 (2026-09-12)
 
@@ -15,7 +15,7 @@ Architecture v1.3 **extends** v1.2 with boundaries that must be frozen **before*
 ```text
 v1.2 domain boundaries (Accepted)
         +
-v1.3 deltas (this document + ADR-0011…0024 Accepted)
+v1.3 deltas (this document + ADR-0011…0025 Accepted)
         =
 Architecture v1.3 baseline for resumed implementation
 ```
@@ -28,7 +28,7 @@ Architecture v1.3 baseline for resumed implementation
 
 | Item | State |
 | --- | --- |
-| Origin main tip | `4546dbe` (Block D1.2A merge PR #27) |
+| Origin main tip | `8844ccb` (ADR-0025 Accept PR #30) |
 | Architecture v1.3 merge | `77c6949` (PR #9) |
 | Block C | **Merged** (PR #7 → `a5e84b0`) and **v1.3-compatible** |
 | Architecture v1.3 alignment | **Merged** (PR #9 → `77c6949`) |
@@ -41,15 +41,19 @@ Architecture v1.3 baseline for resumed implementation
 | ADR-0022 / ADR-0023 / ADR-0024 | **Accepted** (PR #23 → `3590147`) |
 | Block D1.1 Recipes & Preparations foundation | **Merged** (PR #25 → `3ff79a2`) |
 | Block D1.2A ProductionBatch domain foundation | **Merged** (PR #27 → `4546dbe`) |
-| New application verticals (incl. D1.2B) | **STOP** until PO launches next vertical |
+| Block D1.2B Production posting / inventory / costing | **Merged** (PR #29 → `57499df`) |
+| ADR-0025 Order Completion & Sale Inventory Write-off | **Accepted / Merged** (PR #30 → `8844ccb`) |
+| D1.3A / D1.3B / Food Cost | **STOP** until explicit PO launch per block |
 
-**Do not** describe Block C as the next vertical. After acceptance, the current candidate is:
+**Do not** describe Block C as the next vertical. After ADR-0025 Accept, the next candidate is:
 
 ```text
-Recipes → Sale write-off → Food Cost
+D1.3A Orders Foundation & Consumption Plan
+  → D1.3B GoodsIssue & Automatic Sale Write-off
+  → Food Cost
 ```
 
-(only when PO launches — not in this PR).
+(only when PO launches each block — not automatic).
 
 ## 3. Non-negotiable foundation (unchanged from v1.2)
 
@@ -335,10 +339,17 @@ OutputEndpoint (KDS/Printer/…) remains Production Routing. Device gateway / pr
 ## 23. Work sequence after v1.3 acceptance
 
 ```text
-Architecture v1.3 accepted (+ ADR-0022…0024 Accepted)
+Architecture v1.3 accepted (+ ADR-0011…0025 Accepted)
         ↓
-PO launches next application vertical
-(current candidate: Recipes → Sale write-off → Food Cost)
+~~Block D1.1 / D1.2A / D1.2B~~ Merged
+        ↓
+~~ADR-0025~~ Accepted / Merged (sale write-off event model)
+        ↓
+PO launches D1.3A — Orders Foundation & Consumption Plan
+        ↓
+D1.3B — GoodsIssue & Automatic Sale Write-off
+        ↓
+Food Cost (only after D1.3B + explicit PO launch)
         ↓
 Migration Core scaffolding when scheduled (adapters later)
         ↓
@@ -350,7 +361,7 @@ POS / FloorPlan / Fiscal provider / Grab / Voice·AI runtime — only after thei
 - No Migration adapter implementations
 - No fiscal provider adapter
 - No POS / FloorPlan / Grab / Shopee code
-- No Recipes / Sale write-off implementation
+- No D1.3A/B Orders / GoodsIssue sale write-off **implementation** (ADR-0025 records semantics only)
 - No ModelGateway / ASR / TTS / GPU / vLLM / Qwen install
 - No Professional / Workforce / Allergen application implementation
 - No dozens of empty future SQL tables
