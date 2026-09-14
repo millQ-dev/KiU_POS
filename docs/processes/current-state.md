@@ -1,10 +1,11 @@
 # MillQ Current State
 
-**Checkpoint:** Block D1.2A ProductionBatch domain foundation **Merged** — Origin `main` @ `4546dbe` (2026-09-12)  
+**Checkpoint:** Block D1.2B Production posting **Merged** — Origin `main` @ `57499df` (2026-09-14)  
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)  
 **Backup host:** GitHub `https://github.com/millQ-dev/MillQ.git` (mirror only)  
-**Block D1.2A PR #27:** merged @ `4546dbe` (tip before merge `ee59f39`)  
-**Block D1.1 PR #25:** merged @ `3ff79a2` (tip before merge `3c7c84a`)  
+**Block D1.2B PR #29:** merged @ `57499df`  
+**Block D1.2A PR #27:** merged @ `4546dbe`  
+**Block D1.1 PR #25:** merged @ `3ff79a2`  
 **Accept PR #23:** ADR-0022 / ADR-0023 / ADR-0024 @ `3590147`  
 **Accept PR #21:** ADR-0011 @ `cf5398a`  
 **Accept PR #19:** ADR-0017 @ `1f683dc`  
@@ -13,7 +14,7 @@
 **Accept PR #13:** ADR-0015 / ADR-0019 @ `4510092`  
 **Accept PR #11:** ADR-0012 / ADR-0013 @ `cf3375f`  
 **Architecture v1.3 PR:** https://cursor.com/codebase/millqdev/MillQ/pull/9 — **merged** @ `77c6949`  
-**Updated:** 2026-09-12
+**Updated:** 2026-09-14
 
 ## Runtime / CI / backup
 
@@ -30,10 +31,11 @@
 | ADR-0017 | **Accepted** (PR #19 → `1f683dc`) |
 | ADR-0011 | **Accepted** (PR #21 → `cf5398a`) |
 | ADR-0022 / ADR-0023 / ADR-0024 | **Accepted** (PR #23 → `3590147`) |
-| Block D1.1 Recipes & Preparations foundation | **Merged** (PR #25 → `3ff79a2`; no ProductionBatch / sale write-off) |
-| Block D1.2A ProductionBatch domain foundation | **Merged** (PR #27 → `4546dbe`; FINALIZED facts; **no** inventory posting) |
-| Block D1.2B Production posting / inventory / costing | **In remediation review** (PR #29; certainty/chronology/currency/reversal) |
-| New application verticals beyond D1.2B | **STOP** until PO launches next slice |
+| Block D1.1 Recipes & Preparations foundation | **Merged** (PR #25 → `3ff79a2`) |
+| Block D1.2A ProductionBatch domain foundation | **Merged** (PR #27 → `4546dbe`) |
+| Block D1.2B Production posting / inventory / costing | **Merged** (PR #29 → `57499df`) |
+| ADR-0025 Order Completion & Sale Inventory Write-off | **Accepted (this PR)** — architecture-only; D1.3A/B STOP until PO launch |
+| D1.3A / D1.3B / Food Cost | **STOP** until ADR-0025 Accept + explicit PO launch per block |
 | Origin CI | **Attached** — Depot |
 | GitHub Actions | Dormant copies only |
 | GitHub backup | Post-merge Origin→GitHub via **MillQ Origin Backup** App |
@@ -65,10 +67,11 @@
 | ADR-0022 | Accepted | Professional Account & Cross-Business Access |
 | ADR-0023 | Accepted | Workforce / Recruiting / Learning / Assessment |
 | ADR-0024 | Accepted | Allergen & Dietary Constraint Resolution |
+| ADR-0025 | **Accepted (this PR)** | Order Completion & Sale Inventory Write-off Semantics |
 
-## Proposed (Architecture v1.3 — not yet Accepted)
+## Proposed
 
-_None remaining in the ADR-0011…0024 set covered by this architecture track._
+_None remaining for this Accept PR._
 
 ### Settlement / non-custody invariant (ADR-0013 + ADR-0016)
 
@@ -90,6 +93,10 @@ AI may score/recommend; material employment decisions require authorized human a
 
 Structured Effective Recipe resolution; `UNKNOWN` never silently SAFE; AI/voice must not invent ingredients.
 
+### Sale write-off invariant (ADR-0025)
+
+Charter “Sale” = OrderCompleted. Write-off via Inventory-owned GoodsIssue on CompleteOrder. Exactly one physical path (VIRTUAL explode XOR STOCK_TRACKED consume). ConsumptionPlanSnapshot frozen at completion. Food Cost deferred after D1.3B.
+
 ## Architecture baseline
 
 - [`docs/architecture/architecture-v1.2.md`](../architecture/architecture-v1.2.md) (Accepted)
@@ -99,19 +106,22 @@ Structured Effective Recipe resolution; `UNKNOWN` never silently SAFE; AI/voice 
 - [`docs/architecture/block-d1.1-recipes-preparations.md`](../architecture/block-d1.1-recipes-preparations.md)
 - [`docs/architecture/block-d1.2a-production-batch.md`](../architecture/block-d1.2a-production-batch.md)
 - [`docs/architecture/block-d1.2b-production-posting.md`](../architecture/block-d1.2b-production-posting.md)
+- [`docs/decisions/ADR-0025-order-completion-sale-inventory-write-off.md`](../decisions/ADR-0025-order-completion-sale-inventory-write-off.md)
 
 ## What exists in code
 
 - Block C: Goods Receipt → movements → balance → CostQuote → GoodsReceived fact mirror
-- Block D1.1 **Merged**: RecipeSpecification / RecipeVersion / PreparationSpecification with VIRTUAL|STOCK_TRACKED, nested graph validation, normative yield — **no** ProductionBatch / sale write-off
-- Block D1.2A **Merged**: ProductionBatch DRAFT→FINALIZED with pinned PreparationVersion, normative vs actual I/O/yield, deviation classification — **no** inventory movements / costing
-- Block D1.2B (this PR): ProductionBatch posting FINALIZED→POSTED with Inventory OUT/IN, moving-average rebuild, facts, reversal — shared Block C engine
+- Block D1.1 **Merged**: RecipeSpecification / RecipeVersion / PreparationSpecification with VIRTUAL|STOCK_TRACKED
+- Block D1.2A **Merged**: ProductionBatch DRAFT→FINALIZED
+- Block D1.2B **Merged**: ProductionBatch posting FINALIZED→POSTED with Inventory OUT/IN, shared costing stream, reversal entity
+- No Orders / GoodsIssue sale path yet
 - No Migration adapters, fiscal providers, POS/FloorPlan, Grab/Shopee, ModelGateway, ASR/TTS, or GPU runtime
-- No Professional Account / Workforce recruiting / Allergen Resolver application code
 
 ## Explicitly not started (implementation)
 
-- Next vertical slices after PO: **Sale write-off → Food Cost**
+- **D1.3A** Orders Foundation & Consumption Plan (after ADR-0025 Accept + PO launch)
+- **D1.3B** GoodsIssue & Automatic Sale Write-off (after D1.3A)
+- **Food Cost** (after D1.3B + PO launch)
 - Migration Core scaffolding & source adapters
 - Fiscal provider adapters
 - POS / FloorPlan / Grab / Shopee
@@ -126,9 +136,11 @@ Structured Effective Recipe resolution; `UNKNOWN` never silently SAFE; AI/voice 
 1. ~~Block C~~ done  
 2. ~~Architecture v1.3 alignment~~ merged  
 3. ~~ADR-0011…0024~~ **Accepted**  
-4. ~~Block D1.1 Recipes & Preparations foundation~~ **Merged** (PR #25 → `3ff79a2`)  
-5. ~~Block D1.2A ProductionBatch domain foundation~~ **Merged** (PR #27 → `4546dbe`)  
-6. Block D1.2B Production posting — **await handoff review #2 / merge**  
-7. Further application slices remain **STOP** until PO launch  
-8. Review policy: **NEXT substantive PR after D1.2B requires COMPLETE FULL-DIFF REVIEW**  
-
+4. ~~Block D1.1~~ **Merged**  
+5. ~~Block D1.2A~~ **Merged**  
+6. ~~Block D1.2B~~ **Merged** (PR #29 → `57499df`)  
+7. **ADR-0025** Accept (this PR)  
+8. **STOP** — D1.3A only after explicit PO launch  
+9. D1.3B after D1.3A  
+10. Food Cost only after D1.3B + PO launch  
+11. Review policy: next substantive application PR after D1.2B requires **COMPLETE FULL-DIFF REVIEW**
