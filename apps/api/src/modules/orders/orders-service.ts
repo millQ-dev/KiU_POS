@@ -123,33 +123,41 @@ export class OrdersService {
     const cmd = openOrderSchema.parse(raw);
     await this.assertOutlet(cmd.tenantId, cmd.legalEntityId, cmd.outletId);
     const orderId = randomUUID();
-    await this.pool.query(
-      `INSERT INTO sales_order (
-         order_id, tenant_id, legal_entity_id, outlet_id, status, channel, actor_id, device_id
-       ) VALUES ($1,$2,$3,$4,'OPEN',$5,$6,$7)`,
-      [
-        orderId,
-        cmd.tenantId,
-        cmd.legalEntityId,
-        cmd.outletId,
-        cmd.channel,
-        cmd.actorId ?? null,
-        cmd.deviceId ?? null,
-      ],
-    );
-
-    await this.mirrorFact({
-      factType: OperationalFactType.OrderOpened,
-      idempotencyKey: `order-opened:${orderId}`,
-      payload: { orderId, channel: cmd.channel },
-      context: {
-        tenantId: cmd.tenantId,
-        legalEntityId: cmd.legalEntityId,
-        outletId: cmd.outletId,
-        actorId: cmd.actorId ?? null,
-      },
-    });
-
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `INSERT INTO sales_order (
+           order_id, tenant_id, legal_entity_id, outlet_id, status, channel, actor_id, device_id
+         ) VALUES ($1,$2,$3,$4,'OPEN',$5,$6,$7)`,
+        [
+          orderId,
+          cmd.tenantId,
+          cmd.legalEntityId,
+          cmd.outletId,
+          cmd.channel,
+          cmd.actorId ?? null,
+          cmd.deviceId ?? null,
+        ],
+      );
+      await this.mirrorFactTx(client, {
+        factType: OperationalFactType.OrderOpened,
+        idempotencyKey: `order-opened:${orderId}`,
+        payload: { orderId, channel: cmd.channel },
+        context: {
+          tenantId: cmd.tenantId,
+          legalEntityId: cmd.legalEntityId,
+          outletId: cmd.outletId,
+          actorId: cmd.actorId ?? null,
+        },
+      });
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
     return this.getOrder(orderId);
   }
 
@@ -182,9 +190,7 @@ export class OrdersService {
           cmd.dimension,
         ],
       );
-      await client.query('COMMIT');
-
-      await this.mirrorFact({
+      await this.mirrorFactTx(client, {
         factType: OperationalFactType.OrderItemAdded,
         idempotencyKey: `order-line-added:${orderLineId}`,
         payload: {
@@ -200,6 +206,7 @@ export class OrdersService {
           actorId: order.actor_id,
         },
       });
+      await client.query('COMMIT');
 
       return this.getOrder(cmd.orderId);
     } catch (e) {
@@ -278,9 +285,7 @@ export class OrdersService {
          WHERE order_id = $1`,
         [cmd.orderId, cmd.reason, cmd.actorId ?? null, cmd.deviceId ?? null],
       );
-      await client.query('COMMIT');
-
-      await this.mirrorFact({
+      await this.mirrorFactTx(client, {
         factType: OperationalFactType.OrderCancelled,
         idempotencyKey: `order-cancelled:${cmd.orderId}`,
         payload: {
@@ -295,6 +300,7 @@ export class OrdersService {
           actorId: cmd.actorId ?? order.actor_id,
         },
       });
+      await client.query('COMMIT');
 
       return this.getOrder(cmd.orderId);
     } catch (e) {
@@ -720,7 +726,7 @@ export class OrdersService {
 
       await this.mirrorFactTx(client, {
         factType: OperationalFactType.OrderCompleted,
-        idempotencyKey: `order-completed:${cmd.idempotencyKey}`,
+        idempotencyKey: `order-completed:${order.legal_entity_id}:${cmd.idempotencyKey}`,
         payload: {
           orderId: cmd.orderId,
           consumptionPlanId,
@@ -1021,29 +1027,42 @@ export class OrdersService {
     for (const soldId of soldCatalogItemIds) {
       await loadCatalog(soldId);
 
-      const recipeRes = await client.query<{
-        recipe_version_id: string;
+      const profileRes = await client.query<{
         recipe_specification_id: string;
-        status: 'DRAFT' | 'PUBLISHED';
-        batch_size_quantity: string;
-        batch_size_unit: string;
-        batch_size_dimension: UnitDimension;
       }>(
-        `SELECT rv.recipe_version_id, rv.recipe_specification_id, rv.status,
-                rv.batch_size_quantity, rv.batch_size_unit,
-                rv.batch_size_dimension::text AS batch_size_dimension
-         FROM catalog_item_recipe_profile rp
-         JOIN recipe_version rv ON rv.recipe_specification_id = rp.recipe_specification_id
-         WHERE rp.tenant_id = $1
-           AND rp.catalog_item_id = $2
-           AND rp.product_variant_id IS NULL
-           AND rv.status = 'PUBLISHED'
-         ORDER BY rv.version_number DESC
-         LIMIT 1`,
+        `SELECT recipe_specification_id
+         FROM catalog_item_recipe_profile
+         WHERE tenant_id = $1
+           AND catalog_item_id = $2
+           AND product_variant_id IS NULL`,
         [tenantId, soldId],
       );
-      const rv = recipeRes.rows[0];
-      if (rv) {
+      const profile = profileRes.rows[0];
+      if (profile) {
+        const recipeRes = await client.query<{
+          recipe_version_id: string;
+          recipe_specification_id: string;
+          status: 'DRAFT' | 'PUBLISHED';
+          batch_size_quantity: string;
+          batch_size_unit: string;
+          batch_size_dimension: UnitDimension;
+        }>(
+          `SELECT recipe_version_id, recipe_specification_id, status,
+                  batch_size_quantity, batch_size_unit,
+                  batch_size_dimension::text AS batch_size_dimension
+           FROM recipe_version
+           WHERE recipe_specification_id = $1 AND status = 'PUBLISHED'
+           ORDER BY version_number DESC
+           LIMIT 1`,
+          [profile.recipe_specification_id],
+        );
+        const rv = recipeRes.rows[0];
+        if (!rv) {
+          throw new DomainValidationError(
+            'RECIPE_PROFILE_UNPUBLISHED',
+            `CatalogItem ${soldId} has a RecipeProfile but no PUBLISHED RecipeVersion`,
+          );
+        }
         const comps = await client.query<{
           line_number: number;
           component_kind: 'CATALOG_ITEM' | 'PREPARATION_VERSION';
@@ -1082,20 +1101,29 @@ export class OrdersService {
         }
       }
 
-      const stockPrepRes = await client.query<{ preparation_version_id: string }>(
-        `SELECT pv.preparation_version_id
+      const stockRoots = await client.query<{
+        preparation_specification_id: string;
+        preparation_version_id: string;
+      }>(
+        `SELECT DISTINCT ON (pv.preparation_specification_id)
+            pv.preparation_specification_id, pv.preparation_version_id
          FROM preparation_version pv
          JOIN preparation_specification ps ON ps.preparation_specification_id = pv.preparation_specification_id
          WHERE ps.tenant_id = $1
            AND pv.status = 'PUBLISHED'
            AND pv.materialization_mode = 'STOCK_TRACKED'
            AND pv.output_catalog_item_id = $2
-         ORDER BY pv.version_number DESC
-         LIMIT 1`,
+         ORDER BY pv.preparation_specification_id, pv.version_number DESC`,
         [tenantId, soldId],
       );
-      if (stockPrepRes.rows[0]) {
-        const prep = await loadPrep(stockPrepRes.rows[0].preparation_version_id);
+      if (stockRoots.rows.length > 1) {
+        throw new DomainValidationError(
+          'AMBIGUOUS_CONSUMPTION_ROOT',
+          `Sold item ${soldId} has multiple STOCK_TRACKED preparation roots; configuration must be unique`,
+        );
+      }
+      if (stockRoots.rows[0]) {
+        const prep = await loadPrep(stockRoots.rows[0].preparation_version_id);
         if (prep) stockPrepByOutput.set(soldId, prep);
       }
     }
