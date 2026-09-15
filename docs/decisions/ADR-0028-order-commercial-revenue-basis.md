@@ -500,7 +500,7 @@ ADR-0028 must remain valid against at least:
 25. COGS / revenue currency mismatch → no silent Food Cost  
 26. DB insertion order does not alter economics  
 27. partial refund is **not** silently interpreted as partial sales reversal  
-28. exact Order total = exact sum of line commercial allocation  
+28. exact Order `netMerchandiseSalesMinor` (Revenue Basis) = exact sum of line `netMerchandiseSalesMinor` allocations (not customer payable)  
 29. Revenue Basis remains independent of current Pricing / Menu lookup  
 30. Actual COGS D1.4A remains unchanged  
 
