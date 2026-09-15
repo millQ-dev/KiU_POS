@@ -486,6 +486,7 @@ ORDER BY
     if (q.orderId) add('gi.source_order_id = ?', q.orderId);
     if (q.physicalCatalogItemId) add('m.catalog_item_id = ?', q.physicalCatalogItemId);
     if (q.currencyCode) add('m.currency_code = ?', q.currencyCode);
+    if (q.channel) add('so.channel = ?', q.channel);
     if (q.soldCatalogItemId || q.orderLineId) {
       // Physical grain does not filter by sold line without joining evidence — apply via EXISTS
     }
