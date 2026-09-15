@@ -18,6 +18,10 @@ async function truncateBusiness() {
     TRUNCATE
       operational_fact_feed,
       audit_record,
+      order_line_commercial_snapshot,
+      order_commercial_snapshot,
+      sales_order_commercial_line_terms,
+      sales_order_commercial_terms,
       sales_order_completion_reversal,
       goods_issue_reversal,
       goods_issue_line,

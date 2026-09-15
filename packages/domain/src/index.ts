@@ -99,3 +99,13 @@ export {
   type LineConsumptionPlan,
   type RecipeGraphLookup,
 } from './sale-consumption.js';
+export {
+  allocateOrderMerchantDiscount,
+  commercialSnapshotSemanticHash,
+  commercialTermsSemanticFingerprint,
+  computeLineNetMerchandiseSalesMinor,
+  type CommercialCertainty,
+  type CommercialLineCanonical,
+  type CommercialSnapshotCanonical,
+  type EligibleDiscountLine,
+} from './order-commercial.js';

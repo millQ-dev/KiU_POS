@@ -10,6 +10,7 @@ import { RecipesService } from '../recipes/recipes-service.js';
 import { IdempotencyConflictError } from './errors.js';
 import { OrdersService } from './orders-service.js';
 import type { SaleInventoryWriteOffPort } from './sale-write-off-port.js';
+import { acceptFinalMerchandiseTerms } from '../../test/commercial-terms.js';
 
 const DATABASE_URL = process.env.DATABASE_URL ?? 'postgresql://millq:millq@localhost:5432/millq_dev';
 
@@ -26,6 +27,10 @@ async function truncateBusiness() {
     TRUNCATE
       operational_fact_feed,
       audit_record,
+      order_line_commercial_snapshot,
+      order_commercial_snapshot,
+      sales_order_commercial_line_terms,
+      sales_order_commercial_terms,
       sales_order_completion_reversal,
       goods_issue_reversal,
       goods_issue_line,
@@ -237,6 +242,25 @@ async function countGiOutMovements(orderId?: string) {
   };
 }
 
+
+async function completeOrderWithCommercial(raw: {
+  orderId: string;
+  idempotencyKey: string;
+  businessDate: string;
+  businessOrder: number;
+  businessTime?: string;
+  actorId?: string;
+}) {
+  const current = await orders.getOrder(raw.orderId);
+  if (current.status === 'OPEN') {
+    await acceptFinalMerchandiseTerms(orders, raw.orderId, {
+      defaultGrossMinor: '0',
+      idempotencyKey: `commercial:${raw.idempotencyKey}`,
+    });
+  }
+  return orders.completeOrder(raw);
+}
+
 describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
   beforeAll(async () => {
     await runMigrations(DATABASE_URL);
@@ -263,7 +287,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
     expect(before.quantity).toBe('10');
 
     const order = await openMilkOrder('2');
-    const result = await orders.completeOrder({
+    const result = await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'd13b-direct-1',
       businessDate: '2026-09-14',
@@ -381,7 +405,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
       unit: 'ea',
       dimension: 'COUNT',
     });
-    const result = await orders.completeOrder({
+    const result = await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'd13b-virtual-1',
       businessDate: '2026-09-14',
@@ -449,7 +473,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
       unit: 'L',
       dimension: 'VOLUME',
     });
-    const result = await orders.completeOrder({
+    const result = await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'd13b-stock-tracked-1',
       businessDate: '2026-09-14',
@@ -496,7 +520,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
       unit: 'L',
       dimension: 'VOLUME',
     });
-    const result = await orders.completeOrder({
+    const result = await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'd13b-multi-1',
       businessDate: '2026-09-14',
@@ -534,7 +558,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
       unit: 'L',
       dimension: 'VOLUME',
     });
-    const result = await orders.completeOrder({
+    const result = await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'd13b-same-item-1',
       businessDate: '2026-09-14',
@@ -591,6 +615,10 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
       unit: 'L',
       dimension: 'VOLUME',
     });
+    await acceptFinalMerchandiseTerms(failingOrders, order.orderId, {
+      defaultGrossMinor: '0',
+      idempotencyKey: 'commercial:d13b-fail-1',
+    });
 
     await expect(
       failingOrders.completeOrder({
@@ -603,6 +631,11 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
 
     const after = await orders.getOrder(order.orderId);
     expect(after.status).toBe('OPEN');
+    const snapGone = await pool.query(
+      `SELECT COUNT(*)::int AS c FROM order_commercial_snapshot WHERE order_id = $1`,
+      [order.orderId],
+    );
+    expect(snapGone.rows[0]!.c).toBe(0);
     expect(after.consumptionPlanId).toBeNull();
 
     const snaps = await pool.query(`SELECT COUNT(*)::text AS c FROM consumption_plan_snapshot`);
@@ -619,7 +652,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
   it('6 — same-key retry → duplicate, zero extra movements', async () => {
     await receiveMilkStock(5, '10000');
     const order = await openMilkOrder('1');
-    const first = await orders.completeOrder({
+    const first = await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'd13b-retry-same',
       businessDate: '2026-09-14',
@@ -628,7 +661,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
     expect(first.status).toBe('completed');
     const movBefore = await countGiOutMovements(order.orderId);
 
-    const second = await orders.completeOrder({
+    const second = await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'd13b-retry-same',
       businessDate: '2026-09-14',
@@ -643,14 +676,14 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
   it('7 — same-key different semantics → IdempotencyConflictError', async () => {
     await receiveMilkStock(5, '10000');
     const order = await openMilkOrder('1');
-    await orders.completeOrder({
+    await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'd13b-sem-conflict',
       businessDate: '2026-09-14',
       businessOrder: 1,
     });
     await expect(
-      orders.completeOrder({
+      completeOrderWithCommercial({
         orderId: order.orderId,
         idempotencyKey: 'd13b-sem-conflict',
         businessDate: '2026-09-14',
@@ -662,14 +695,14 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
   it('8 — different key on already COMPLETED → conflict', async () => {
     await receiveMilkStock(5, '10000');
     const order = await openMilkOrder('1');
-    await orders.completeOrder({
+    await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'd13b-key-a',
       businessDate: '2026-09-14',
       businessOrder: 1,
     });
     await expect(
-      orders.completeOrder({
+      completeOrderWithCommercial({
         orderId: order.orderId,
         idempotencyKey: 'd13b-key-b',
         businessDate: '2026-09-14',
@@ -683,7 +716,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
     const order = await openMilkOrder('1');
     const results = await Promise.allSettled(
       Array.from({ length: 8 }, () =>
-        orders.completeOrder({
+        completeOrderWithCommercial({
           orderId: order.orderId,
           idempotencyKey: 'd13b-conc-same',
           businessDate: '2026-09-14',
@@ -715,13 +748,13 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
     await receiveMilkStock(10, '10000');
     const order = await openMilkOrder('1');
     const results = await Promise.allSettled([
-      orders.completeOrder({
+      completeOrderWithCommercial({
         orderId: order.orderId,
         idempotencyKey: 'd13b-conc-a',
         businessDate: '2026-09-14',
         businessOrder: 1,
       }),
-      orders.completeOrder({
+      completeOrderWithCommercial({
         orderId: order.orderId,
         idempotencyKey: 'd13b-conc-b',
         businessDate: '2026-09-14',
@@ -741,7 +774,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
   it('11 — cost FINAL after receipt; UNKNOWN when no stock history (negative ok)', async () => {
     await receiveMilkStock(6, '10000');
     const priced = await openMilkOrder('1');
-    const pricedResult = await orders.completeOrder({
+    const pricedResult = await completeOrderWithCommercial({
       orderId: priced.orderId,
       idempotencyKey: 'd13b-cost-final',
       businessDate: '2026-09-14',
@@ -766,7 +799,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
       unit: 'L',
       dimension: 'VOLUME',
     });
-    const unknownResult = await orders.completeOrder({
+    const unknownResult = await completeOrderWithCommercial({
       orderId: oilOrder.orderId,
       idempotencyKey: 'd13b-cost-unknown',
       businessDate: '2026-09-14',
@@ -784,7 +817,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
   it('12 — backdated businessDate/businessOrder used on movements', async () => {
     await receiveMilkStock(5, '10000');
     const order = await openMilkOrder('1');
-    const result = await orders.completeOrder({
+    const result = await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'd13b-backdate',
       businessDate: '2026-01-15',
@@ -849,7 +882,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
       unit: 'ea',
       dimension: 'COUNT',
     });
-    const result = await orders.completeOrder({
+    const result = await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'd13b-hist-1',
       businessDate: '2026-09-14',
@@ -890,7 +923,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
   it('14 — ReverseCompletedOrder: compensating IN, GI REVERSED, Order COMPLETED, fact, balance', async () => {
     await receiveMilkStock(10, '10000');
     const order = await openMilkOrder('3');
-    const completed = await orders.completeOrder({
+    const completed = await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'd13b-rev-complete',
       businessDate: '2026-09-14',
@@ -944,7 +977,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
   it('15 — reverse same-key duplicate; different key ALREADY_REVERSED; concurrent one only', async () => {
     await receiveMilkStock(10, '10000');
     const order = await openMilkOrder('1');
-    await orders.completeOrder({
+    await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'd13b-rev15-c',
       businessDate: '2026-09-14',
@@ -981,7 +1014,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
 
     // Concurrent reverse on a fresh completed order
     const order2 = await openMilkOrder('1');
-    await orders.completeOrder({
+    await completeOrderWithCommercial({
       orderId: order2.orderId,
       idempotencyKey: 'd13b-rev15-c2',
       businessDate: '2026-09-14',
@@ -1017,7 +1050,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
   it('16 — scope: no food_cost / payment / settlement tables used', async () => {
     await receiveMilkStock(3, '10000');
     const order = await openMilkOrder('1');
-    await orders.completeOrder({
+    await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'd13b-scope',
       businessDate: '2026-09-14',

@@ -89,6 +89,47 @@ export const reverseCompletedOrderSchema = z
   })
   .strict();
 
+const minorNonNeg = z.string().regex(/^[0-9]+$/);
+const commercialCertaintySchema = z.enum(['FINAL', 'UNKNOWN']);
+
+export const setOrderCommercialTermsSchema = z
+  .object({
+    orderId: uuid,
+    idempotencyKey: z.string().min(1),
+    currencyCode: z.string().length(3),
+    minorUnitExponent: z.number().int().min(0).max(4),
+    certainty: commercialCertaintySchema,
+    orderMerchantFundedDiscountMinor: minorNonNeg.default('0'),
+    taxMinor: minorNonNeg.nullable().optional(),
+    nonMerchandiseChargesMinor: minorNonNeg.nullable().optional(),
+    tipMinor: minorNonNeg.nullable().optional(),
+    customerPayableMinor: minorNonNeg.nullable().optional(),
+    commercialResolution: z.string().min(1).nullable().optional(),
+    provenance: z.unknown().optional(),
+    actorId: uuid.optional(),
+    deviceId: uuid.optional(),
+    lineTerms: z
+      .array(
+        z
+          .object({
+            orderLineId: uuid,
+            resolvedUnitPriceMinor: minorNonNeg.nullable().optional(),
+            grossMerchandiseMinor: minorNonNeg,
+            lineMerchantFundedDiscountMinor: minorNonNeg.default('0'),
+            eligibleForOrderDiscount: z.boolean().default(true),
+            thirdPartyMerchandiseFundingMinor: minorNonNeg.default('0'),
+            taxMinor: minorNonNeg.nullable().optional(),
+            certainty: commercialCertaintySchema.optional(),
+            fundingProvenance: z.string().min(1).nullable().optional(),
+            provenance: z.unknown().optional(),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+
 export type OpenOrderInput = z.infer<typeof openOrderSchema>;
 export type CompleteOrderInput = z.infer<typeof completeOrderSchema>;
 export type ReverseCompletedOrderInput = z.infer<typeof reverseCompletedOrderSchema>;
+export type SetOrderCommercialTermsInput = z.infer<typeof setOrderCommercialTermsSchema>;
