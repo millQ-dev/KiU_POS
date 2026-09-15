@@ -9,6 +9,8 @@ import {
   packageToBaseQuantity,
   variableWeightToBase,
   createQuantity,
+  mergeCertainty,
+  mergeReportingCertainty,
 } from './index.js';
 
 describe('moving weighted average', () => {
@@ -98,5 +100,20 @@ describe('Block C package examples', () => {
 
   it('24 eggs as COUNT ea', () => {
     expect(createQuantity('24', 'COUNT', 'ea').value).toBe('24');
+  });
+});
+
+describe('certainty merge helpers', () => {
+  it('inventory mergeCertainty ranks UNKNOWN above ORDER_UNRESOLVED', () => {
+    expect(mergeCertainty('FINAL', 'UNKNOWN')).toBe('UNKNOWN');
+    expect(mergeCertainty('ORDER_UNRESOLVED', 'UNKNOWN')).toBe('UNKNOWN');
+  });
+
+  it('ADR-0026 mergeReportingCertainty ranks ORDER_UNRESOLVED above UNKNOWN', () => {
+    expect(mergeReportingCertainty('FINAL', 'ESTIMATED_FROM_LAST_KNOWN')).toBe(
+      'ESTIMATED_FROM_LAST_KNOWN',
+    );
+    expect(mergeReportingCertainty('UNKNOWN', 'ORDER_UNRESOLVED')).toBe('ORDER_UNRESOLVED');
+    expect(mergeReportingCertainty('FINAL', 'ORDER_UNRESOLVED')).toBe('ORDER_UNRESOLVED');
   });
 });

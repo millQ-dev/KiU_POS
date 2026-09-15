@@ -40,6 +40,21 @@ export function mergeCertainty(a: CostCertainty, b: CostCertainty): CostCertaint
   return CERTAINTY_RANK[a] >= CERTAINTY_RANK[b] ? a : b;
 }
 
+/**
+ * ADR-0026 Actual COGS reporting aggregate precedence (distinct from inventory stream mergeCertainty):
+ * ORDER_UNRESOLVED > UNKNOWN > ESTIMATED_FROM_LAST_KNOWN > FINAL
+ */
+const REPORTING_CERTAINTY_RANK: Record<CostCertainty, number> = {
+  ORDER_UNRESOLVED: 3,
+  UNKNOWN: 2,
+  ESTIMATED_FROM_LAST_KNOWN: 1,
+  FINAL: 0,
+};
+
+export function mergeReportingCertainty(a: CostCertainty, b: CostCertainty): CostCertainty {
+  return REPORTING_CERTAINTY_RANK[a] >= REPORTING_CERTAINTY_RANK[b] ? a : b;
+}
+
 export function deriveUnitCost(state: CostStreamState): CostValue | null {
   const qty = parseCanonicalDecimal(state.quantity);
   if (qty.lte(0)) {
