@@ -102,10 +102,10 @@ export class ActualCogsService {
     const q = actualCogsQuerySchema.parse(raw);
     const { sql, params } = this.buildLineEffectsSql(q);
     const res = await this.pool.query<LineEffectRow>(sql, params);
-    return res.rows
-      .filter((r) => (q.certainty ? r.cost_certainty === q.certainty : true))
-      .filter((r) => (q.channel ? r.channel === q.channel : true))
-      .map((r) => this.mapLineEffect(r));
+    const rows = res.rows.filter((r) => (q.channel ? r.channel === q.channel : true));
+    const mapped = rows.map((r) => this.mapLineEffect(r));
+    const elevated = this.applyUnresolvedChronologyLine(mapped);
+    return elevated.filter((e) => (q.certainty ? e.costCertainty === q.certainty : true));
   }
 
   /**
@@ -116,9 +116,9 @@ export class ActualCogsService {
     const q = actualCogsQuerySchema.parse(raw);
     const { sql, params } = this.buildPhysicalEffectsSql(q);
     const res = await this.pool.query<PhysicalEffectRow>(sql, params);
-    return res.rows
-      .filter((r) => (q.certainty ? r.cost_certainty === q.certainty : true))
-      .map((r) => this.mapPhysicalEffect(r));
+    const mapped = res.rows.map((r) => this.mapPhysicalEffect(r));
+    const elevated = this.applyUnresolvedChronologyPhysical(mapped);
+    return elevated.filter((e) => (q.certainty ? e.costCertainty === q.certainty : true));
   }
 
   /** Aggregate at evidence-line grain (sold/order reporting). */
@@ -156,6 +156,60 @@ export class ActualCogsService {
       'FOOD_COST_RATIO_UNAVAILABLE',
       'Food Cost Ratio / Revenue Basis are out of scope for D1.4A (ADR-0026)',
     );
+  }
+
+  /**
+   * ADR-0003 / ADR-0026: unrelated independent documents at the same business
+   * position cannot be ordered → report ORDER_UNRESOLVED (do not present as exact).
+   * Linked primary SALE + its GoodsIssueReversal at the same position stay ordered.
+   */
+  private unresolvedPositionKeys(
+    effects: ReadonlyArray<{
+      warehouseId: string;
+      physicalCatalogItemId: string;
+      currencyCode: string;
+      businessDate: string;
+      businessOrder: number;
+      goodsIssueId: string;
+    }>,
+  ): Set<string> {
+    const byPos = new Map<string, Set<string>>();
+    for (const e of effects) {
+      const key = `${e.warehouseId}|${e.physicalCatalogItemId}|${e.currencyCode}|${e.businessDate}|${e.businessOrder}`;
+      let issues = byPos.get(key);
+      if (!issues) {
+        issues = new Set();
+        byPos.set(key, issues);
+      }
+      issues.add(e.goodsIssueId);
+    }
+    const unresolved = new Set<string>();
+    for (const [key, issues] of byPos) {
+      if (issues.size > 1) unresolved.add(key);
+    }
+    return unresolved;
+  }
+
+  private applyUnresolvedChronologyLine(effects: ActualCogsEffect[]): ActualCogsEffect[] {
+    const unresolved = this.unresolvedPositionKeys(effects);
+    if (unresolved.size === 0) return effects;
+    return effects.map((e) => {
+      const key = `${e.warehouseId}|${e.physicalCatalogItemId}|${e.currencyCode}|${e.businessDate}|${e.businessOrder}`;
+      if (!unresolved.has(key) || e.costCertainty === 'ORDER_UNRESOLVED') return e;
+      return { ...e, costCertainty: 'ORDER_UNRESOLVED' };
+    });
+  }
+
+  private applyUnresolvedChronologyPhysical(
+    effects: ActualCogsPhysicalEffect[],
+  ): ActualCogsPhysicalEffect[] {
+    const unresolved = this.unresolvedPositionKeys(effects);
+    if (unresolved.size === 0) return effects;
+    return effects.map((e) => {
+      const key = `${e.warehouseId}|${e.physicalCatalogItemId}|${e.currencyCode}|${e.businessDate}|${e.businessOrder}`;
+      if (!unresolved.has(key) || e.costCertainty === 'ORDER_UNRESOLVED') return e;
+      return { ...e, costCertainty: 'ORDER_UNRESOLVED' };
+    });
   }
 
   aggregateEffects(
@@ -460,6 +514,7 @@ ORDER BY
     let soldExistsSale = '';
     let soldExistsRev = '';
     if (q.soldCatalogItemId) {
+      // SALE: gil.inventory_movement_id is the OUT movement id.
       soldExistsSale = `AND EXISTS (
         SELECT 1 FROM goods_issue_line gil2
         JOIN sales_order_line sol2 ON sol2.order_line_id = gil2.order_line_id
@@ -467,19 +522,40 @@ ORDER BY
           AND gil2.inventory_movement_id = m.movement_id
           AND sol2.catalog_item_id = $${p}
       )`;
-      soldExistsRev = soldExistsSale;
+      // REVERSAL IN movements have distinct ids; match via original OUT that gil points to.
+      soldExistsRev = `AND EXISTS (
+        SELECT 1 FROM goods_issue_line gil2
+        JOIN sales_order_line sol2 ON sol2.order_line_id = gil2.order_line_id
+        JOIN inventory_movement out_m ON out_m.movement_id = gil2.inventory_movement_id
+        WHERE gil2.goods_issue_id = gi.goods_issue_id
+          AND sol2.catalog_item_id = $${p}
+          AND out_m.source_document_type = 'GoodsIssue'
+          AND out_m.source_document_id = gi.goods_issue_id
+          AND out_m.catalog_item_id = m.catalog_item_id
+          AND out_m.quantity = m.quantity
+          AND out_m.acquisition_cost_minor = m.acquisition_cost_minor
+      )`;
       params.push(q.soldCatalogItemId);
       p += 1;
     }
     if (q.orderLineId) {
-      const clause = `AND EXISTS (
+      soldExistsSale += ` AND EXISTS (
         SELECT 1 FROM goods_issue_line gil2
         WHERE gil2.goods_issue_id = gi.goods_issue_id
           AND gil2.inventory_movement_id = m.movement_id
           AND gil2.order_line_id = $${p}
       )`;
-      soldExistsSale += ` ${clause}`;
-      soldExistsRev += ` ${clause}`;
+      soldExistsRev += ` AND EXISTS (
+        SELECT 1 FROM goods_issue_line gil2
+        JOIN inventory_movement out_m ON out_m.movement_id = gil2.inventory_movement_id
+        WHERE gil2.goods_issue_id = gi.goods_issue_id
+          AND gil2.order_line_id = $${p}
+          AND out_m.source_document_type = 'GoodsIssue'
+          AND out_m.source_document_id = gi.goods_issue_id
+          AND out_m.catalog_item_id = m.catalog_item_id
+          AND out_m.quantity = m.quantity
+          AND out_m.acquisition_cost_minor = m.acquisition_cost_minor
+      )`;
       params.push(q.orderLineId);
       p += 1;
     }

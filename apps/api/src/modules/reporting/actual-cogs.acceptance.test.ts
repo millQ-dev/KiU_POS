@@ -687,13 +687,17 @@ describe('Block D1.4A Actual COGS read model (PostgreSQL)', () => {
     expect(mixed.unresolvedComponentCount).toBe(1);
     expect(mixed.unknownComponentCount).toBe(1);
 
-    // Also: two independent same-position sales produce inventory ORDER_UNRESOLVED stream,
-    // but reporting still lists both SALE effects (do not invent silent drop).
+    // Also: two independent same-position sales → ORDER_UNRESOLVED (not exact FINAL).
     await receiveMilkStock(10, '10000');
     await completeMilkSale('1', '2026-03-10', 1, 'cogs-24-a');
     await completeMilkSale('1', '2026-03-10', 1, 'cogs-24-b');
     const effects = await cogs.listLineEffects(baseQuery({ businessDate: '2026-03-10' }));
     expect(effects.length).toBeGreaterThanOrEqual(2);
+    expect(effects.every((e) => e.costCertainty === 'ORDER_UNRESOLVED')).toBe(true);
+    const dayAgg = await cogs.aggregateByLine(baseQuery({ businessDate: '2026-03-10' }));
+    expect(dayAgg.certainty).toBe('ORDER_UNRESOLVED');
+    expect(dayAgg.actualCogsMinor).toBeNull();
+    expect(dayAgg.unresolvedComponentCount).toBeGreaterThanOrEqual(2);
   });
 
   it('25-27 — sale+reversal periods: same net~0, A/B split, reversal-only negative', async () => {
@@ -806,6 +810,16 @@ describe('Block D1.4A Actual COGS read model (PostgreSQL)', () => {
 
     const physRev = await cogs.listPhysicalEffects(baseQuery({ businessDate: '2026-03-05' }));
     expect(physRev[0]!.signedActualCogsMinor).toBe('-20000');
+
+    // Physical grain + soldCatalogItemId must still include REVERSAL (IN ≠ OUT movement id)
+    const physSold = await cogs.listPhysicalEffects(
+      baseQuery({ soldCatalogItemId: fx.milkItemId, businessDateFrom: '2026-03-05', businessDateTo: '2026-03-10' }),
+    );
+    expect(physSold.map((e) => e.effectType).sort()).toEqual(['REVERSAL', 'SALE']);
+    const physSoldAgg = await cogs.aggregateByPhysicalMovement(
+      baseQuery({ soldCatalogItemId: fx.milkItemId, businessDateFrom: '2026-03-05', businessDateTo: '2026-03-10' }),
+    );
+    expect(physSoldAgg.actualCogsMinor).toBe('0');
   });
 
   it('33-34 — recipe change after sale does not change Actual COGS', async () => {
