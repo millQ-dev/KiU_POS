@@ -24,6 +24,10 @@ async function truncateBusiness() {
     TRUNCATE
       operational_fact_feed,
       audit_record,
+      sales_order_completion_reversal,
+      goods_issue_reversal,
+      goods_issue_line,
+      goods_issue,
       consumption_plan_physical_leaf,
       consumption_plan_resolved_version,
       consumption_plan_line,

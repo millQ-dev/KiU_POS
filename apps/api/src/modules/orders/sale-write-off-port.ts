@@ -29,14 +29,33 @@ export type SaleWriteOffCommand = {
   }>;
 };
 
+export type SaleGoodsIssueReverseCommand = {
+  readonly orderId: string;
+  readonly goodsIssueId: string;
+  readonly tenantId: string;
+  readonly legalEntityId: string;
+  readonly idempotencyKey: string;
+  readonly reason?: string | null;
+  readonly actorId?: string | null;
+  readonly deviceId?: string | null;
+};
+
+export type SaleGoodsIssueReverseRef = {
+  readonly goodsIssueReversalId: string;
+};
+
 /**
- * Inventory-owned posting boundary (ADR-0025 §4).
- * Must create typed GoodsIssue + POSTED movements inside the caller's transaction client
- * when D1.3B is wired. D1.3A leaves this unwired.
+ * Inventory-owned posting boundary (ADR-0025 §4 / §9).
+ * Creates typed GoodsIssue + POSTED movements (and reversals) inside the caller's TX.
  */
 export interface SaleInventoryWriteOffPort {
   postGoodsIssueFromConsumptionPlan(
     client: unknown,
     command: SaleWriteOffCommand,
   ): Promise<SaleGoodsIssueRef>;
+
+  reverseGoodsIssueFromOrder(
+    client: unknown,
+    command: SaleGoodsIssueReverseCommand,
+  ): Promise<SaleGoodsIssueReverseRef>;
 }

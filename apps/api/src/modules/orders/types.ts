@@ -75,5 +75,16 @@ export const completeOrderSchema = z
   })
   .strict();
 
+export const reverseCompletedOrderSchema = z
+  .object({
+    orderId: uuid,
+    idempotencyKey: z.string().min(1),
+    reason: z.string().min(1).optional(),
+    actorId: uuid.optional(),
+    deviceId: uuid.optional(),
+  })
+  .strict();
+
 export type OpenOrderInput = z.infer<typeof openOrderSchema>;
 export type CompleteOrderInput = z.infer<typeof completeOrderSchema>;
+export type ReverseCompletedOrderInput = z.infer<typeof reverseCompletedOrderSchema>;

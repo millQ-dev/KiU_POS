@@ -125,7 +125,7 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 
 | | |
 | --- | --- |
-| **Owns** | Order, OrderLine, commercial/order snapshots, lifecycle; SettlementGroup / Check / CheckLineAllocation coordination (ADR-0016); **ConsumptionPlanSnapshot** at CompleteOrder (ADR-0025; persisted in D1.3B) |
+| **Owns** | Order, OrderLine, commercial/order snapshots, lifecycle; SettlementGroup / Check / CheckLineAllocation coordination (ADR-0016); **ConsumptionPlanSnapshot** at CompleteOrder (ADR-0025; D1.3A/B); **sales_order_completion_reversal** (D1.3B) |
 | **Does not own** | Payments, FiscalDocument, kitchen ticket state, inventory movements / GoodsIssue tables, FloorPlan geometry, TableAssignment / TableRuntimeState |
 | **Key concepts** | Order (table optional), OrderLine snapshot, CompleteOrder → OrderCompleted (sale write-off trigger — ADR-0025; D1.3B), ConsumptionPlanSnapshot, CatalogItem RecipeProfile binding (ADR-0009), SettlementGroup, Check, CheckLineAllocation, PaymentAllocation (Order ≠ Settlement) |
 | **Commands in** | OpenOrder, AddOrderLine, CancelOrder, CompleteOrder (requires Inventory port — D1.3B), ReverseCompletedOrder (ADR-0025); SendToProduction / OpenSettlement / SplitCheck (deferred beyond D1.3A MVP surface) |
@@ -162,7 +162,7 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 | **Does not own** | Purchasing source documents (GoodsReceipt header lives with Purchasing posting coordination — see Block C contract), derived unit cost presentation, ProductionBatch recording foundation without posting (Production / D1.2A), Order truth |
 | **Key concepts** | InventoryMovement, warehouse stock projection, explain-balance chain; shared `rebuildInventoryBalance`; sale GoodsIssue references Order / OrderLines |
 | **Commands in** | ApplyPostedMovements, AdjustStock, CompleteProductionBatch / PostProductionBatch (D1.2B), PostGoodsIssue / ReverseGoodsIssue (sale path orchestrated from CompleteOrder — ADR-0025) |
-| **Facts out** | InventoryAdjusted, InventoryConsumed, PreparationProduced |
+| **Facts out** | InventoryAdjusted, InventoryConsumed, PreparationProduced; sale GoodsIssue path emits InventoryConsumed with `sourceOrderId` (D1.3B) |
 | **Depends on** | Catalog, Units, Recipes (expansion rules), Organization, Production (finalized batch refs), Orders (source refs only) |
 
 ### Production Routing
