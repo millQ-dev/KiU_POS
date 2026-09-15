@@ -128,7 +128,7 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 | **Owns** | Order, OrderLine, commercial/order snapshots, lifecycle; SettlementGroup / Check / CheckLineAllocation coordination (ADR-0016); **ConsumptionPlanSnapshot** at CompleteOrder (ADR-0025; D1.3A/B); **sales_order_completion_reversal** (D1.3B) |
 | **Does not own** | Payments, FiscalDocument, kitchen ticket state, inventory movements / GoodsIssue tables, FloorPlan geometry, TableAssignment / TableRuntimeState |
 | **Key concepts** | Order (table optional), OrderLine snapshot, CompleteOrder → OrderCompleted (sale write-off trigger — ADR-0025; D1.3B), ConsumptionPlanSnapshot, CatalogItem RecipeProfile binding (ADR-0009), SettlementGroup, Check, CheckLineAllocation, PaymentAllocation (Order ≠ Settlement) |
-| **Commands in** | OpenOrder, AddOrderLine, CancelOrder, CompleteOrder (requires Inventory port — D1.3B), ReverseCompletedOrder (ADR-0025); SendToProduction / OpenSettlement / SplitCheck (deferred beyond D1.3A MVP surface) |
+| **Commands in** | OpenOrder, AddOrderLine, CancelOrder, CompleteOrder (requires Inventory port — D1.3B), ReverseCompletedOrder (ADR-0025; business chronology required — ADR-0027 / D1.3B-R1); SendToProduction / OpenSettlement / SplitCheck (deferred beyond D1.3A MVP surface) |
 | **Facts out** | OrderOpened, OrderItemAdded, OrderCancelled, OrderCompleted (D1.3B), OrderCompletionReversed (D1.3B); OrderPaid remains payment signal owned by Payments |
 | **Depends on** | Menu/Pricing resolvers, Catalog (RecipeProfile), Recipes (graph resolution), Organization (default issue warehouse), Identity; **synchronous** Inventory posting ports for GoodsIssue inside CompleteOrder (D1.3B; does not write Inventory tables; does not async-subscribe to OrderCompleted feed) |
 
@@ -161,7 +161,7 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 | **Owns** | InventoryMovement, balances (projection), ProductionBatch **stock effects** (D1.2B posting), **GoodsIssue** (sale write-off — ADR-0025), StockAdjustment, count posting effects |
 | **Does not own** | Purchasing source documents (GoodsReceipt header lives with Purchasing posting coordination — see Block C contract), derived unit cost presentation, ProductionBatch recording foundation without posting (Production / D1.2A), Order truth |
 | **Key concepts** | InventoryMovement, warehouse stock projection, explain-balance chain; shared `rebuildInventoryBalance`; sale GoodsIssue references Order / OrderLines |
-| **Commands in** | ApplyPostedMovements, AdjustStock, CompleteProductionBatch / PostProductionBatch (D1.2B), PostGoodsIssue / ReverseGoodsIssue (sale path orchestrated from CompleteOrder — ADR-0025) |
+| **Commands in** | ApplyPostedMovements, AdjustStock, CompleteProductionBatch / PostProductionBatch (D1.2B), PostGoodsIssue / ReverseGoodsIssue (sale path orchestrated from CompleteOrder — ADR-0025; compensating movement chronology = reversal event — ADR-0027) |
 | **Facts out** | InventoryAdjusted, InventoryConsumed, PreparationProduced; sale GoodsIssue path emits InventoryConsumed with `sourceOrderId` (D1.3B) |
 | **Depends on** | Catalog, Units, Recipes (expansion rules), Organization, Production (finalized batch refs), Orders (source refs only) |
 

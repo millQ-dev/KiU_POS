@@ -5,8 +5,9 @@
 - **Accepted:** 2026-09-15 (PO LAUNCH — binding decisions recorded)
 - **Decision owners:** Product Owner and System Architect
 - **Related:** ADR-0002, ADR-0003, ADR-0008, ADR-0010, ADR-0012, ADR-0016, ADR-0019, ADR-0025; Architecture v1.2 / v1.3; Block D1.3A; Block D1.3B
-- **Blocks enabled after Accept:** D1.4A — Actual COGS Read Model (implementation; **not** launched by this ADR)
+- **Blocks enabled after Accept:** D1.4A — Actual COGS Read Model (implementation; **not** launched by this ADR; **further blocked** until ADR-0027 Accept + **D1.3B-R1** remediation merge + backup)
 - **Explicitly deferred:** Food Cost Ratio / Gross Profit / Revenue Basis / Theoretical Recipe Cost implementation
+- **Related chronology:** ADR-0027 (Reversal Business Chronology Semantics) — Required for honest ADR-0026 period A/B reversal reporting
 
 ## Context
 
