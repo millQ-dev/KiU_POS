@@ -222,6 +222,8 @@ export class OrdersService {
           cmd.dimension,
         ],
       );
+      // Line mutation invalidates accepted commercial terms (must re-accept before CompleteOrder).
+      await this.clearOpenCommercialTerms(client, cmd.orderId);
       await this.mirrorFactTx(client, {
         factType: OperationalFactType.OrderItemAdded,
         idempotencyKey: `order-line-added:${orderLineId}`,
@@ -268,6 +270,7 @@ export class OrdersService {
          WHERE order_line_id = $5`,
         [catalogItemId, quantity, unit, dimension, cmd.orderLineId],
       );
+      await this.clearOpenCommercialTerms(client, cmd.orderId);
       await client.query('COMMIT');
       return this.getOrder(cmd.orderId);
     } catch (e) {
@@ -287,6 +290,7 @@ export class OrdersService {
       this.assertOpenMutable(order);
       await this.lockLine(client, cmd.orderId, cmd.orderLineId);
       await client.query(`DELETE FROM sales_order_line WHERE order_line_id = $1`, [cmd.orderLineId]);
+      await this.clearOpenCommercialTerms(client, cmd.orderId);
       await client.query('COMMIT');
       return this.getOrder(cmd.orderId);
     } catch (e) {
@@ -1227,6 +1231,11 @@ export class OrdersService {
         fundingProvenance: l.funding_provenance,
       })),
     };
+  }
+
+  private async clearOpenCommercialTerms(client: Client, orderId: string): Promise<void> {
+    await client.query(`DELETE FROM sales_order_commercial_line_terms WHERE order_id = $1`, [orderId]);
+    await client.query(`DELETE FROM sales_order_commercial_terms WHERE order_id = $1`, [orderId]);
   }
 
   private assertOpenMutable(order: OrderRow): void {

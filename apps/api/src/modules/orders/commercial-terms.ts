@@ -398,18 +398,46 @@ export async function loadBuiltCommercialState(
   // Recompute allocation from OPEN terms for freeze consistency.
   const qtyByLine = new Map(
     (
-      await client.query<{ order_line_id: string; quantity: string }>(
-        `SELECT order_line_id, quantity FROM sales_order_line WHERE order_id = $1`,
+      await client.query<{
+        order_line_id: string;
+        quantity: string;
+        catalog_item_id: string;
+        line_number: number;
+      }>(
+        `SELECT order_line_id, quantity, catalog_item_id, line_number FROM sales_order_line WHERE order_id = $1`,
         [orderId],
       )
-    ).rows.map((r) => [r.order_line_id, r.quantity]),
+    ).rows.map((r) => [r.order_line_id, r]),
   );
 
+  if (qtyByLine.size !== linesRes.rows.length) {
+    throw new DomainValidationError(
+      'COMMERCIAL_TERMS_STALE',
+      'Accepted commercial terms no longer cover current OrderLines; call SetOrderCommercialTerms again',
+    );
+  }
+  for (const r of linesRes.rows) {
+    const live = qtyByLine.get(r.order_line_id);
+    if (!live) {
+      throw new DomainValidationError(
+        'COMMERCIAL_TERMS_STALE',
+        'Accepted commercial terms reference a removed OrderLine; call SetOrderCommercialTerms again',
+      );
+    }
+    if (live.catalog_item_id !== r.sold_catalog_item_id || live.line_number !== r.line_number) {
+      throw new DomainValidationError(
+        'COMMERCIAL_TERMS_STALE',
+        'Accepted commercial terms disagree with current OrderLine identity; call SetOrderCommercialTerms again',
+      );
+    }
+  }
+
   const prepared = linesRes.rows.map((r) => {
+    const live = qtyByLine.get(r.order_line_id)!;
     const gross = BigInt(r.gross_merchandise_minor);
     const lineDisc = BigInt(r.line_merchant_funded_discount_minor);
     const basis = r.eligible_for_order_discount ? (gross - lineDisc).toString() : '0';
-    return { ...r, basisMinor: basis, quantity: qtyByLine.get(r.order_line_id) ?? '0' };
+    return { ...r, basisMinor: basis, quantity: live.quantity };
   });
 
   let allocations: ReadonlyMap<string, string>;

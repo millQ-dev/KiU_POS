@@ -559,4 +559,35 @@ describe('Block D1.4B Order Commercial Snapshot (PostgreSQL)', () => {
       }),
     ).rejects.toMatchObject({ code: 'FOREIGN_ORDER_LINE' });
   });
+
+  it('line mutation after SetTerms invalidates commercial state before CompleteOrder', async () => {
+    await receiveMilk(5, '10000');
+    const o = await openMilkOrder('1');
+    await acceptFinalMerchandiseTerms(orders, o.orderId, { defaultGrossMinor: '1000' });
+    await orders.addOrderLine({
+      orderId: o.orderId,
+      catalogItemId: fx.milkItemId,
+      quantity: '1',
+      unit: 'L',
+      dimension: 'VOLUME',
+    });
+    await expect(
+      orders.completeOrder({
+        orderId: o.orderId,
+        idempotencyKey: 'stale-c',
+        businessDate: '2026-03-10',
+        businessOrder: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'COMMERCIAL_TERMS_REQUIRED' });
+
+    await acceptFinalMerchandiseTerms(orders, o.orderId, { defaultGrossMinor: '1000' });
+    await orders.completeOrder({
+      orderId: o.orderId,
+      idempotencyKey: 'stale-ok',
+      businessDate: '2026-03-10',
+      businessOrder: 1,
+    });
+    const snap = await orders.getCommercialSnapshot(o.orderId);
+    expect(snap!.lines).toHaveLength(2);
+  });
 });
