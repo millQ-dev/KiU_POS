@@ -19,6 +19,10 @@ async function truncateBusiness() {
     TRUNCATE
       operational_fact_feed,
       audit_record,
+      sales_order_completion_reversal,
+      goods_issue_reversal,
+      goods_issue_line,
+      goods_issue,
       consumption_plan_physical_leaf,
       consumption_plan_resolved_version,
       consumption_plan_line,
@@ -56,22 +60,13 @@ async function countInventoryEffects(orderId?: string) {
   const movements = await pool.query<{ c: string }>(
     `SELECT COUNT(*)::text AS c FROM inventory_movement`,
   );
-  const goodsIssues = await pool.query<{ c: string }>(
-    `SELECT COUNT(*)::text AS c FROM information_schema.tables
-     WHERE table_schema='public' AND table_name='goods_issue'`,
+  const goodsIssueRows = await pool.query<{ c: string }>(
+    `SELECT COUNT(*)::text AS c FROM goods_issue`,
   );
-  // goods_issue table must not exist in D1.3A
-  const goodsIssueTableExists = goodsIssues.rows[0]?.c === '1';
-  let goodsIssueRows = '0';
-  if (goodsIssueTableExists) {
-    const r = await pool.query<{ c: string }>(`SELECT COUNT(*)::text AS c FROM goods_issue`);
-    goodsIssueRows = r.rows[0]?.c ?? '0';
-  }
   void orderId;
   return {
     inventoryMovementCount: Number(movements.rows[0]?.c ?? 0),
-    goodsIssueTableExists,
-    goodsIssueRowCount: Number(goodsIssueRows),
+    goodsIssueRowCount: Number(goodsIssueRows.rows[0]?.c ?? 0),
   };
 }
 
@@ -211,7 +206,7 @@ describe('Block D1.3A Orders Foundation & Consumption Plan (PostgreSQL)', () => 
 
     const inv = await countInventoryEffects(order.orderId);
     expect(inv.inventoryMovementCount).toBe(0);
-    expect(inv.goodsIssueTableExists).toBe(false);
+    expect(inv.goodsIssueRowCount).toBe(0);
   });
 
   it('concurrent CompleteOrder attempts leave OPEN and no divergent snapshot', async () => {
@@ -676,7 +671,6 @@ describe('Block D1.3A Orders Foundation & Consumption Plan (PostgreSQL)', () => 
   it('D1.3A suite leaves zero GoodsIssue and zero InventoryMovement', async () => {
     const inv = await countInventoryEffects();
     expect(inv.inventoryMovementCount).toBe(0);
-    expect(inv.goodsIssueTableExists).toBe(false);
     expect(inv.goodsIssueRowCount).toBe(0);
   });
 

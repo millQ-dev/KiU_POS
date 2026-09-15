@@ -30,6 +30,7 @@ import {
   completeOrderSchema,
   openOrderSchema,
   removeOrderLineSchema,
+  reverseCompletedOrderSchema,
   updateOrderLineSchema,
 } from './types.js';
 
@@ -91,6 +92,22 @@ function completeFingerprint(input: {
         lineIds: [...input.lineIds].sort(),
         provenanceHash: input.provenanceHash,
         warehouseId: input.warehouseId,
+      }),
+    )
+    .digest('hex');
+}
+
+function reverseCompletionFingerprint(input: {
+  orderId: string;
+  goodsIssueId: string;
+  reason?: string | null;
+}): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        orderId: input.orderId,
+        goodsIssueId: input.goodsIssueId,
+        reason: input.reason ?? null,
       }),
     )
     .digest('hex');
@@ -601,24 +618,7 @@ export class OrdersService {
         })),
       );
 
-      // Inventory first — if this fails, transaction rolls back; Order stays OPEN.
-      const goodsIssue = await this.saleWriteOffPort!.postGoodsIssueFromConsumptionPlan(client, {
-        orderId: cmd.orderId,
-        tenantId: order.tenant_id,
-        legalEntityId: order.legal_entity_id,
-        outletId: order.outlet_id,
-        warehouseId,
-        businessDate: cmd.businessDate,
-        businessTime: cmd.businessTime ?? null,
-        businessOrder: cmd.businessOrder,
-        actorId: cmd.actorId ?? null,
-        deviceId: cmd.deviceId ?? null,
-        idempotencyKey: cmd.idempotencyKey,
-        provenanceHash,
-        planJson,
-        physicalLeaves,
-      });
-
+      // ADR-0025 §4: persist ConsumptionPlanSnapshot before Inventory GoodsIssue.
       const consumptionPlanId = randomUUID();
       await client.query(
         `INSERT INTO consumption_plan_snapshot (
@@ -696,6 +696,24 @@ export class OrdersService {
         }
       }
 
+      // Inventory posts GoodsIssue from frozen leaves only (same TX). Failure → full ROLLBACK.
+      const goodsIssue = await this.saleWriteOffPort!.postGoodsIssueFromConsumptionPlan(client, {
+        orderId: cmd.orderId,
+        tenantId: order.tenant_id,
+        legalEntityId: order.legal_entity_id,
+        outletId: order.outlet_id,
+        warehouseId,
+        businessDate: cmd.businessDate,
+        businessTime: cmd.businessTime ?? null,
+        businessOrder: cmd.businessOrder,
+        actorId: cmd.actorId ?? null,
+        deviceId: cmd.deviceId ?? null,
+        idempotencyKey: cmd.idempotencyKey,
+        provenanceHash,
+        planJson,
+        physicalLeaves,
+      });
+
       await client.query(
         `UPDATE sales_order SET
            status = 'COMPLETED',
@@ -752,6 +770,217 @@ export class OrdersService {
       return {
         status: 'completed' as const,
         goodsIssueId: goodsIssue.goodsIssueId,
+        order: await this.getOrder(cmd.orderId),
+      };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * ReverseCompletedOrder — explicit compensating truth (ADR-0025 §9).
+   * Original Order remains COMPLETED; GoodsIssue + movements stay immutable.
+   */
+  async reverseCompletedOrder(raw: unknown) {
+    const cmd = reverseCompletedOrderSchema.parse(raw);
+
+    if (!this.saleWriteOffPort) {
+      throw new DomainValidationError(
+        'SALE_WRITE_OFF_NOT_WIRED',
+        'ReverseCompletedOrder requires Inventory SaleInventoryWriteOffPort (D1.3B)',
+      );
+    }
+
+    const peek = await this.requireOrder(cmd.orderId);
+    if (peek.status !== 'COMPLETED') {
+      throw new DomainValidationError(
+        'NOT_COMPLETED',
+        'Only COMPLETED orders can be reversed via ReverseCompletedOrder',
+      );
+    }
+
+    const giPeek = await this.pool.query<{ goods_issue_id: string }>(
+      `SELECT goods_issue_id FROM goods_issue WHERE source_order_id = $1`,
+      [cmd.orderId],
+    );
+    const goodsIssueId = giPeek.rows[0]?.goods_issue_id;
+    if (!goodsIssueId) {
+      throw new NotFoundError(`GoodsIssue not found for completed order: ${cmd.orderId}`);
+    }
+
+    const fp = reverseCompletionFingerprint({
+      orderId: cmd.orderId,
+      goodsIssueId,
+      reason: cmd.reason ?? null,
+    });
+
+    const priorRev = await this.pool.query<{
+      sales_order_completion_reversal_id: string;
+      idempotency_key: string;
+      semantic_fingerprint: string;
+      goods_issue_reversal_id: string;
+    }>(`SELECT * FROM sales_order_completion_reversal WHERE order_id = $1`, [cmd.orderId]);
+    const prior = priorRev.rows[0];
+    if (prior) {
+      if (prior.idempotency_key === cmd.idempotencyKey && prior.semantic_fingerprint === fp) {
+        return {
+          status: 'duplicate' as const,
+          reversalId: prior.sales_order_completion_reversal_id,
+          goodsIssueReversalId: prior.goods_issue_reversal_id,
+          order: await this.getOrder(cmd.orderId),
+        };
+      }
+      if (prior.idempotency_key === cmd.idempotencyKey) {
+        throw new IdempotencyConflictError(
+          cmd.idempotencyKey,
+          'Order completion already reversed with a different semantic fingerprint',
+        );
+      }
+      throw new DomainValidationError(
+        'ALREADY_REVERSED',
+        'Order completion is already reversed',
+      );
+    }
+
+    const keyConflict = await this.pool.query(
+      `SELECT order_id FROM sales_order_completion_reversal
+       WHERE legal_entity_id = $1 AND idempotency_key = $2 AND order_id <> $3`,
+      [peek.legal_entity_id, cmd.idempotencyKey, cmd.orderId],
+    );
+    if (keyConflict.rows[0]) {
+      throw new IdempotencyConflictError(
+        cmd.idempotencyKey,
+        'Reversal idempotency key already used by another order in this legal entity',
+      );
+    }
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const order = await this.lockOrder(client, cmd.orderId);
+      if (order.status !== 'COMPLETED') {
+        throw new DomainValidationError(
+          'NOT_COMPLETED',
+          'Only COMPLETED orders can be reversed via ReverseCompletedOrder',
+        );
+      }
+
+      const concurrent = await client.query<{
+        sales_order_completion_reversal_id: string;
+        idempotency_key: string;
+        semantic_fingerprint: string;
+        goods_issue_reversal_id: string;
+      }>(
+        `SELECT * FROM sales_order_completion_reversal WHERE order_id = $1 FOR UPDATE`,
+        [cmd.orderId],
+      );
+      const concurrentPrior = concurrent.rows[0];
+      if (concurrentPrior) {
+        if (
+          concurrentPrior.idempotency_key === cmd.idempotencyKey &&
+          concurrentPrior.semantic_fingerprint === fp
+        ) {
+          await client.query('COMMIT');
+          return {
+            status: 'duplicate' as const,
+            reversalId: concurrentPrior.sales_order_completion_reversal_id,
+            goodsIssueReversalId: concurrentPrior.goods_issue_reversal_id,
+            order: await this.getOrder(cmd.orderId),
+          };
+        }
+        throw new DomainValidationError(
+          'ALREADY_REVERSED',
+          'Order completion is already reversed',
+        );
+      }
+
+      const gi = await client.query<{ goods_issue_id: string }>(
+        `SELECT goods_issue_id FROM goods_issue WHERE source_order_id = $1 FOR UPDATE`,
+        [cmd.orderId],
+      );
+      const lockedGiId = gi.rows[0]?.goods_issue_id;
+      if (!lockedGiId) {
+        throw new NotFoundError(`GoodsIssue not found for completed order: ${cmd.orderId}`);
+      }
+
+      const inventoryReverse = await this.saleWriteOffPort!.reverseGoodsIssueFromOrder(client, {
+        orderId: cmd.orderId,
+        goodsIssueId: lockedGiId,
+        tenantId: order.tenant_id,
+        legalEntityId: order.legal_entity_id,
+        idempotencyKey: cmd.idempotencyKey,
+        reason: cmd.reason ?? null,
+        actorId: cmd.actorId ?? null,
+        deviceId: cmd.deviceId ?? null,
+      });
+
+      const reversalId = randomUUID();
+      await client.query(
+        `INSERT INTO sales_order_completion_reversal (
+           sales_order_completion_reversal_id, tenant_id, order_id, goods_issue_id,
+           goods_issue_reversal_id, legal_entity_id, idempotency_key, semantic_fingerprint,
+           reason, actor_id, device_id, reversed_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())`,
+        [
+          reversalId,
+          order.tenant_id,
+          cmd.orderId,
+          lockedGiId,
+          inventoryReverse.goodsIssueReversalId,
+          order.legal_entity_id,
+          cmd.idempotencyKey,
+          fp,
+          cmd.reason ?? null,
+          cmd.actorId ?? null,
+          cmd.deviceId ?? null,
+        ],
+      );
+
+      const reverseContext: {
+        tenantId: string;
+        legalEntityId: string;
+        outletId: string;
+        actorId: string | null;
+        warehouseId?: string;
+      } = {
+        tenantId: order.tenant_id,
+        legalEntityId: order.legal_entity_id,
+        outletId: order.outlet_id,
+        actorId: cmd.actorId ?? order.actor_id,
+      };
+      if (order.resolved_issue_warehouse_id) {
+        reverseContext.warehouseId = order.resolved_issue_warehouse_id;
+      }
+
+      await this.mirrorFactTx(client, {
+        factType: OperationalFactType.OrderCompletionReversed,
+        idempotencyKey: `order-completion-reversed:${order.legal_entity_id}:${cmd.idempotencyKey}`,
+        payload: {
+          orderId: cmd.orderId,
+          salesOrderCompletionReversalId: reversalId,
+          goodsIssueId: lockedGiId,
+          goodsIssueReversalId: inventoryReverse.goodsIssueReversalId,
+          ...(cmd.reason ? { reason: cmd.reason } : {}),
+        },
+        context: reverseContext,
+        position: {
+          businessDate:
+            order.business_date instanceof Date
+              ? order.business_date.toISOString().slice(0, 10)
+              : (order.business_date as string),
+          ...(order.business_time ? { businessTime: order.business_time } : {}),
+          businessOrder: order.business_order ?? 0,
+        },
+      });
+
+      await client.query('COMMIT');
+      return {
+        status: 'reversed' as const,
+        reversalId,
+        goodsIssueReversalId: inventoryReverse.goodsIssueReversalId,
         order: await this.getOrder(cmd.orderId),
       };
     } catch (e) {
