@@ -1,84 +1,61 @@
 # MillQ Current State
 
-**Checkpoint:** ADR-0026 Actual COGS & Food Cost Reporting Semantics — **architecture-only Level C** (this PR)
+**Checkpoint:** ADR-0027 Reversal Business Chronology Semantics — **architecture-only Level C** (this PR)
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)
 **Backup host:** GitHub `https://github.com/millQ-dev/MillQ.git` (mirror only)
-**Block D1.3B PR #32:** merged @ `b2174ee56a7417b4a4db516ae3ea1855ed470f0a` (backup verified)
-**Block D1.3A PR #31:** merged @ `d85ea04`
-**Accept PR #30:** ADR-0025 @ `8844ccb`
+**ADR-0026 Accept PR #33:** merged @ `39723023fb83c231285169091330d867ff739536`
+**Block D1.3B PR #32:** merged @ `b2174ee`
 **Updated:** 2026-09-15
 
 ## Runtime / CI / backup
 
 | Item | State |
 | --- | --- |
-| Foundation Operational Core | Merged |
-| Architecture v1.2 / v1.3 | **Merged** |
-| Block C Goods Receipt vertical | **Merged** |
-| Block D1.1 / D1.2A / D1.2B | **Merged** |
-| ADR-0025 Order Completion & Sale Inventory Write-off | **Accepted / Merged** (PR #30 → `8844ccb`) |
-| Block D1.3A Orders Foundation & Consumption Plan | **Merged** (PR #31 → `d85ea04`) |
-| Block D1.3B GoodsIssue & Automatic Sale Write-off | **Merged** (PR #32 → `b2174ee`) + backup verified |
-| ADR-0026 Actual COGS & Food Cost Reporting Semantics | **This PR** — architecture-only; no runtime/code/schema |
-| D1.4A Actual COGS Read Model | **STOP** until explicit PO launch after ADR-0026 Accept + merge + backup |
+| Block D1.3B GoodsIssue & Automatic Sale Write-off | **Merged** (PR #32) |
+| ADR-0026 Actual COGS & Food Cost Reporting Semantics | **Accepted / Merged** (PR #33 → `3972302`) |
+| ADR-0027 Reversal Business Chronology Semantics | **This PR** — architecture-only; no runtime/code/schema |
+| D1.3B-R1 Reversal Chronology Remediation | **STOP** until explicit PO launch after ADR-0027 Accept + merge + backup |
+| D1.4A Actual COGS Read Model | **STOP** until D1.3B-R1 merged + backed up (after ADR-0027) |
 | Food Cost Ratio / Gross Profit / Revenue Basis | **Deferred** (ADR-0026) |
 | Origin CI | **Attached** — Depot |
-| GitHub Actions | Dormant copies only |
 | GitHub backup | Post-merge Origin→GitHub via **MillQ Origin Backup** App |
 
 ## Accepted decisions
 
 | ADR | Status | Topic |
 | --- | --- | --- |
-| ADR-0001 … ADR-0025 | Accepted | Prior decisions (see history) |
-| ADR-0026 | **Accepted** (this PR records PO LAUNCH binding) | Actual COGS & Food Cost Reporting Semantics |
+| ADR-0001 … ADR-0025 | Accepted | Prior decisions |
+| ADR-0026 | **Accepted** | Actual COGS & Food Cost Reporting Semantics |
+| ADR-0027 | **Accepted** (this PR records PO LAUNCH binding) | Reversal Business Chronology Semantics |
 
 ## Proposed
 
 _None._
 
-### Sale write-off invariant (ADR-0025 / D1.3B)
+### Reversal chronology invariant (ADR-0027)
 
-Charter “Sale” = OrderCompleted. Write-off via Inventory-owned GoodsIssue on CompleteOrder. Exactly one physical path (VIRTUAL explode XOR STOCK_TRACKED consume). ConsumptionPlanSnapshot frozen at completion.
+`ReverseCompletedOrder` is its own business event with authoritative `businessDate` / `businessOrder` / optional `businessTime`. Technical `reversed_at` / `created_at` / `recorded_at` never substitute.
 
-D1.3B atomic orchestration (same PostgreSQL TX):
+Compensating `GoodsIssueReversal` InventoryMovement uses **reversal** chronology (not sale chronology), while preserving original historical cost/qty/currency/certainty. Same-position linked sale→reversal uses ADR-0003 effect-class ordering. Reporting (ADR-0026) period A/B follows that reversal chronology.
 
-```text
-freeze/persist ConsumptionPlanSnapshot
-→ Inventory.postGoodsIssueFromConsumptionPlan (frozen leaves only)
-→ POST GoodsIssue + InventoryMovement OUT + cost/certainty
-→ Order COMPLETED
-→ operational fact mirrors
-```
+**Do not fabricate** chronology for legacy reversal rows; D1.3B-R1 must re-audit before migrate.
 
-ReverseCompletedOrder uses dedicated reversal entities (not fake Orders/GoodsIssues).
-
-### Actual COGS invariant (ADR-0026)
-
-Actual COGS is a Reporting/Finance **derived read-side** model from D1.3B historical GoodsIssue / movement / certainty. Never mutable `product.cost`. Never re-resolve current recipes for historical Actual COGS. `UNKNOWN` never silently zero. Native currency only in first model. Food Cost Ratio deferred until authoritative Revenue Basis exists.
-
-## Delivered on main (D1.3B)
-
-- Migration `008_goods_issue_sale_writeoff.sql`
-- `GoodsIssueService` implements `SaleInventoryWriteOffPort`
-- Successful CompleteOrder + ReverseCompletedOrder
-- Shared valuation stream, locking, issue-cost certainty
-- Facts: `OrderCompleted`, `InventoryConsumed`, `OrderCompletionReversed`
-
-## This PR (ADR-0026)
+## This PR (ADR-0027)
 
 - Architecture decision only
-- Docs hygiene: D1.3B marked merged; Food Cost architecture launched as ADR-0026
-- **No** application code, migrations, or D1.4A implementation
+- Legacy fixture audit: zero reversal rows in local `millq_dev`
+- **No** application code, migrations, D1.3B-R1, D1.4A, Food Cost Ratio
 
-## Out of scope
+## Out of scope / STOP
 
-- D1.4A Actual COGS Read Model (implementation)
-- Food Cost Ratio / Gross Profit / Revenue Basis / Net Sales / tax
-- Settlement / Payments / FX / Theoretical Recipe Cost / Intelligence / dashboard UI
+- D1.3B-R1 implementation
+- D1.4A Actual COGS Read Model
+- Food Cost Ratio / Revenue Basis / Gross Profit
+- D1.4A feature branch must remain untouched by this Accept
 
 ## Next
 
-1. Independent architecture review + CI green on this ADR PR
+1. Independent architecture review + Origin CI
 2. `origin pr merge --auto` → backup → Origin main == GitHub main
-3. **STOP** — D1.4A only after explicit PO launch
+3. **STOP** — D1.3B-R1 only after explicit PO launch
+4. D1.4A only after D1.3B-R1 merge + backup + PO launch
