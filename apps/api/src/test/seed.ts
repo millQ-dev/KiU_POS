@@ -80,6 +80,10 @@ export async function seedBlockCFixture(pool: pg.Pool): Promise<BlockCFixture> {
         ids.otherLegalEntityId,
       ],
     );
+    await client.query(
+      `UPDATE outlet SET default_sales_issue_warehouse_id = $1 WHERE outlet_id = $2`,
+      [ids.warehouseId, ids.outletId],
+    );
     await client.query(`INSERT INTO supplier (supplier_id, tenant_id, name) VALUES ($1,$2,'Supplier A')`, [
       ids.supplierId,
       ids.tenantId,

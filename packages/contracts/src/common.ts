@@ -35,6 +35,7 @@ export const OperationalFactType = {
   OrderItemAdded: 'OrderItemAdded',
   OrderPaid: 'OrderPaid',
   OrderCancelled: 'OrderCancelled',
+  OrderCompleted: 'OrderCompleted',
   PaymentRecorded: 'PaymentRecorded',
   DangerousOperationRecorded: 'DangerousOperationRecorded',
 } as const;
@@ -55,6 +56,7 @@ export const operationalFactTypeSchema = z.enum([
   OperationalFactType.OrderItemAdded,
   OperationalFactType.OrderPaid,
   OperationalFactType.OrderCancelled,
+  OperationalFactType.OrderCompleted,
   OperationalFactType.PaymentRecorded,
   OperationalFactType.DangerousOperationRecorded,
 ]);

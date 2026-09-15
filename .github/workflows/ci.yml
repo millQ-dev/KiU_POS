@@ -51,15 +51,22 @@ jobs:
           pnpm --filter @millq/api run migrate
       - name: API health with live PostgreSQL
         run: |
+          set -o pipefail
           pnpm --filter @millq/api run start &
           API_PID=$!
+          HEALTH_OK=0
           for i in $(seq 1 30); do
-            if curl -sf http://127.0.0.1:3000/health | tee /tmp/health.json; then
+            if curl -sf http://127.0.0.1:3000/health -o /tmp/health.json; then
+              HEALTH_OK=1
               break
             fi
             sleep 1
           done
           kill $API_PID || true
+          if [ "$HEALTH_OK" -ne 1 ]; then
+            echo "API health check failed after 30 attempts"
+            exit 1
+          fi
           python3 - <<'PY'
           import json, sys
           data = json.load(open('/tmp/health.json'))

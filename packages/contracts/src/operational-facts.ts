@@ -124,6 +124,15 @@ export const orderCancelledPayloadSchema = z.object({
   inventoryWriteOff: z.boolean(),
 });
 
+/** OrderCompleted — economic sale completion (ADR-0025). D1.3A mirrors this without InventoryConsumed. */
+export const orderCompletedPayloadSchema = z.object({
+  orderId: z.string().uuid(),
+  consumptionPlanId: z.string().uuid(),
+  resolvedIssueWarehouseId: z.string().uuid(),
+  provenanceHash: z.string().min(1),
+  lineCount: z.number().int().positive(),
+});
+
 export const paymentRecordedPayloadSchema = z.object({
   paymentId: z.string().uuid(),
   orderId: z.string().uuid().optional(),
@@ -155,6 +164,7 @@ export const operationalFactPayloadSchemas = {
   [OperationalFactType.OrderItemAdded]: orderItemAddedPayloadSchema,
   [OperationalFactType.OrderPaid]: orderPaidPayloadSchema,
   [OperationalFactType.OrderCancelled]: orderCancelledPayloadSchema,
+  [OperationalFactType.OrderCompleted]: orderCompletedPayloadSchema,
   [OperationalFactType.PaymentRecorded]: paymentRecordedPayloadSchema,
   [OperationalFactType.DangerousOperationRecorded]: dangerousOperationRecordedPayloadSchema,
 } as const satisfies Record<OperationalFactTypeName, z.ZodTypeAny>;

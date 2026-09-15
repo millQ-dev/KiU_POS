@@ -83,3 +83,18 @@ export {
   assertDeviationRules,
   type ProductionDeviationClass,
 } from './production-batch.js';
+export {
+  resolveSaleLineConsumption,
+  consumptionPlanProvenanceHash,
+  assertExactlyOneConsumptionPath,
+  type MaterializationMode,
+  type AppliedConsumptionStrategy,
+  type GraphCatalogItem,
+  type GraphComponent,
+  type GraphRecipeVersion,
+  type GraphPreparationVersion,
+  type PhysicalLeaf,
+  type ResolvedVersionRef,
+  type LineConsumptionPlan,
+  type RecipeGraphLookup,
+} from './sale-consumption.js';
