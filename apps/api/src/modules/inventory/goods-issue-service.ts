@@ -24,6 +24,7 @@ import {
 } from '../orders/errors.js';
 import type {
   SaleGoodsIssueRef,
+  SaleGoodsIssueReverseCommand,
   SaleInventoryWriteOffPort,
   SaleWriteOffCommand,
 } from '../orders/sale-write-off-port.js';
@@ -91,6 +92,9 @@ function goodsIssueFingerprint(command: SaleWriteOffCommand): string {
 function goodsIssueReverseFingerprint(input: {
   goodsIssueId: string;
   orderId: string;
+  businessDate: string;
+  businessOrder: number;
+  businessTime?: string | null;
   reason?: string | null;
 }): string {
   return createHash('sha256')
@@ -98,6 +102,9 @@ function goodsIssueReverseFingerprint(input: {
       JSON.stringify({
         goodsIssueId: input.goodsIssueId,
         orderId: input.orderId,
+        businessDate: input.businessDate,
+        businessOrder: input.businessOrder,
+        businessTime: input.businessTime ?? null,
         reason: input.reason ?? null,
       }),
     )
@@ -378,16 +385,7 @@ export class GoodsIssueService implements SaleInventoryWriteOffPort {
    */
   async reverseGoodsIssueFromOrder(
     client: unknown,
-    input: {
-      orderId: string;
-      goodsIssueId: string;
-      tenantId: string;
-      legalEntityId: string;
-      idempotencyKey: string;
-      reason?: string | null;
-      actorId?: string | null;
-      deviceId?: string | null;
-    },
+    input: SaleGoodsIssueReverseCommand,
   ): Promise<{ goodsIssueReversalId: string }> {
     const tx = client as Client;
     const locked = await tx.query<GoodsIssueRow>(
@@ -406,6 +404,9 @@ export class GoodsIssueService implements SaleInventoryWriteOffPort {
     const fp = goodsIssueReverseFingerprint({
       goodsIssueId: input.goodsIssueId,
       orderId: input.orderId,
+      businessDate: input.businessDate,
+      businessOrder: input.businessOrder,
+      businessTime: input.businessTime ?? null,
       reason: input.reason ?? null,
     });
 
@@ -489,8 +490,9 @@ export class GoodsIssueService implements SaleInventoryWriteOffPort {
       `INSERT INTO goods_issue_reversal (
          goods_issue_reversal_id, tenant_id, goods_issue_id, source_order_id,
          legal_entity_id, warehouse_id, idempotency_key, semantic_fingerprint,
+         business_date, business_time, business_order,
          reason, actor_id, device_id, reversed_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())`,
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::date,$10,$11,$12,$13,$14,NOW())`,
       [
         reversalId,
         input.tenantId,
@@ -500,6 +502,9 @@ export class GoodsIssueService implements SaleInventoryWriteOffPort {
         gi.warehouse_id,
         input.idempotencyKey,
         fp,
+        input.businessDate,
+        input.businessTime ?? null,
+        input.businessOrder,
         input.reason ?? null,
         input.actorId ?? null,
         input.deviceId ?? null,
@@ -536,9 +541,9 @@ export class GoodsIssueService implements SaleInventoryWriteOffPort {
           m.acquisition_cost_minor,
           m.currency_code,
           m.minor_unit_exponent,
-          asIsoDate(m.business_date),
-          m.business_time,
-          m.business_order,
+          input.businessDate,
+          input.businessTime ?? null,
+          input.businessOrder,
           reversalId,
           m.source_document_line_id,
           input.actorId ?? null,

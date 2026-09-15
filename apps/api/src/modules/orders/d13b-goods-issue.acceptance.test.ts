@@ -902,6 +902,8 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
     const reversed = await orders.reverseCompletedOrder({
       orderId: order.orderId,
       idempotencyKey: 'd13b-rev-1',
+      businessDate: '2026-09-14',
+      businessOrder: 2,
       reason: 'guest void',
       actorId: fx.actorId,
     });
@@ -952,6 +954,8 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
     const first = await orders.reverseCompletedOrder({
       orderId: order.orderId,
       idempotencyKey: 'd13b-rev15-r',
+      businessDate: '2026-09-14',
+      businessOrder: 10,
       reason: 'void',
     });
     expect(first.status).toBe('reversed');
@@ -959,6 +963,8 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
     const dup = await orders.reverseCompletedOrder({
       orderId: order.orderId,
       idempotencyKey: 'd13b-rev15-r',
+      businessDate: '2026-09-14',
+      businessOrder: 10,
       reason: 'void',
     });
     expect(dup.status).toBe('duplicate');
@@ -967,6 +973,8 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
       orders.reverseCompletedOrder({
         orderId: order.orderId,
         idempotencyKey: 'd13b-rev15-other',
+        businessDate: '2026-09-14',
+        businessOrder: 11,
         reason: 'void again',
       }),
     ).rejects.toMatchObject({ code: 'ALREADY_REVERSED' });
@@ -983,11 +991,15 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
       orders.reverseCompletedOrder({
         orderId: order2.orderId,
         idempotencyKey: 'd13b-rev15-conc-a',
+        businessDate: '2026-09-14',
+        businessOrder: 20,
         reason: 'a',
       }),
       orders.reverseCompletedOrder({
         orderId: order2.orderId,
         idempotencyKey: 'd13b-rev15-conc-b',
+        businessDate: '2026-09-14',
+        businessOrder: 21,
         reason: 'b',
       }),
     ]);
