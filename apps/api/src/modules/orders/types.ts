@@ -79,6 +79,10 @@ export const reverseCompletedOrderSchema = z
   .object({
     orderId: uuid,
     idempotencyKey: z.string().min(1),
+    /** Authoritative reversal business chronology (ADR-0027). Required. */
+    businessDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    businessOrder: z.number().int().nonnegative(),
+    businessTime: z.string().optional(),
     reason: z.string().min(1).optional(),
     actorId: uuid.optional(),
     deviceId: uuid.optional(),

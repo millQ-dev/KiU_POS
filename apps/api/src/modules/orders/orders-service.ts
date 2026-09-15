@@ -100,6 +100,9 @@ function completeFingerprint(input: {
 function reverseCompletionFingerprint(input: {
   orderId: string;
   goodsIssueId: string;
+  businessDate: string;
+  businessOrder: number;
+  businessTime?: string | null;
   reason?: string | null;
 }): string {
   return createHash('sha256')
@@ -107,6 +110,9 @@ function reverseCompletionFingerprint(input: {
       JSON.stringify({
         orderId: input.orderId,
         goodsIssueId: input.goodsIssueId,
+        businessDate: input.businessDate,
+        businessOrder: input.businessOrder,
+        businessTime: input.businessTime ?? null,
         reason: input.reason ?? null,
       }),
     )
@@ -814,6 +820,9 @@ export class OrdersService {
     const fp = reverseCompletionFingerprint({
       orderId: cmd.orderId,
       goodsIssueId,
+      businessDate: cmd.businessDate,
+      businessOrder: cmd.businessOrder,
+      businessTime: cmd.businessTime ?? null,
       reason: cmd.reason ?? null,
     });
 
@@ -912,6 +921,9 @@ export class OrdersService {
         tenantId: order.tenant_id,
         legalEntityId: order.legal_entity_id,
         idempotencyKey: cmd.idempotencyKey,
+        businessDate: cmd.businessDate,
+        businessOrder: cmd.businessOrder,
+        businessTime: cmd.businessTime ?? null,
         reason: cmd.reason ?? null,
         actorId: cmd.actorId ?? null,
         deviceId: cmd.deviceId ?? null,
@@ -922,8 +934,9 @@ export class OrdersService {
         `INSERT INTO sales_order_completion_reversal (
            sales_order_completion_reversal_id, tenant_id, order_id, goods_issue_id,
            goods_issue_reversal_id, legal_entity_id, idempotency_key, semantic_fingerprint,
+           business_date, business_time, business_order,
            reason, actor_id, device_id, reversed_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())`,
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::date,$10,$11,$12,$13,$14,NOW())`,
         [
           reversalId,
           order.tenant_id,
@@ -933,6 +946,9 @@ export class OrdersService {
           order.legal_entity_id,
           cmd.idempotencyKey,
           fp,
+          cmd.businessDate,
+          cmd.businessTime ?? null,
+          cmd.businessOrder,
           cmd.reason ?? null,
           cmd.actorId ?? null,
           cmd.deviceId ?? null,
@@ -967,12 +983,9 @@ export class OrdersService {
         },
         context: reverseContext,
         position: {
-          businessDate:
-            order.business_date instanceof Date
-              ? order.business_date.toISOString().slice(0, 10)
-              : (order.business_date as string),
-          ...(order.business_time ? { businessTime: order.business_time } : {}),
-          businessOrder: order.business_order ?? 0,
+          businessDate: cmd.businessDate,
+          ...(cmd.businessTime ? { businessTime: cmd.businessTime } : {}),
+          businessOrder: cmd.businessOrder,
         },
       });
 

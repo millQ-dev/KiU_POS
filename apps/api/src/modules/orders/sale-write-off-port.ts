@@ -35,6 +35,10 @@ export type SaleGoodsIssueReverseCommand = {
   readonly tenantId: string;
   readonly legalEntityId: string;
   readonly idempotencyKey: string;
+  /** Authoritative reversal business chronology (ADR-0027) — same position as Orders. */
+  readonly businessDate: string;
+  readonly businessOrder: number;
+  readonly businessTime?: string | null;
   readonly reason?: string | null;
   readonly actorId?: string | null;
   readonly deviceId?: string | null;
