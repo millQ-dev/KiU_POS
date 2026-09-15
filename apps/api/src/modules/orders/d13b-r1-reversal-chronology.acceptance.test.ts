@@ -3,7 +3,8 @@ import pg from 'pg';
 import { OperationalFactType } from '@millq/contracts';
 import { orderMovementsForEconomicReplay } from '@millq/domain';
 import { runMigrations } from '../../db/migrate.js';
-import { seedBlockCFixture, type BlockCFixture } from '../../test/seed.js';
+import { seedBlockCFixture, type BlockCFixture } from '../../test/seed.js'
+import { acceptFinalMerchandiseTerms } from '../../test/commercial-terms.js';
 import { GoodsIssueService } from '../inventory/goods-issue-service.js';
 import { GoodsReceiptService } from '../procurement/goods-receipt-service.js';
 import { IdempotencyConflictError } from './errors.js';
@@ -22,6 +23,10 @@ async function truncateBusiness() {
     TRUNCATE
       operational_fact_feed,
       audit_record,
+      order_line_commercial_snapshot,
+      order_commercial_snapshot,
+      sales_order_commercial_line_terms,
+      sales_order_commercial_terms,
       sales_order_completion_reversal,
       goods_issue_reversal,
       goods_issue_line,
@@ -128,6 +133,10 @@ async function completeMilkSale(
   idempotencyKey: string,
 ) {
   const order = await openMilkOrder(quantity);
+  await acceptFinalMerchandiseTerms(orders, order.orderId, {
+    defaultGrossMinor: '0',
+    idempotencyKey: `commercial:${idempotencyKey}`,
+  });
   const result = await orders.completeOrder({
     orderId: order.orderId,
     idempotencyKey,

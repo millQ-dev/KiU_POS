@@ -2,7 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { runMigrations } from '../../db/migrate.js';
-import { seedBlockCFixture, type BlockCFixture } from '../../test/seed.js';
+import { seedBlockCFixture, type BlockCFixture } from '../../test/seed.js'
+import { acceptFinalMerchandiseTerms } from '../../test/commercial-terms.js';
 import { GoodsIssueService } from '../inventory/goods-issue-service.js';
 import { DomainValidationError } from '../orders/errors.js';
 import { OrdersService } from '../orders/orders-service.js';
@@ -25,6 +26,10 @@ async function truncateBusiness() {
     TRUNCATE
       operational_fact_feed,
       audit_record,
+      order_line_commercial_snapshot,
+      order_commercial_snapshot,
+      sales_order_commercial_line_terms,
+      sales_order_commercial_terms,
       sales_order_completion_reversal,
       goods_issue_reversal,
       goods_issue_line,
@@ -231,7 +236,7 @@ async function completeMilkSale(
   idempotencyKey: string,
 ) {
   const order = await openMilkOrder(quantity);
-  const result = await orders.completeOrder({
+  const result = await completeOrderWithCommercial({
     orderId: order.orderId,
     idempotencyKey,
     businessDate,
@@ -272,6 +277,24 @@ async function bindMilkDishRecipe(qtyPerEa = '0.2') {
     recipeSpecificationId: recipe.recipeSpecificationId,
   });
   return { dishId, recipe };
+}
+
+
+async function completeOrderWithCommercial(raw: {
+  orderId: string;
+  idempotencyKey: string;
+  businessDate: string;
+  businessOrder: number;
+  actorId?: string;
+}) {
+  const current = await orders.getOrder(raw.orderId);
+  if (current.status === 'OPEN') {
+    await acceptFinalMerchandiseTerms(orders, raw.orderId, {
+      defaultGrossMinor: '0',
+      idempotencyKey: `commercial:${raw.idempotencyKey}`,
+    });
+  }
+  return orders.completeOrder(raw);
 }
 
 describe('Block D1.4A Actual COGS read model (PostgreSQL)', () => {
@@ -345,7 +368,7 @@ describe('Block D1.4A Actual COGS read model (PostgreSQL)', () => {
       unit: 'ea',
       dimension: 'COUNT',
     });
-    await orders.completeOrder({
+    await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'cogs-2-virtual',
       businessDate: '2026-03-10',
@@ -416,7 +439,7 @@ describe('Block D1.4A Actual COGS read model (PostgreSQL)', () => {
       unit: 'L',
       dimension: 'VOLUME',
     });
-    await orders.completeOrder({
+    await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'cogs-4-stock-tracked',
       businessDate: '2026-03-10',
@@ -459,7 +482,7 @@ describe('Block D1.4A Actual COGS read model (PostgreSQL)', () => {
       unit: 'L',
       dimension: 'VOLUME',
     });
-    await orders.completeOrder({
+    await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'cogs-5-multi',
       businessDate: '2026-03-10',
@@ -509,7 +532,7 @@ describe('Block D1.4A Actual COGS read model (PostgreSQL)', () => {
       unit: 'L',
       dimension: 'VOLUME',
     });
-    const result = await orders.completeOrder({
+    const result = await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'cogs-7-shared',
       businessDate: '2026-03-10',
@@ -626,7 +649,7 @@ describe('Block D1.4A Actual COGS read model (PostgreSQL)', () => {
 
   it('21 — UNKNOWN: no prior stock → actualCogsMinor null, never fabricate exact zero', async () => {
     const order = await openMilkOrder('1');
-    await orders.completeOrder({
+    await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'cogs-21-unknown',
       businessDate: '2026-03-10',
@@ -838,7 +861,7 @@ describe('Block D1.4A Actual COGS read model (PostgreSQL)', () => {
       unit: 'ea',
       dimension: 'COUNT',
     });
-    await orders.completeOrder({
+    await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'cogs-33-sale',
       businessDate: '2026-03-10',
@@ -937,7 +960,7 @@ describe('Block D1.4A Actual COGS read model (PostgreSQL)', () => {
       unit: 'ea',
       dimension: 'COUNT',
     });
-    await orders.completeOrder({
+    await completeOrderWithCommercial({
       orderId: order.orderId,
       idempotencyKey: 'cogs-3-nested',
       businessDate: '2026-03-10',

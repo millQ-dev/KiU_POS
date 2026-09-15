@@ -18,6 +18,12 @@ import {
   type UnitDimension,
 } from '@millq/domain';
 import {
+  buildCommercialStateFromCommand,
+  freezeCommercialSnapshot,
+  loadBuiltCommercialState,
+  persistOpenCommercialTerms,
+} from './commercial-terms.js';
+import {
   DomainValidationError,
   IdempotencyConflictError,
   NotFoundError,
@@ -31,6 +37,7 @@ import {
   openOrderSchema,
   removeOrderLineSchema,
   reverseCompletedOrderSchema,
+  setOrderCommercialTermsSchema,
   updateOrderLineSchema,
 } from './types.js';
 
@@ -81,6 +88,7 @@ function completeFingerprint(input: {
   lineIds: string[];
   provenanceHash: string;
   warehouseId: string;
+  commercialSemanticHash: string;
 }): string {
   return createHash('sha256')
     .update(
@@ -92,6 +100,7 @@ function completeFingerprint(input: {
         lineIds: [...input.lineIds].sort(),
         provenanceHash: input.provenanceHash,
         warehouseId: input.warehouseId,
+        commercialSemanticHash: input.commercialSemanticHash,
       }),
     )
     .digest('hex');
@@ -213,6 +222,8 @@ export class OrdersService {
           cmd.dimension,
         ],
       );
+      // Line mutation invalidates accepted commercial terms (must re-accept before CompleteOrder).
+      await this.clearOpenCommercialTerms(client, cmd.orderId);
       await this.mirrorFactTx(client, {
         factType: OperationalFactType.OrderItemAdded,
         idempotencyKey: `order-line-added:${orderLineId}`,
@@ -259,6 +270,7 @@ export class OrdersService {
          WHERE order_line_id = $5`,
         [catalogItemId, quantity, unit, dimension, cmd.orderLineId],
       );
+      await this.clearOpenCommercialTerms(client, cmd.orderId);
       await client.query('COMMIT');
       return this.getOrder(cmd.orderId);
     } catch (e) {
@@ -278,6 +290,7 @@ export class OrdersService {
       this.assertOpenMutable(order);
       await this.lockLine(client, cmd.orderId, cmd.orderLineId);
       await client.query(`DELETE FROM sales_order_line WHERE order_line_id = $1`, [cmd.orderLineId]);
+      await this.clearOpenCommercialTerms(client, cmd.orderId);
       await client.query('COMMIT');
       return this.getOrder(cmd.orderId);
     } catch (e) {
@@ -326,6 +339,88 @@ export class OrdersService {
       await client.query('COMMIT');
 
       return this.getOrder(cmd.orderId);
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * D1.4B — Accept explicit commercial terms while Order is OPEN (ADR-0028).
+   * Not a pricing engine: receives already-resolved commercial economics.
+   */
+  async setOrderCommercialTerms(raw: unknown) {
+    const cmd = setOrderCommercialTermsSchema.parse(raw);
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const order = await this.lockOrder(client, cmd.orderId);
+      if (order.status === 'COMPLETED' || order.status === 'CANCELLED') {
+        throw new OrderImmutableError(
+          `${order.status} order commercial terms are immutable; explicit reprice is OPEN-only`,
+        );
+      }
+      if (order.status !== 'OPEN') {
+        throw new OrderImmutableError('Only OPEN orders accept commercial terms');
+      }
+
+      const lines = await this.loadLines(client, cmd.orderId);
+      const state = buildCommercialStateFromCommand(cmd, lines);
+
+      const prior = await client.query<{
+        idempotency_key: string;
+        semantic_fingerprint: string;
+      }>(`SELECT idempotency_key, semantic_fingerprint FROM sales_order_commercial_terms WHERE order_id = $1`, [
+        cmd.orderId,
+      ]);
+      const p = prior.rows[0];
+      if (p) {
+        if (p.idempotency_key === cmd.idempotencyKey && p.semantic_fingerprint === state.semanticFingerprint) {
+          await client.query('COMMIT');
+          return {
+            status: 'duplicate' as const,
+            orderId: cmd.orderId,
+            certainty: state.certainty,
+            netMerchandiseSalesMinor: state.netMerchandiseSalesMinor,
+            semanticFingerprint: state.semanticFingerprint,
+          };
+        }
+        if (p.idempotency_key === cmd.idempotencyKey) {
+          throw new IdempotencyConflictError(
+            cmd.idempotencyKey,
+            'SetOrderCommercialTerms idempotency key already used with different commercial semantics',
+          );
+        }
+        // Different key while OPEN → explicit replacement (reprice)
+      }
+
+      await persistOpenCommercialTerms(client, {
+        orderId: cmd.orderId,
+        tenantId: order.tenant_id,
+        idempotencyKey: cmd.idempotencyKey,
+        actorId: cmd.actorId ?? null,
+        deviceId: cmd.deviceId ?? null,
+        state,
+      });
+      await client.query('COMMIT');
+      return {
+        status: 'accepted' as const,
+        orderId: cmd.orderId,
+        certainty: state.certainty,
+        netMerchandiseSalesMinor: state.netMerchandiseSalesMinor,
+        semanticFingerprint: state.semanticFingerprint,
+        grossMerchandiseMinor: state.grossMerchandiseMinor,
+        merchantFundedDiscountMinor: state.merchantFundedDiscountMinor,
+        thirdPartyMerchandiseFundingMinor: state.thirdPartyMerchandiseFundingMinor,
+        lines: state.lines.map((l) => ({
+          orderLineId: l.orderLineId,
+          lineNumber: l.lineNumber,
+          allocatedOrderMerchantDiscountMinor: l.allocatedOrderMerchantDiscountMinor,
+          netMerchandiseSalesMinor: l.netMerchandiseSalesMinor,
+        })),
+      };
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
@@ -471,6 +566,14 @@ export class OrdersService {
         );
         const p = plan.rows[0];
         if (!p) throw new NotFoundError('ConsumptionPlanSnapshot missing for completed order');
+        const snap = await this.pool.query<{ semantic_hash: string }>(
+          `SELECT semantic_hash FROM order_commercial_snapshot WHERE order_id = $1`,
+          [cmd.orderId],
+        );
+        const commercialSemanticHash = snap.rows[0]?.semantic_hash;
+        if (!commercialSemanticHash) {
+          throw new NotFoundError('OrderCommercialSnapshot missing for completed order');
+        }
         const fp = completeFingerprint({
           orderId: cmd.orderId,
           businessDate: cmd.businessDate,
@@ -479,6 +582,7 @@ export class OrdersService {
           lineIds: lines.map((l) => l.order_line_id),
           provenanceHash: p.provenance_hash,
           warehouseId: p.resolved_issue_warehouse_id,
+          commercialSemanticHash,
         });
         if (peek.complete_semantic_fingerprint === fp) {
           return { status: 'duplicate' as const, order: await this.getOrder(cmd.orderId) };
@@ -527,6 +631,14 @@ export class OrdersService {
           if (!p) {
             throw new NotFoundError('ConsumptionPlanSnapshot missing for completed order');
           }
+          const snap = await client.query<{ semantic_hash: string }>(
+            `SELECT semantic_hash FROM order_commercial_snapshot WHERE order_id = $1`,
+            [cmd.orderId],
+          );
+          const commercialSemanticHash = snap.rows[0]?.semantic_hash;
+          if (!commercialSemanticHash) {
+            throw new NotFoundError('OrderCommercialSnapshot missing for completed order');
+          }
           const lockedFp = completeFingerprint({
             orderId: cmd.orderId,
             businessDate: cmd.businessDate,
@@ -535,6 +647,7 @@ export class OrdersService {
             lineIds: linesLocked.map((l) => l.order_line_id),
             provenanceHash: p.provenance_hash,
             warehouseId: p.resolved_issue_warehouse_id,
+            commercialSemanticHash,
           });
           if (order.complete_semantic_fingerprint === lockedFp) {
             await client.query('COMMIT');
@@ -553,6 +666,14 @@ export class OrdersService {
       const lines = await this.loadLines(client, cmd.orderId);
       if (lines.length === 0) {
         throw new DomainValidationError('EMPTY_ORDER', 'Cannot complete an order with no lines');
+      }
+
+      const commercialState = await loadBuiltCommercialState(client, cmd.orderId);
+      if (!commercialState) {
+        throw new DomainValidationError(
+          'COMMERCIAL_TERMS_REQUIRED',
+          'CompleteOrder requires explicit SetOrderCommercialTerms (FINAL or UNKNOWN) before completion',
+        );
       }
 
       const warehouseId = await this.resolveAuthoritativeIssueWarehouse(
@@ -596,6 +717,19 @@ export class OrdersService {
         resolvedIssueWarehouseId: warehouseId,
         lines: resolvedLines,
       });
+
+      // Freeze commercial snapshot before inventory write-off (same TX).
+      const frozen = await freezeCommercialSnapshot(client, {
+        orderId: cmd.orderId,
+        tenantId: order.tenant_id,
+        legalEntityId: order.legal_entity_id,
+        outletId: order.outlet_id,
+        businessDate: cmd.businessDate,
+        businessOrder: cmd.businessOrder,
+        businessTime: cmd.businessTime ?? null,
+        state: commercialState,
+      });
+
       const fp = completeFingerprint({
         orderId: cmd.orderId,
         businessDate: cmd.businessDate,
@@ -604,6 +738,7 @@ export class OrdersService {
         lineIds: lines.map((l) => l.order_line_id),
         provenanceHash,
         warehouseId,
+        commercialSemanticHash: frozen.semanticHash,
       });
 
       const planJson = {
@@ -732,7 +867,8 @@ export class OrdersService {
            complete_idempotency_key = $7,
            complete_semantic_fingerprint = $8,
            resolved_issue_warehouse_id = $9,
-           consumption_plan_id = $10
+           consumption_plan_id = $10,
+           order_commercial_snapshot_id = $11
          WHERE order_id = $1`,
         [
           cmd.orderId,
@@ -745,6 +881,7 @@ export class OrdersService {
           fp,
           warehouseId,
           consumptionPlanId,
+          frozen.snapshotId,
         ],
       );
 
@@ -754,6 +891,8 @@ export class OrdersService {
         payload: {
           orderId: cmd.orderId,
           consumptionPlanId,
+          orderCommercialSnapshotId: frozen.snapshotId,
+          commercialSemanticHash: frozen.semanticHash,
           resolvedIssueWarehouseId: warehouseId,
           provenanceHash,
           lineCount: lines.length,
@@ -1035,6 +1174,68 @@ export class OrdersService {
         dimension: l.dimension,
       })),
     };
+  }
+
+  async getCommercialSnapshot(orderId: string) {
+    const snap = await this.pool.query(
+      `SELECT * FROM order_commercial_snapshot WHERE order_id = $1`,
+      [orderId],
+    );
+    const row = snap.rows[0];
+    if (!row) return null;
+    const lines = await this.pool.query(
+      `SELECT * FROM order_line_commercial_snapshot
+       WHERE order_commercial_snapshot_id = $1
+       ORDER BY line_number ASC`,
+      [row.order_commercial_snapshot_id],
+    );
+    return {
+      orderCommercialSnapshotId: row.order_commercial_snapshot_id,
+      orderId: row.order_id,
+      tenantId: row.tenant_id,
+      legalEntityId: row.legal_entity_id,
+      outletId: row.outlet_id,
+      currencyCode: row.currency_code,
+      minorUnitExponent: row.minor_unit_exponent,
+      businessDate:
+        typeof row.business_date === 'string'
+          ? row.business_date.slice(0, 10)
+          : row.business_date.toISOString().slice(0, 10),
+      businessOrder: row.business_order,
+      businessTime: row.business_time,
+      certainty: row.certainty,
+      grossMerchandiseMinor: row.gross_merchandise_minor,
+      merchantFundedDiscountMinor: row.merchant_funded_discount_minor,
+      thirdPartyMerchandiseFundingMinor: row.third_party_merchandise_funding_minor,
+      netMerchandiseSalesMinor: row.net_merchandise_sales_minor,
+      taxMinor: row.tax_minor,
+      nonMerchandiseChargesMinor: row.non_merchandise_charges_minor,
+      tipMinor: row.tip_minor,
+      customerPayableMinor: row.customer_payable_minor,
+      commercialResolution: row.commercial_resolution,
+      semanticHash: row.semantic_hash,
+      lines: lines.rows.map((l) => ({
+        orderLineCommercialSnapshotId: l.order_line_commercial_snapshot_id,
+        orderLineId: l.order_line_id,
+        lineNumber: l.line_number,
+        soldCatalogItemId: l.sold_catalog_item_id,
+        quantity: l.quantity,
+        resolvedUnitPriceMinor: l.resolved_unit_price_minor,
+        grossMerchandiseMinor: l.gross_merchandise_minor,
+        lineMerchantFundedDiscountMinor: l.line_merchant_funded_discount_minor,
+        allocatedOrderMerchantDiscountMinor: l.allocated_order_merchant_discount_minor,
+        thirdPartyMerchandiseFundingMinor: l.third_party_merchandise_funding_minor,
+        netMerchandiseSalesMinor: l.net_merchandise_sales_minor,
+        taxMinor: l.tax_minor,
+        certainty: l.certainty,
+        fundingProvenance: l.funding_provenance,
+      })),
+    };
+  }
+
+  private async clearOpenCommercialTerms(client: Client, orderId: string): Promise<void> {
+    await client.query(`DELETE FROM sales_order_commercial_line_terms WHERE order_id = $1`, [orderId]);
+    await client.query(`DELETE FROM sales_order_commercial_terms WHERE order_id = $1`, [orderId]);
   }
 
   private assertOpenMutable(order: OrderRow): void {

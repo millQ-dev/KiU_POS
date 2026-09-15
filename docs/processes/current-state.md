@@ -1,27 +1,27 @@
 # MillQ Current State
 
-**Checkpoint:** ADR-0028 Order Commercial Snapshot & Revenue Basis Semantics **architecture-only** — branch from Origin `main` @ `465dcb9` (2026-09-15)
+**Checkpoint:** Block D1.4B Order Commercial Snapshot **in review** — branch from Origin `main` @ `614daed` (2026-09-15)
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)
 **Backup host:** GitHub `https://github.com/millQ-dev/MillQ.git` (mirror only)
-**D1.4A PR #36:** merged @ `465dcb906304f2e0d9414a2dc80fc888e634f193`
+**ADR-0028 PR #37:** merged @ `614daed6a1e6473b1a1c0e4a3cf8cf9f544d3b74`
 **Updated:** 2026-09-15
 
 ## Runtime / CI / backup
 
 | Item | State |
 | --- | --- |
-| D1.3B + D1.3B-R1 | **Merged** |
-| D1.4A Actual COGS Read Model | **Merged** |
-| ADR-0026 / ADR-0027 | **Accepted** |
-| ADR-0028 Order Commercial Snapshot & Revenue Basis | **This PR** — docs only |
-| Order Commercial Snapshot / Revenue read model / Food Cost Ratio / Operational Gross Profit | **STOP** — not started (await explicit PO launch after Accept) |
+| D1.4A Actual COGS | **Merged** (unchanged by this block) |
+| ADR-0028 | **Accepted** |
+| Block D1.4B Order Commercial Snapshot | **This PR** |
+| Revenue Basis read model / Food Cost Ratio / Operational Gross Profit | **STOP** — not started |
 
-## This PR (ADR-0028)
+## This PR (D1.4B)
 
-- `docs/decisions/ADR-0028-order-commercial-revenue-basis.md`
-- Architecture-only Level C
-- **No** runtime / migrations / schema / Revenue implementation
+- Migration `011_order_commercial_snapshot.sql`
+- `SetOrderCommercialTerms` + immutable freeze at `CompleteOrder`
+- Largest-remainder order-discount allocation (domain)
+- **No** Revenue reporting / Food Cost / Gross Profit
 
 ## Next
 
-Independent architecture review → merge → backup → **STOP** (no automatic implementation launch)
+Independent review → merge → backup → **STOP**
