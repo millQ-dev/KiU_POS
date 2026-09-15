@@ -179,10 +179,19 @@ export class GoodsIssueService implements SaleInventoryWriteOffPort {
     );
 
     const touched = new Set<string>();
-    let lineNumber = 0;
 
+    // Aggregate same catalog item into one OUT at the sale business position so rebuild
+    // does not treat sibling leaves as ORDER_UNRESOLVED chronology conflicts (ADR-0003).
+    // Evidence lines remain one-per-leaf and share the aggregated movement id.
+    type AggLeaf = {
+      catalogItemId: string;
+      quantityBase: string;
+      unitBase: string;
+      dimension: UnitDimension;
+      leaves: SaleWriteOffCommand['physicalLeaves'];
+    };
+    const aggregated = new Map<string, AggLeaf>();
     for (const leaf of command.physicalLeaves) {
-      lineNumber += 1;
       const catalog = await this.loadCatalogItem(tx, command.tenantId, leaf.catalogItemId);
       if (catalog.dimension !== leaf.dimension) {
         throw new DomainValidationError(
@@ -196,12 +205,36 @@ export class GoodsIssueService implements SaleInventoryWriteOffPort {
         leaf.dimension as UnitDimension,
         catalog.base_unit,
       );
+      const existing = aggregated.get(leaf.catalogItemId);
+      if (existing) {
+        existing.quantityBase = toCanonicalDecimal(
+          parseCanonicalDecimal(existing.quantityBase).plus(parseCanonicalDecimal(qtyInCatalogBase)),
+        );
+        existing.leaves = [...existing.leaves, leaf];
+      } else {
+        aggregated.set(leaf.catalogItemId, {
+          catalogItemId: leaf.catalogItemId,
+          quantityBase: qtyInCatalogBase,
+          unitBase: catalog.base_unit,
+          dimension: catalog.dimension,
+          leaves: [leaf],
+        });
+      }
+    }
 
+    // Deterministic processing order (deadlock-safe with sorted stream locks later).
+    const groups = [...aggregated.values()].sort((a, b) =>
+      a.catalogItemId.localeCompare(b.catalogItemId),
+    );
+
+    let lineNumber = 0;
+    for (const group of groups) {
+      const catalog = await this.loadCatalogItem(tx, command.tenantId, group.catalogItemId);
       const quote = await this.quoteIssueCost(
         tx,
         command.legalEntityId,
         command.warehouseId,
-        leaf.catalogItemId,
+        group.catalogItemId,
         valuation.currencyCode,
         valuation.minorUnitExponent,
         command.businessDate,
@@ -209,31 +242,10 @@ export class GoodsIssueService implements SaleInventoryWriteOffPort {
       );
       const lineCost = costForQuantity(
         createCostValue(quote.amountMinorUnits, quote.currencyCode, quote.minorUnitExponent),
-        qtyInCatalogBase,
+        group.quantityBase,
       );
 
-      const lineId = randomUUID();
-      await tx.query(
-        `INSERT INTO goods_issue_line (
-           goods_issue_line_id, goods_issue_id, line_number, order_line_id,
-           catalog_item_id, quantity_base, unit_base, dimension,
-           issue_cost_minor, cost_certainty, cost_basis
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-        [
-          lineId,
-          goodsIssueId,
-          lineNumber,
-          leaf.orderLineId,
-          leaf.catalogItemId,
-          qtyInCatalogBase,
-          catalog.base_unit,
-          catalog.dimension,
-          lineCost.amountMinorUnits,
-          quote.certainty,
-          quote.basis,
-        ],
-      );
-
+      const movementId = randomUUID();
       await tx.query(
         `INSERT INTO inventory_movement (
            movement_id, tenant_id, legal_entity_id, warehouse_id, catalog_item_id,
@@ -243,12 +255,12 @@ export class GoodsIssueService implements SaleInventoryWriteOffPort {
            cost_certainty, cost_basis
          ) VALUES ($1,$2,$3,$4,$5,'OUT',$6,$7,$8,$9,$10,$11,$12::date,$13,$14,'GoodsIssue',$15,$16,$17,$18,$19)`,
         [
-          randomUUID(),
+          movementId,
           command.tenantId,
           command.legalEntityId,
           command.warehouseId,
-          leaf.catalogItemId,
-          qtyInCatalogBase,
+          group.catalogItemId,
+          group.quantityBase,
           catalog.base_unit,
           catalog.dimension,
           lineCost.amountMinorUnits,
@@ -258,31 +270,84 @@ export class GoodsIssueService implements SaleInventoryWriteOffPort {
           command.businessTime ?? null,
           command.businessOrder,
           goodsIssueId,
-          lineId,
+          null,
           command.actorId ?? null,
           quote.certainty,
           quote.basis,
         ],
       );
-      touched.add(leaf.catalogItemId);
+      touched.add(group.catalogItemId);
 
-      await this.mirrorInventoryConsumed(tx, {
-        tenantId: command.tenantId,
-        legalEntityId: command.legalEntityId,
-        warehouseId: command.warehouseId,
-        catalogItemId: leaf.catalogItemId,
-        quantity: qtyInCatalogBase,
-        unit: catalog.base_unit,
-        dimension: catalog.dimension,
-        orderId: command.orderId,
-        goodsIssueLineId: lineId,
-        idempotencyKey: command.idempotencyKey,
-        businessDate: command.businessDate,
-        businessTime: command.businessTime ?? null,
-        businessOrder: command.businessOrder,
-        actorId: command.actorId ?? null,
-        currencyCode: valuation.currencyCode,
-      });
+      // Allocate line cost proportionally across evidence leaves for historical COGS-ready rows.
+      const groupQty = parseCanonicalDecimal(group.quantityBase);
+      if (groupQty.lte(0)) {
+        throw new DomainValidationError(
+          'NON_POSITIVE_ISSUE_QTY',
+          `Aggregated issue quantity for ${group.catalogItemId} must be positive`,
+        );
+      }
+      let allocated = parseCanonicalDecimal('0');
+      for (let i = 0; i < group.leaves.length; i++) {
+        const leaf = group.leaves[i]!;
+        const leafQty = this.toCatalogBaseQuantity(
+          leaf.quantityBase,
+          leaf.unitBase,
+          leaf.dimension as UnitDimension,
+          catalog.base_unit,
+        );
+        const leafQtyDec = parseCanonicalDecimal(leafQty);
+        const leafCost =
+          i === group.leaves.length - 1
+            ? toCanonicalDecimal(parseCanonicalDecimal(lineCost.amountMinorUnits).minus(allocated))
+            : toCanonicalDecimal(
+                parseCanonicalDecimal(lineCost.amountMinorUnits).times(leafQtyDec).div(groupQty),
+              );
+        if (i < group.leaves.length - 1) {
+          allocated = allocated.plus(parseCanonicalDecimal(leafCost));
+        }
+
+        lineNumber += 1;
+        const lineId = randomUUID();
+        await tx.query(
+          `INSERT INTO goods_issue_line (
+             goods_issue_line_id, goods_issue_id, line_number, order_line_id,
+             catalog_item_id, quantity_base, unit_base, dimension,
+             issue_cost_minor, cost_certainty, cost_basis, inventory_movement_id
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+          [
+            lineId,
+            goodsIssueId,
+            lineNumber,
+            leaf.orderLineId,
+            leaf.catalogItemId,
+            leafQty,
+            catalog.base_unit,
+            catalog.dimension,
+            leafCost,
+            quote.certainty,
+            quote.basis,
+            movementId,
+          ],
+        );
+
+        await this.mirrorInventoryConsumed(tx, {
+          tenantId: command.tenantId,
+          legalEntityId: command.legalEntityId,
+          warehouseId: command.warehouseId,
+          catalogItemId: leaf.catalogItemId,
+          quantity: leafQty,
+          unit: catalog.base_unit,
+          dimension: catalog.dimension,
+          orderId: command.orderId,
+          goodsIssueLineId: lineId,
+          idempotencyKey: command.idempotencyKey,
+          businessDate: command.businessDate,
+          businessTime: command.businessTime ?? null,
+          businessOrder: command.businessOrder,
+          actorId: command.actorId ?? null,
+          currencyCode: valuation.currencyCode,
+        });
+      }
     }
 
     for (const catalogItemId of [...touched].sort()) {

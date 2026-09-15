@@ -513,6 +513,62 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
     expect(byItem[fx.oilItemId]).toBe('0.5');
   });
 
+  it('4b — same catalog item on two lines aggregates to one OUT (no ORDER_UNRESOLVED)', async () => {
+    await receiveMilkStock(10, '10000');
+    const order = await orders.openOrder({
+      tenantId: fx.tenantId,
+      legalEntityId: fx.legalEntityId,
+      outletId: fx.outletId,
+    });
+    await orders.addOrderLine({
+      orderId: order.orderId,
+      catalogItemId: fx.milkItemId,
+      quantity: '1',
+      unit: 'L',
+      dimension: 'VOLUME',
+    });
+    await orders.addOrderLine({
+      orderId: order.orderId,
+      catalogItemId: fx.milkItemId,
+      quantity: '2',
+      unit: 'L',
+      dimension: 'VOLUME',
+    });
+    const result = await orders.completeOrder({
+      orderId: order.orderId,
+      idempotencyKey: 'd13b-same-item-1',
+      businessDate: '2026-09-14',
+      businessOrder: 1,
+    });
+    expect(result.status).toBe('completed');
+
+    const lines = await pool.query(
+      `SELECT quantity_base, inventory_movement_id FROM goods_issue_line
+       WHERE goods_issue_id = $1 ORDER BY line_number`,
+      [result.goodsIssueId],
+    );
+    expect(lines.rowCount).toBe(2);
+    expect(lines.rows[0]!.inventory_movement_id).toBe(lines.rows[1]!.inventory_movement_id);
+
+    const outs = await pool.query(
+      `SELECT quantity, cost_certainty FROM inventory_movement
+       WHERE source_document_type = 'GoodsIssue' AND source_document_id = $1
+         AND catalog_item_id = $2 AND direction = 'OUT'`,
+      [result.goodsIssueId, fx.milkItemId],
+    );
+    expect(outs.rowCount).toBe(1);
+    expect(outs.rows[0]!.quantity).toBe('3');
+    expect(outs.rows[0]!.cost_certainty).toBe('FINAL');
+
+    const bal = await pool.query(
+      `SELECT quantity, carrying_certainty FROM inventory_balance
+       WHERE legal_entity_id = $1 AND warehouse_id = $2 AND catalog_item_id = $3`,
+      [fx.legalEntityId, fx.warehouseId, fx.milkItemId],
+    );
+    expect(bal.rows[0]!.quantity).toBe('7');
+    expect(bal.rows[0]!.carrying_certainty).toBe('FINAL');
+  });
+
   it('5 — failing write-off port rolls back (OPEN, no GI, no snapshot, no OrderCompleted)', async () => {
     const failingPort: SaleInventoryWriteOffPort = {
       async postGoodsIssueFromConsumptionPlan() {

@@ -67,6 +67,11 @@ CREATE TABLE IF NOT EXISTS goods_issue_line (
   CONSTRAINT uq_goods_issue_line_number UNIQUE (goods_issue_id, line_number)
 );
 
+-- Optional link from evidence line → economic movement (many leaves may share one OUT when
+-- the same catalog item appears on multiple OrderLines within one sale GoodsIssue).
+ALTER TABLE goods_issue_line
+  ADD COLUMN IF NOT EXISTS inventory_movement_id UUID;
+
 CREATE INDEX IF NOT EXISTS idx_goods_issue_line_order_line
   ON goods_issue_line (order_line_id);
 
