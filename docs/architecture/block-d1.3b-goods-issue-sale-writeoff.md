@@ -1,8 +1,11 @@
 # Block D1.3B — GoodsIssue & Automatic Sale Write-off
 
-**Status:** Implemented on feature branch (awaiting independent review)  
+**Status:** Merged  
 **ADR:** ADR-0025 (Accepted)  
-**Baseline:** Origin `main` @ `d85ea0419333fea73d77596fd45adacc289296d9` (D1.3A merged)
+**Origin PR:** #32  
+**Merge SHA:** `b2174ee56a7417b4a4db516ae3ea1855ed470f0a`  
+**Baseline before merge:** Origin `main` @ `d85ea0419333fea73d77596fd45adacc289296d9` (D1.3A)  
+**Backup:** Verified via MillQ Origin Backup App (Origin main → GitHub main)
 
 ## Boundary
 
@@ -34,7 +37,13 @@ Orders never writes Inventory tables; Inventory never re-resolves live recipes a
 - Issue cost / certainty / valuation currency / stream replay from D1.2B + Block C
 - Deterministic sorted `lockValuationStream` deadlock prevention
 - D1.3A resolver + snapshot schema + `SaleInventoryWriteOffPort` boundary
+- Same GoodsIssue / same business position / same stock item leaf aggregation into one InventoryMovement OUT (separate evidence lines preserved)
 
-## Out of scope
+## Out of scope (remains out)
 
-Food Cost, Payment, Settlement, Fiscal, POS UI, Tables/FloorPlan, KDS, modifiers, Effective Recipe, offline local runtime.
+Food Cost Ratio, Payment, Settlement, Fiscal, POS UI, Tables/FloorPlan, KDS, modifiers, Effective Recipe, offline local runtime.
+
+## Follow-on architecture
+
+Food Cost / Actual COGS reporting semantics are frozen in **ADR-0026** (Accepted).  
+Implementation of the Actual COGS read model is **D1.4A** and starts only after explicit Product Owner launch. Food Cost Ratio remains deferred until Revenue Basis exists.
