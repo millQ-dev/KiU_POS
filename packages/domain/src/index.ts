@@ -52,6 +52,7 @@ export {
   compareBusinessPosition,
   assertBusinessChronologyLess,
   mergeCertainty,
+  mergeReportingCertainty,
   orderMovementsForEconomicReplay,
   isReversalDocumentType,
   type CostCertainty,
