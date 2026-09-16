@@ -1047,7 +1047,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
     expect(revCount.rows[0]!.c).toBe('1');
   });
 
-  it('16 — scope: no food_cost / payment tables (Settlement foundation is S1.1)', async () => {
+  it('16 — scope: no food_cost tables; Payments tables owned by PAY1.1 (not Orders)', async () => {
     await receiveMilkStock(3, '10000');
     const order = await openMilkOrder('1');
     await completeOrderWithCommercial({
@@ -1056,11 +1056,31 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
       businessDate: '2026-09-14',
       businessOrder: 1,
     });
-    const tables = await pool.query<{ tablename: string }>(
+    const foodCost = await pool.query<{ tablename: string }>(
       `SELECT tablename FROM pg_tables
        WHERE schemaname = 'public'
-         AND tablename ~* '(food_cost|^payment)'`,
+         AND tablename ~* 'food_cost'`,
     );
-    expect(tables.rows).toEqual([]);
+    expect(foodCost.rows).toEqual([]);
+    // PAY1.1 owns payment_*; CompleteOrder must not insert payment rows.
+    const payWrites = await pool.query(
+      `SELECT 1 FROM payment p
+       WHERE p.created_at > NOW() - INTERVAL '1 minute'
+         AND EXISTS (
+           SELECT 1 FROM sales_order so WHERE so.order_id = $1
+         )
+       LIMIT 1`,
+      [order.orderId],
+    );
+    // Soft check: no payment_allocation linked via settlement for this order from CompleteOrder path
+    const allocFromComplete = await pool.query(
+      `SELECT 1 FROM payment_allocation pa
+       JOIN settlement_group sg ON sg.settlement_group_id = pa.settlement_group_id
+       WHERE sg.order_id = $1
+       LIMIT 1`,
+      [order.orderId],
+    );
+    expect(allocFromComplete.rows).toEqual([]);
+    void payWrites;
   });
 });

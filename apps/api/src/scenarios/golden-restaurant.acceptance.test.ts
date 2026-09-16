@@ -1976,12 +1976,254 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
     });
   });
 
+  describe('VARIATION — Payments Core Runtime (PAY1.1 Vietnam/Asia-ready)', () => {
+    it('async digital Payment → redirect ignored → verified success → allocation → SATISFIED → fiscal fixture → CompleteOrder; duplicate callback once', async () => {
+      const { SettlementService } = await import('../modules/settlement/settlement-service.js');
+      const { CheckoutOrchestrator } = await import('../modules/checkout/checkout-orchestrator.js');
+      const { fixedFiscalCheckoutGate } = await import('../modules/settlement/settlement-ports.js');
+      const { PaymentsService } = await import('../modules/payments/payments-service.js');
+
+      receiptSeq += 1;
+      const eggDraft = await receipts.createDraft({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        warehouseId: fx.warehouseId,
+        supplierId: fx.supplierId,
+        supplierDocumentNumber: `GOLDEN-PAY11-EGG-${receiptSeq}`,
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        businessDate: DAY.PROCURE_1,
+        businessOrder: 90,
+        actorId: fx.actorId,
+        lines: [
+          {
+            lineNumber: 1,
+            catalogItemId: fx.eggItemId,
+            supplierItemId: fx.eggSupplierItemId,
+            inputKind: 'COUNT',
+            packageCount: 5,
+            acceptedBaseQuantity: '5',
+            baseUnit: 'ea',
+            dimension: 'COUNT',
+            unitPriceMinor: '2000',
+            lineAcquisitionCostMinor: '10000',
+          },
+        ],
+      });
+      await receipts.post(eggDraft!.goodsReceiptId, {
+        idempotencyKey: `golden-pay11-egg-${eggDraft!.goodsReceiptId}`,
+        actorId: fx.actorId,
+      });
+
+      const order = await orders.openOrder({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        outletId: fx.outletId,
+        actorId: fx.actorId,
+      });
+      await orders.addOrderLine({
+        orderId: order.orderId,
+        catalogItemId: fx.eggItemId,
+        quantity: '1',
+        unit: 'ea',
+        dimension: 'COUNT',
+      });
+      await acceptFinalMerchandiseTerms(orders, order.orderId, {
+        defaultGrossMinor: '100000',
+        idempotencyKey: `golden-pay11-${order.orderId}`,
+      });
+
+      let settlements!: import('../modules/settlement/settlement-service.js').SettlementService;
+      const payments = new PaymentsService(pool, {
+        onCoverageChanged: async (gid) => {
+          await settlements.reconcileSettlementCoverage(gid);
+        },
+      });
+      settlements = new SettlementService(pool, {
+        coverageReader: payments.createCoverageReader(),
+        externalEffects: payments.createExternalEffectProbe(),
+      });
+
+      const s = await settlements.openSettlement({
+        orderId: order.orderId,
+        idempotencyKey: `golden-pay11-open-${order.orderId}`,
+      });
+      expect(s.state).toBe('COLLECTING');
+      const checkId = s.checks[0]!.settlementCheckId;
+
+      const tender = await payments.createTenderDefinition({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        code: `golden_vietqr_${order.orderId.slice(0, 8)}`,
+        displayName: 'DEV VietQR-like',
+        providerIdentity: 'dev.provider.vietqr_like',
+        railIdentity: 'VIETQR_DOMESTIC',
+        instrumentFamily: 'DIGITAL_WALLET_OR_QR',
+        presentationCapability: 'MERCHANT_PRESENTED',
+      });
+
+      const pay = await payments.createPayment({
+        tenderDefinitionId: tender.tenderDefinitionId,
+        createIdempotencyKey: `golden-pay-${order.orderId}`,
+        requestedAmountMinor: '100000',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+      });
+      await payments.recordVerifiedProviderOutcome({
+        paymentId: pay.paymentId,
+        providerEventIdentity: `golden-pending-${pay.paymentId}`,
+        rawProviderStatus: 'QR_DISPLAYED',
+        normalizedOutcome: 'PENDING',
+        verificationStatus: 'VERIFIED',
+        reconciliationOrigin: 'DEV_SIMULATOR',
+      });
+      expect((await payments.getPayment(pay.paymentId))!.lifecycleState).toBe('PENDING');
+      expect((await settlements.getSettlement(s.settlementGroupId)).state).toBe('COLLECTING');
+
+      await payments.recordClientRedirectSignal(pay.paymentId);
+      expect((await settlements.getSettlement(s.settlementGroupId)).state).toBe('COLLECTING');
+      expect((await payments.getPayment(pay.paymentId))!.lifecycleState).not.toBe('SUCCEEDED');
+
+      const successEvent = `golden-success-${pay.paymentId}`;
+      await payments.recordVerifiedProviderOutcome({
+        paymentId: pay.paymentId,
+        providerEventIdentity: successEvent,
+        rawProviderStatus: '00',
+        normalizedOutcome: 'SUCCEEDED',
+        verificationStatus: 'VERIFIED',
+        reconciliationOrigin: 'CALLBACK',
+        evidenceAmountMinor: '100000',
+        evidenceCurrencyCode: 'VND',
+        providerTransactionReference: `golden_tx_${pay.paymentId.slice(0, 8)}`,
+        allocateToCheckId: checkId,
+        allocationIdempotencyKey: `golden-alloc-${pay.paymentId}`,
+      });
+      let proj = await settlements.getSettlement(s.settlementGroupId);
+      expect(proj.state).toBe('SATISFIED');
+      expect(proj.outstandingAmountMinor).toBe('0');
+
+      const dup = await payments.recordVerifiedProviderOutcome({
+        paymentId: pay.paymentId,
+        providerEventIdentity: successEvent,
+        rawProviderStatus: '00',
+        normalizedOutcome: 'SUCCEEDED',
+        verificationStatus: 'VERIFIED',
+        reconciliationOrigin: 'CALLBACK',
+        evidenceAmountMinor: '100000',
+        evidenceCurrencyCode: 'VND',
+        allocateToCheckId: checkId,
+        allocationIdempotencyKey: `golden-alloc-${pay.paymentId}`,
+      });
+      expect(dup.duplicate).toBe(true);
+      proj = await settlements.getSettlement(s.settlementGroupId);
+      expect(proj.outstandingAmountMinor).toBe('0');
+
+      await expect(
+        settlements.abortSettlement({ settlementGroupId: s.settlementGroupId }),
+      ).rejects.toMatchObject({ code: 'SETTLEMENT_ABORT_FORBIDDEN' });
+
+      const orch = new CheckoutOrchestrator(
+        pool,
+        orders,
+        settlements.withDeps({ fiscalGate: fixedFiscalCheckoutGate('NOT_REQUIRED') }),
+      );
+      const advanced = await orch.tryAdvanceCheckout({
+        settlementGroupId: s.settlementGroupId,
+        completeIdempotencyKey: `golden-pay11-complete-${order.orderId}`,
+        businessDate: '2026-09-16',
+        businessOrder: 910,
+      });
+      expect(advanced.settlement.state).toBe('SATISFIED');
+      expect((await orders.getOrder(order.orderId)).status).toBe('COMPLETED');
+    });
+
+    it('late inquiry reconciliation — same Payment succeeds once after missing callback', async () => {
+      const { SettlementService } = await import('../modules/settlement/settlement-service.js');
+      const { PaymentsService } = await import('../modules/payments/payments-service.js');
+
+      const order = await orders.openOrder({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        outletId: fx.outletId,
+        actorId: fx.actorId,
+      });
+      await orders.addOrderLine({
+        orderId: order.orderId,
+        catalogItemId: fx.eggItemId,
+        quantity: '1',
+        unit: 'ea',
+        dimension: 'COUNT',
+      });
+      await acceptFinalMerchandiseTerms(orders, order.orderId, {
+        defaultGrossMinor: '50000',
+        idempotencyKey: `golden-pay11-late-${order.orderId}`,
+      });
+
+      let settlements!: import('../modules/settlement/settlement-service.js').SettlementService;
+      const payments = new PaymentsService(pool, {
+        onCoverageChanged: async (gid) => {
+          await settlements.reconcileSettlementCoverage(gid);
+        },
+      });
+      settlements = new SettlementService(pool, {
+        coverageReader: payments.createCoverageReader(),
+        externalEffects: payments.createExternalEffectProbe(),
+      });
+
+      const s = await settlements.openSettlement({
+        orderId: order.orderId,
+        idempotencyKey: `golden-pay11-late-open-${order.orderId}`,
+      });
+      const tender = await payments.createTenderDefinition({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        code: `golden_inq_${order.orderId.slice(0, 8)}`,
+        displayName: 'DEV inquiry rail',
+        providerIdentity: 'dev.provider.inquiry',
+        railIdentity: 'WALLET_QR',
+        instrumentFamily: 'DIGITAL_WALLET_OR_QR',
+        presentationCapability: 'REDIRECT_OR_DEEPLINK',
+      });
+      const pay = await payments.createPayment({
+        tenderDefinitionId: tender.tenderDefinitionId,
+        createIdempotencyKey: `golden-late-${order.orderId}`,
+        requestedAmountMinor: '50000',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+      });
+      await payments.recordVerifiedProviderOutcome({
+        paymentId: pay.paymentId,
+        providerEventIdentity: `late-pend-${pay.paymentId}`,
+        rawProviderStatus: 'UNKNOWN',
+        normalizedOutcome: 'PENDING',
+        verificationStatus: 'VERIFIED',
+        reconciliationOrigin: 'CALLBACK',
+      });
+      expect((await settlements.getSettlement(s.settlementGroupId)).state).toBe('COLLECTING');
+
+      await payments.recordVerifiedProviderOutcome({
+        paymentId: pay.paymentId,
+        providerEventIdentity: `late-inq-${pay.paymentId}`,
+        rawProviderStatus: 'PAID',
+        normalizedOutcome: 'SUCCEEDED',
+        verificationStatus: 'VERIFIED',
+        reconciliationOrigin: 'INQUIRY',
+        evidenceAmountMinor: '50000',
+        evidenceCurrencyCode: 'VND',
+        allocateToCheckId: s.checks[0]!.settlementCheckId,
+        allocationIdempotencyKey: `late-alloc-${pay.paymentId}`,
+      });
+      expect((await settlements.getSettlement(s.settlementGroupId)).state).toBe('SATISFIED');
+      expect((await payments.getPayment(pay.paymentId))!.lifecycleState).toBe('SUCCEEDED');
+    });
+  });
+
   describe('DEFERRED markers (must remain explicit — do not fake PASS)', () => {
     it('documents unsupported torture steps as EXPECTED STOP', () => {
       const deferred = [
         'MODIFIER commercial + physical semantics → future Modifier / Effective Recipe vertical',
         'DANGEROUS OPERATION / MANAGER OVERRIDE → future Authorization / Roles vertical',
-        'SPLIT PAYMENT / SETTLEMENT runtime payments → Payments Core after S1.1',
+        'SPLIT PAYMENT / SETTLEMENT runtime payments → PASS PAY1.1 (multi-check allocation); production provider adapter DEFERRED',
         'PARTIAL RETURN → Partial Return / Partial Commercial Correction model',
         'PERIOD LOCK → PeriodLock vertical',
         'Contribution Margin / channel commissions / payment fees → ADR-0019 future',
@@ -1991,6 +2233,7 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
         'MASS/VOLUME quantity entry UX → PASS P1.3 (authoritative dimension/unit metadata)',
         'COMMERCIAL ROUNDING POLICY runtime → PASS C1.1 (ADR-0030 BASE_LIST_LINE_GROSS)',
         'Settlement / Checkout foundation → PASS S1.1 (ADR-0032)',
+        'Payments Core Runtime → PASS PAY1.1 (provider-neutral; Vietnam/Asia-ready; no production adapter)',
         'Floor/Table runtime → DEFERRED (P1.1/P1.2/P1.3 tableless POS proven without Floor/Table)',
         'Payments / Fiscalization → DEFERRED (after S1.1; Payments Core before provider adapters)',
         'Settlement / Checkout orchestration boundary → PASS ADR-0032',

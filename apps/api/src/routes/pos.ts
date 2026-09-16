@@ -14,6 +14,11 @@ import {
   PublishedImmutableError,
 } from '../modules/pos/index.js';
 import { SettlementService } from '../modules/settlement/settlement-service.js';
+import {
+  createWiredPaymentsAndSettlement,
+  registerDevPaymentSimulatorRoutes,
+  registerPaymentRoutes,
+} from './payments.js';
 
 function mapError(err: unknown): { status: number; body: Record<string, unknown> } {
   if (err instanceof DomainValidationError) {
@@ -303,8 +308,17 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
     },
   );
 
-  // --- S1.1 Settlement / Checkout (Orders-coordinated; no Payment writer) ---
-  const settlements = new SettlementService(pool);
+  // --- S1.1 Settlement + PAY1.1 Payments Core (wired coverage / external-effect) ---
+  const { payments, settlements } = createWiredPaymentsAndSettlement(
+    pool,
+    (paymentsSvc) =>
+      new SettlementService(pool, {
+        coverageReader: paymentsSvc.createCoverageReader(),
+        externalEffects: paymentsSvc.createExternalEffectProbe(),
+      }),
+  );
+  await registerPaymentRoutes(app, payments);
+  await registerDevPaymentSimulatorRoutes(app, payments);
   const checkout = new CheckoutOrchestrator(pool, orders, settlements);
 
   app.post<{ Params: { orderId: string } }>(
@@ -380,7 +394,7 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
     '/api/v1/settlements/:settlementGroupId/reconcile-coverage',
     async (req, reply) => {
       try {
-        // Production: empty Payments reader → no allocations. Tests inject via service, not this route.
+        // PAY1.1: real QualifyingPaymentCoverageReader wired via Payments Core.
         return await settlements.reconcileSettlementCoverage(req.params.settlementGroupId);
       } catch (err) {
         const mapped = mapError(err);
