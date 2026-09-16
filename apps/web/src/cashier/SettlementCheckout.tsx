@@ -29,8 +29,8 @@ export function SettlementCheckoutPanel({
       {!live ? (
         <>
           <p className="pos-settlement__hint">
-            Open checkout freezes Customer Payable from accepted merchandise terms. No payment methods
-            in this shell.
+            Open checkout freezes Customer Payable from accepted merchandise terms. Cash is available
+            for this first counter-service slice.
           </p>
           <button
             type="button"

@@ -1,6 +1,7 @@
 import type {
   ApiErrorBody,
   CashierContext,
+  CashCheckoutResult,
   CommercialStatus,
   MenuPriceResolution,
   OrderBasket,
@@ -57,6 +58,25 @@ export const posApi = {
     return request('GET', '/api/v1/dev/cashier-contexts');
   },
 
+  openDevCashShift(payload: {
+    tenantId: string;
+    legalEntityId: string;
+    outletId: string;
+    openingCashMinor?: string;
+    cashierId?: string;
+    deviceId?: string;
+  }): Promise<{
+    cashShiftId: string;
+    cashierId: string;
+    deviceId: string;
+    status: 'OPEN';
+    openingCashMinor: string;
+    currencyCode: string;
+    minorUnitExponent: number;
+  }> {
+    return request('POST', '/api/v1/dev/cash-shifts', payload);
+  },
+
   resolveSurface(payload: PresentationSalesPayload): Promise<ResolvedPosSurface> {
     return request('POST', '/api/v1/pos/surface/resolve', payload);
   },
@@ -78,6 +98,7 @@ export const posApi = {
     payload: PresentationSalesPayload & {
       orderId: string;
       layoutPublicationSlotId: string;
+      modifierSelections?: Array<{ groupId: string; optionIds: string[] }>;
     },
   ): Promise<{ order: OrderBasket }> {
     return request('POST', '/api/v1/pos/select-count', payload);
@@ -88,6 +109,7 @@ export const posApi = {
       orderId: string;
       layoutPublicationSlotId: string;
       quantity: string;
+      modifierSelections?: Array<{ groupId: string; optionIds: string[] }>;
     },
   ): Promise<{ order: OrderBasket }> {
     return request('POST', '/api/v1/pos/select-quantity', payload);
@@ -166,5 +188,18 @@ export const posApi = {
     payload?: { expectedVersion?: number },
   ): Promise<import('./types.js').SettlementProjection> {
     return request('POST', `/api/v1/settlements/${settlementGroupId}/abort`, payload ?? {});
+  },
+
+  checkoutCash(
+    orderId: string,
+    payload: {
+      cashShiftId: string;
+      tenderedMinor: string;
+      idempotencyKey: string;
+      actorId?: string;
+      deviceId?: string;
+    },
+  ): Promise<CashCheckoutResult> {
+    return request('POST', `/api/v1/orders/${orderId}/checkout/cash`, payload);
   },
 };

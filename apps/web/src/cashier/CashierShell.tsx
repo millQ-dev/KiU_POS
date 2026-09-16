@@ -10,11 +10,13 @@ import type {
   ResolvedPosSlot,
   ResolvedPosSurface,
   SettlementProjection,
+  CashCheckoutResult,
 } from '../api/types.js';
 import { OrderBasketPanel } from './OrderBasket.js';
 import { PosPageNavigation } from './PosPageNavigation.js';
 import { ProductGrid } from './ProductGrid.js';
 import { QuantityEntryModal } from './QuantityEntryModal.js';
+import { ModifierSelectionModal } from './ModifierSelectionModal.js';
 import { QuickAccess } from './QuickAccess.js';
 import './CashierShell.css';
 
@@ -60,6 +62,9 @@ export function CashierShell({ context, onChangeContext }: Props) {
   const [refreshingPrices, setRefreshingPrices] = useState(false);
   const [acceptingCommercial, setAcceptingCommercial] = useState(false);
   const [quantitySlot, setQuantitySlot] = useState<ResolvedPosSlot | null>(null);
+  const [quantityModifierSelections, setQuantityModifierSelections] = useState<Array<{ groupId: string; optionIds: string[] }>>([]);
+  const [modifierSlot, setModifierSlot] = useState<ResolvedPosSlot | null>(null);
+  const [cashResult, setCashResult] = useState<CashCheckoutResult | null>(null);
   const [settlement, setSettlement] = useState<SettlementProjection | null>(null);
   const [settlementBusy, setSettlementBusy] = useState(false);
   const inFlightRef = useRef(false);
@@ -136,6 +141,7 @@ export function CashierShell({ context, onChangeContext }: Props) {
     setCommercial(null);
     setPriceResolution(null);
     setSettlement(null);
+    setCashResult(null);
     try {
       const created = await posApi.openOrder({
         tenantId: context.tenantId,
@@ -206,7 +212,12 @@ export function CashierShell({ context, onChangeContext }: Props) {
       return;
     }
     if (slot.state !== 'ACTIVE') return;
+    if ((slot.modifierGroups?.length ?? 0) > 0) {
+      setModifierSlot(slot);
+      return;
+    }
     if (slot.quantityEntry === 'DEFERRED_WEIGHTED') {
+      setQuantityModifierSelections([]);
       setQuantitySlot(slot);
       return;
     }
@@ -239,6 +250,39 @@ export function CashierShell({ context, onChangeContext }: Props) {
     });
   };
 
+  const addSlotWithModifiers = async (
+    slot: ResolvedPosSlot,
+    modifierSelections: Array<{ groupId: string; optionIds: string[] }>,
+  ) => {
+    if (!order) return;
+    await withMutationGuard(async () => {
+      setSelectingSlotId(slot.layoutPublicationSlotId);
+      try {
+        if (slot.quantityEntry === 'DEFERRED_WEIGHTED') {
+          setQuantityModifierSelections(modifierSelections);
+          setModifierSlot(null);
+          setQuantitySlot(slot);
+          return;
+        }
+        const result = await posApi.selectCountTap({
+          ...salesPayload(context),
+          orderId: order.orderId,
+          layoutPublicationSlotId: slot.layoutPublicationSlotId,
+          modifierSelections,
+        });
+        applyOrder(result.order, selectedLineId);
+        await reloadCommercial(result.order.orderId);
+        setModifierSlot(null);
+      } catch (err) {
+        const code = err instanceof ApiError ? err.code : 'NETWORK';
+        const message = err instanceof Error ? err.message : 'Modifier selection failed';
+        setFeedback(`${code}: ${message}`);
+      } finally {
+        setSelectingSlotId(null);
+      }
+    });
+  };
+
   const onConfirmWeighted = async (quantity: string) => {
     if (!order || !quantitySlot) return;
     const slot = quantitySlot;
@@ -250,10 +294,12 @@ export function CashierShell({ context, onChangeContext }: Props) {
           orderId: order.orderId,
           layoutPublicationSlotId: slot.layoutPublicationSlotId,
           quantity,
+          ...(quantityModifierSelections.length > 0 ? { modifierSelections: quantityModifierSelections } : {}),
         });
         applyOrder(result.order, selectedLineId);
         await reloadCommercial(result.order.orderId);
         setQuantitySlot(null);
+        setQuantityModifierSelections([]);
       } catch (err) {
         const code = err instanceof ApiError ? err.code : 'NETWORK';
         const message = err instanceof Error ? err.message : 'Selection failed';
@@ -405,6 +451,27 @@ export function CashierShell({ context, onChangeContext }: Props) {
     });
   };
 
+  const onCashPay = (tenderedMinor: string) => {
+    if (!order || !settlement) return;
+    void withMutationGuard(async () => {
+      try {
+        const result = await posApi.checkoutCash(order.orderId, {
+          cashShiftId: context.cashShiftId,
+          tenderedMinor,
+          idempotencyKey: `cash-checkout:${order.orderId}`,
+          actorId: context.cashierId,
+          deviceId: context.deviceId,
+        });
+        setCashResult(result);
+        applyOrder(result.order, null);
+        setSettlement(settlement);
+        setFeedback('Cash accepted. Order submitted; production tasks created.');
+      } catch (err) {
+        await handleMutationError(err, order.orderId);
+      }
+    });
+  };
+
   return (
     <div className="pos-shell">
       <header className="pos-shell__header">
@@ -493,6 +560,8 @@ export function CashierShell({ context, onChangeContext }: Props) {
             onAcceptCurrentPrices={onAcceptCurrentPrices}
             onOpenCheckout={onOpenCheckout}
             onAbortCheckout={onAbortCheckout}
+            cashResult={cashResult}
+            onCashPay={onCashPay}
             onCancelOrder={onCancelOrder}
             onNewOrder={() => {
               setOrder(null);
@@ -506,8 +575,16 @@ export function CashierShell({ context, onChangeContext }: Props) {
         <QuantityEntryModal
           slot={quantitySlot}
           busy={mutationBusy}
-          onCancel={() => setQuantitySlot(null)}
+          onCancel={() => { setQuantitySlot(null); setQuantityModifierSelections([]); }}
           onConfirm={(q) => void onConfirmWeighted(q)}
+        />
+      )}
+      {modifierSlot && (
+        <ModifierSelectionModal
+          slot={modifierSlot}
+          busy={mutationBusy}
+          onCancel={() => setModifierSlot(null)}
+          onConfirm={(selections) => void addSlotWithModifiers(modifierSlot, selections)}
         />
       )}
     </div>

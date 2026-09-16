@@ -1,5 +1,6 @@
 import type {
   CommercialStatus as CommercialStatusDto,
+  CashCheckoutResult,
   MenuPriceResolution,
   OrderBasket,
   OrderLine,
@@ -8,6 +9,7 @@ import type {
 import { CommercialStatusPanel } from './CommercialStatus.js';
 import { OrderLineEditor } from './OrderLineEditor.js';
 import { SettlementCheckoutPanel } from './SettlementCheckout.js';
+import { CashPaymentPanel } from './CashPaymentPanel.js';
 import './OrderBasket.css';
 
 type Props = {
@@ -29,6 +31,8 @@ type Props = {
   onAcceptCurrentPrices: () => void;
   onOpenCheckout: () => void;
   onAbortCheckout: () => void;
+  cashResult?: CashCheckoutResult | null;
+  onCashPay?: (tenderedMinor: string) => void;
   onCancelOrder: () => void;
   onNewOrder: () => void;
 };
@@ -56,6 +60,8 @@ export function OrderBasketPanel({
   onAcceptCurrentPrices,
   onOpenCheckout,
   onAbortCheckout,
+  cashResult,
+  onCashPay = () => undefined,
   onCancelOrder,
   onNewOrder,
 }: Props) {
@@ -108,6 +114,11 @@ export function OrderBasketPanel({
                 >
                   <span className="pos-basket__name">{line.catalogItemName}</span>
                   <span className="pos-basket__qty">{formatQty(line)}</span>
+                  {line.modifiers && line.modifiers.length > 0 ? (
+                    <span className="pos-basket__modifiers">
+                      {line.modifiers.map((modifier) => modifier.optionLabel).join(' · ')}
+                    </span>
+                  ) : null}
                   {acceptedLine ? (
                     <span className="pos-basket__gross">
                       {acceptedLine.grossMerchandiseMinor} {commercial?.currencyCode ?? ''}
@@ -151,6 +162,15 @@ export function OrderBasketPanel({
         onAbortCheckout={onAbortCheckout}
       />
 
+      {settlement && (cashResult || (settlement.state === 'COLLECTING' && settlement.customerPayableMinor !== '0')) && (
+        <CashPaymentPanel
+          settlement={settlement}
+          busy={mutationBusy || settlementBusy || loading}
+          result={cashResult ?? null}
+          onPay={onCashPay}
+        />
+      )}
+
       <footer className="pos-basket__footer">
         {editable && order && (
           <button
@@ -163,8 +183,8 @@ export function OrderBasketPanel({
           </button>
         )}
         <p className="pos-basket__note">
-          Authoritative merchandise gross and Customer Payable come from backend. No frontend Money
-          arithmetic. No Cash/Card/QR in this shell.
+          Authoritative prices, payable and payment state come from backend. Cash is the first live
+          tender in this counter-service slice; QR/card adapters remain future work.
         </p>
       </footer>
     </aside>

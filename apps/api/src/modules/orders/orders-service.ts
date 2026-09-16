@@ -33,6 +33,7 @@ import {
   OrderImmutableError,
 } from './errors.js';
 import type { SaleInventoryWriteOffPort } from './sale-write-off-port.js';
+import { ModifierService } from '../modifiers/modifier-service.js';
 import {
   addOrderLineSchema,
   cancelOrderSchema,
@@ -52,7 +53,7 @@ type OrderRow = {
   tenant_id: string;
   legal_entity_id: string;
   outlet_id: string;
-  status: 'OPEN' | 'COMPLETED' | 'CANCELLED';
+  status: 'OPEN' | 'SUBMITTED' | 'COMPLETED' | 'CANCELLED';
   channel: string;
   business_date: string | Date | null;
   business_time: string | null;
@@ -74,6 +75,7 @@ type OrderLineRow = {
   quantity: string;
   unit: string;
   dimension: UnitDimension;
+  modifier_price_delta_minor: string;
 };
 
 function mapDomainError(err: unknown): never {
@@ -146,6 +148,7 @@ export type OrdersServiceOptions = {
  */
 export class OrdersService {
   private readonly saleWriteOffPort: SaleInventoryWriteOffPort | undefined;
+  private readonly modifiers = new ModifierService();
 
   constructor(
     private readonly pool: Pool,
@@ -206,6 +209,11 @@ export class OrdersService {
       await this.assertNoLiveSettlement(client, cmd.orderId);
       await this.assertCatalogItem(client, order.tenant_id, cmd.catalogItemId, cmd.dimension);
       const qty = this.assertLineQuantity(cmd.quantity, cmd.dimension, cmd.unit);
+      const modifierState = await this.modifiers.validateSelection(client, {
+        tenantId: order.tenant_id,
+        catalogItemId: cmd.catalogItemId,
+        selections: cmd.modifierSelections,
+      });
 
       const maxLine = await client.query<{ max: number | null }>(
         `SELECT MAX(line_number) AS max FROM sales_order_line WHERE order_id = $1`,
@@ -227,6 +235,26 @@ export class OrdersService {
           qty.dimension,
         ],
       );
+      for (const modifier of modifierState.snapshots) {
+        await client.query(
+          `INSERT INTO sales_order_line_modifier (
+             order_line_modifier_id, order_line_id, modifier_group_id, modifier_option_id,
+             group_label, option_label, price_delta_minor, currency_code, minor_unit_exponent, position
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [
+            modifier.orderLineModifierId,
+            orderLineId,
+            modifier.groupId,
+            modifier.optionId,
+            modifier.groupLabel,
+            modifier.optionLabel,
+            modifier.priceDeltaMinor,
+            modifier.currencyCode,
+            modifier.minorUnitExponent,
+            modifier.position,
+          ],
+        );
+      }
       // Line mutation invalidates accepted commercial terms (must re-accept before CompleteOrder).
       await this.clearOpenCommercialTerms(client, cmd.orderId);
       await this.mirrorFactTx(client, {
@@ -545,6 +573,7 @@ export class OrdersService {
             quantity: l.quantity,
             unit: l.unit,
             dimension: l.dimension,
+            modifierPriceDeltaMinor: l.modifier_price_delta_minor,
           })),
           resolvedLines: resolved.lines,
           policy,
@@ -1404,6 +1433,7 @@ export class OrdersService {
   async getOrder(orderId: string) {
     const row = await this.requireOrder(orderId);
     const lines = await this.loadLines(this.pool, orderId);
+    const modifiers = await this.loadLineModifiers(this.pool, orderId);
     return {
       orderId: row.order_id,
       tenantId: row.tenant_id,
@@ -1430,6 +1460,7 @@ export class OrdersService {
         quantity: l.quantity,
         unit: l.unit,
         dimension: l.dimension,
+        modifiers: modifiers.get(l.order_line_id) ?? [],
       })),
     };
   }
@@ -1652,7 +1683,11 @@ export class OrdersService {
   private async lockLine(client: Client, orderId: string, orderLineId: string): Promise<OrderLineRow> {
     const res = await client.query<OrderLineRow>(
       `SELECT order_line_id, order_id, line_number, catalog_item_id, quantity, unit,
-              dimension::text AS dimension
+              dimension::text AS dimension,
+              COALESCE((SELECT SUM(price_delta_minor::numeric)::text
+                        FROM sales_order_line_modifier m
+                        WHERE m.order_line_id = sales_order_line.order_line_id), '0')
+                AS modifier_price_delta_minor
        FROM sales_order_line WHERE order_line_id = $1 AND order_id = $2 FOR UPDATE`,
       [orderLineId, orderId],
     );
@@ -1664,11 +1699,56 @@ export class OrdersService {
   private async loadLines(client: Client | Pool, orderId: string): Promise<OrderLineRow[]> {
     const res = await client.query<OrderLineRow>(
       `SELECT order_line_id, order_id, line_number, catalog_item_id, quantity, unit,
-              dimension::text AS dimension
+              dimension::text AS dimension,
+              COALESCE((SELECT SUM(price_delta_minor::numeric)::text
+                        FROM sales_order_line_modifier m
+                        WHERE m.order_line_id = sales_order_line.order_line_id), '0')
+                AS modifier_price_delta_minor
        FROM sales_order_line WHERE order_id = $1 ORDER BY line_number`,
       [orderId],
     );
     return res.rows;
+  }
+
+  private async loadLineModifiers(client: Client | Pool, orderId: string) {
+    const result = await client.query<{
+      order_line_modifier_id: string;
+      order_line_id: string;
+      modifier_group_id: string;
+      modifier_option_id: string;
+      group_label: string;
+      option_label: string;
+      price_delta_minor: string;
+      currency_code: string;
+      minor_unit_exponent: number;
+      position: number;
+    }>(
+      `SELECT m.order_line_modifier_id, m.order_line_id, m.modifier_group_id,
+              m.modifier_option_id, m.group_label, m.option_label,
+              m.price_delta_minor, m.currency_code, m.minor_unit_exponent, m.position
+       FROM sales_order_line_modifier m
+       JOIN sales_order_line l ON l.order_line_id = m.order_line_id
+       WHERE l.order_id = $1
+       ORDER BY l.line_number, m.position`,
+      [orderId],
+    );
+    const byLine = new Map<string, Array<Record<string, unknown>>>();
+    for (const row of result.rows) {
+      const line = byLine.get(row.order_line_id) ?? [];
+      line.push({
+        orderLineModifierId: row.order_line_modifier_id,
+        modifierGroupId: row.modifier_group_id,
+        modifierOptionId: row.modifier_option_id,
+        groupLabel: row.group_label,
+        optionLabel: row.option_label,
+        priceDeltaMinor: row.price_delta_minor,
+        currencyCode: row.currency_code,
+        minorUnitExponent: row.minor_unit_exponent,
+        position: row.position,
+      });
+      byLine.set(row.order_line_id, line);
+    }
+    return byLine;
   }
 
   private async assertOutlet(tenantId: string, legalEntityId: string, outletId: string) {

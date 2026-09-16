@@ -4,11 +4,11 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--pos-space-2);
-  min-height: var(--pos-tile-min);
+  min-height: 112px;
   min-width: 0;
-  padding: var(--pos-space-3);
-  border-radius: var(--pos-radius);
-  border: 1px solid var(--pos-border);
+  padding: var(--pos-space-4);
+  border-radius: var(--pos-control-radius);
+  border: 2px solid var(--pos-border);
   background: var(--pos-surface-2);
   color: var(--pos-text);
   text-align: left;
@@ -23,11 +23,12 @@
 
 .pos-tile--active:not(:disabled):hover {
   border-color: var(--pos-accent);
-  background: #343a46;
+  background: var(--pos-accent-soft);
 }
 
 .pos-tile--active:not(:disabled):active {
   background: var(--pos-accent-press);
+  color: white;
 }
 
 .pos-tile--disabled_unavailable {
@@ -48,14 +49,15 @@
 }
 
 .pos-tile__label {
-  font-size: 1rem;
-  font-weight: 600;
+  font-size: 1.05rem;
+  font-weight: 800;
   line-height: 1.25;
 }
 
 .pos-tile__price {
   font-family: var(--pos-font-mono);
-  font-size: 0.95rem;
+  font-size: 1rem;
+  font-weight: 800;
 }
 
 .pos-tile__price--muted {

@@ -3,6 +3,12 @@ import { z } from 'zod';
 const uuid = z.string().uuid();
 const decimalString = z.string().min(1);
 const dimensionSchema = z.enum(['MASS', 'VOLUME', 'COUNT']);
+const modifierSelectionSchema = z
+  .object({
+    groupId: uuid,
+    optionIds: z.array(uuid),
+  })
+  .strict();
 
 export const openOrderSchema = z
   .object({
@@ -22,6 +28,7 @@ export const addOrderLineSchema = z
     quantity: decimalString,
     unit: z.string().min(1),
     dimension: dimensionSchema,
+    modifierSelections: z.array(modifierSelectionSchema).optional().default([]),
   })
   .strict();
 

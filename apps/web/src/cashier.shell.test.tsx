@@ -58,6 +58,11 @@ const ctx: CashierContext = {
   legalEntityId: '44444444-4444-4444-8444-444444444444',
   legalEntityName: 'LE',
   orderChannel: 'DIRECT',
+  cashShiftId: '77777777-7777-4777-8777-777777777777',
+  cashierId: '88888888-8888-4888-8888-888888888888',
+  deviceId: '99999999-9999-4999-8999-999999999999',
+  openingCashMinor: '0',
+  shiftStatus: 'OPEN',
 };
 
 function activeCount(overrides: Partial<ResolvedPosSlot> = {}): ResolvedPosSlot {
@@ -326,7 +331,7 @@ describe('cashier components', () => {
   it('empty basket state and no line-gross math in panel', () => {
     render(<OrderBasketPanel order={null} {...basketProps} />);
     expect(screen.getByText(/Empty/i)).toBeTruthy();
-    expect(screen.getByText(/No Cash\/Card\/QR/i)).toBeTruthy();
+    expect(screen.getByText(/Cash is the first live tender/i)).toBeTruthy();
   });
 
   it('selects basket line and shows selected visual + editor', () => {

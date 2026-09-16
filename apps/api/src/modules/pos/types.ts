@@ -1,5 +1,12 @@
 import { z } from 'zod';
 
+const modifierSelectionSchema = z
+  .object({
+    groupId: z.string().uuid(),
+    optionIds: z.array(z.string().uuid()),
+  })
+  .strict();
+
 const uuid = z.string().uuid();
 const isoInstant = z.string().datetime({ offset: true });
 
@@ -140,6 +147,7 @@ export const selectPosItemSchema = z
     quantity: z.string().regex(/^-?\d+(\.\d+)?$/),
     unit: z.string().min(1),
     dimension: z.enum(['MASS', 'VOLUME', 'COUNT']),
+    modifierSelections: z.array(modifierSelectionSchema).optional().default([]),
   })
   .strict();
 export type SelectPosItemInput = z.infer<typeof selectPosItemSchema>;
@@ -162,6 +170,7 @@ export const selectPosCountTapSchema = z
         businessDateTime: isoInstant,
       })
       .strict(),
+    modifierSelections: z.array(modifierSelectionSchema).optional().default([]),
   })
   .strict();
 export type SelectPosCountTapInput = z.infer<typeof selectPosCountTapSchema>;
@@ -185,6 +194,7 @@ export const selectPosQuantityTapSchema = z
       })
       .strict(),
     quantity: z.string().regex(/^-?\d+(\.\d+)?$/),
+    modifierSelections: z.array(modifierSelectionSchema).optional().default([]),
   })
   .strict();
 export type SelectPosQuantityTapInput = z.infer<typeof selectPosQuantityTapSchema>;

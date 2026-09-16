@@ -15,6 +15,8 @@ export function DevContextBootstrap({ onSelect }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [contexts, setContexts] = useState<CashierContext[]>([]);
+  const [openingCashMinor, setOpeningCashMinor] = useState('0');
+  const [startingShiftOutletId, setStartingShiftOutletId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,13 +57,52 @@ export function DevContextBootstrap({ onSelect }: Props) {
             No outlets in database. Seed local data (e.g. run acceptance fixtures) then refresh.
           </p>
         )}
+        {!loading && contexts.length > 0 && (
+          <label className="dev-boot__cash">
+            Opening cash (VND)
+            <input
+              value={openingCashMinor}
+              inputMode="numeric"
+              onChange={(event) => setOpeningCashMinor(event.target.value.replace(/\D/g, ''))}
+            />
+          </label>
+        )}
         <ul className="dev-boot__list">
           {contexts.map((c) => (
             <li key={c.outletId}>
-              <button type="button" className="dev-boot__btn" onClick={() => onSelect(c)}>
+              <button
+                type="button"
+                className="dev-boot__btn"
+                disabled={startingShiftOutletId !== null}
+                onClick={() => {
+                  setStartingShiftOutletId(c.outletId);
+                  setError(null);
+                  void posApi
+                    .openDevCashShift({
+                      tenantId: c.tenantId,
+                      legalEntityId: c.legalEntityId,
+                      outletId: c.outletId,
+                      openingCashMinor,
+                    })
+                    .then((shift) => {
+                      onSelect({
+                        ...c,
+                        cashShiftId: shift.cashShiftId,
+                        cashierId: shift.cashierId,
+                        deviceId: shift.deviceId,
+                        openingCashMinor: shift.openingCashMinor,
+                        shiftStatus: shift.status,
+                      });
+                    })
+                    .catch((err) => {
+                      setError(err instanceof Error ? err.message : 'Failed to open development shift');
+                    })
+                    .finally(() => setStartingShiftOutletId(null));
+                }}
+              >
                 <strong>{c.outletName}</strong>
                 <span>
-                  {c.tenantName} · {c.brandName}
+                  {c.tenantName} · {c.brandName} · {startingShiftOutletId === c.outletId ? 'Opening shift…' : 'Start'}
                 </span>
               </button>
             </li>

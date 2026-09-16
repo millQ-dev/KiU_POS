@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { CheckoutOrchestrator } from '../modules/checkout/checkout-orchestrator.js';
 import { BaseCommercialAcceptanceService } from '../modules/commercial-rounding/base-commercial-acceptance.js';
+import { CashShiftService } from '../modules/cash/cash-shift-service.js';
+import { CashCheckoutService } from '../modules/checkout/cash-checkout-service.js';
 import { GoodsIssueService } from '../modules/inventory/goods-issue-service.js';
 import { MenuResolver } from '../modules/menu/index.js';
 import { OrdersService } from '../modules/orders/orders-service.js';
@@ -87,6 +89,7 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
   const selection = new PosSelectionService(pool, orders);
   const menuResolver = new MenuResolver(pool);
   const baseCommercial = new BaseCommercialAcceptanceService(pool, orders);
+  const cashCheckout = new CashCheckoutService(pool, orders);
 
   app.post('/api/v1/pos/surface/resolve', async (req, reply) => {
     try {
@@ -437,6 +440,20 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
       }
     },
   );
+
+  app.post<{ Params: { orderId: string } }>(
+    '/api/v1/orders/:orderId/checkout/cash',
+    async (req, reply) => {
+      try {
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        const result = await cashCheckout.checkout({ ...body, orderId: req.params.orderId });
+        return { ...result, order: await enrichOrderLines(pool, result.order) };
+      } catch (err) {
+        const mapped = mapError(err);
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    },
+  );
 }
 
 /**
@@ -446,6 +463,19 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
 export async function registerDevCashierBootstrapRoutes(app: FastifyInstance, pool: pg.Pool) {
   const allowed =
     process.env.NODE_ENV !== 'production' || process.env.ALLOW_DEV_CASHIER_BOOTSTRAP === '1';
+  const cashShifts = new CashShiftService(pool);
+
+  app.post('/api/v1/dev/cash-shifts', async (req, reply) => {
+    if (!allowed) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Dev bootstrap disabled' });
+    }
+    try {
+      return await cashShifts.ensureDevOpenShift(req.body);
+    } catch (err) {
+      const mapped = mapError(err);
+      return reply.code(mapped.status).send(mapped.body);
+    }
+  });
 
   app.get('/api/v1/dev/cashier-contexts', async (_req, reply) => {
     if (!allowed) {

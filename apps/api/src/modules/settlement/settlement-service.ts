@@ -19,7 +19,7 @@ import type {
 } from './settlement-ports.js';
 import {
   emptyExternalEffectProbe,
-  emptyPaymentCoverageReader,
+  databasePaymentCoverageReader,
   unavailableFiscalCheckoutGate,
 } from './settlement-ports.js';
 
@@ -135,7 +135,7 @@ export class SettlementService {
     private readonly pool: Pool,
     deps: SettlementServiceDeps = {},
   ) {
-    this.coverage = deps.coverageReader ?? emptyPaymentCoverageReader();
+    this.coverage = deps.coverageReader ?? databasePaymentCoverageReader(pool);
     this.fiscalGate = deps.fiscalGate ?? unavailableFiscalCheckoutGate();
     this.externalEffects = deps.externalEffects ?? emptyExternalEffectProbe();
   }

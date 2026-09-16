@@ -35,6 +35,23 @@
   font-size: 0.875rem;
 }
 
+.dev-boot__cash {
+  display: grid;
+  gap: var(--pos-space-2);
+  margin-top: var(--pos-space-4);
+  font-weight: 700;
+}
+
+.dev-boot__cash input {
+  min-height: var(--pos-touch);
+  padding: 0 var(--pos-space-3);
+  border: 2px solid var(--pos-border);
+  border-radius: var(--pos-control-radius);
+  background: var(--pos-surface);
+  color: var(--pos-text);
+  font: inherit;
+}
+
 .dev-boot__error {
   color: var(--pos-danger);
 }

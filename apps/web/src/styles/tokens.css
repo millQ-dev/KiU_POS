@@ -1,19 +1,27 @@
 :root {
-  --pos-font: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
-  --pos-font-mono: 'IBM Plex Mono', ui-monospace, monospace;
-  --pos-bg: #1a1d23;
-  --pos-surface: #242830;
-  --pos-surface-2: #2e333d;
-  --pos-border: #3d4450;
-  --pos-text: #f2f4f7;
-  --pos-text-muted: #9aa3b2;
-  --pos-accent: #3d8bfd;
-  --pos-accent-press: #2f6fd1;
-  --pos-ok: #3dd68c;
-  --pos-warn: #f0b429;
-  --pos-danger: #f07178;
-  --pos-disabled: #5a6270;
-  --pos-radius: 10px;
+  --pos-font: Inter, 'Segoe UI', system-ui, sans-serif;
+  --pos-font-mono: Inter, ui-monospace, monospace;
+  --pos-bg: #f5f1e9;
+  --pos-surface: #ffffff;
+  --pos-surface-2: #faf7f1;
+  --pos-surface-soft: #faf7f1;
+  --pos-border: #d9d1c5;
+  --pos-border-strong: #202a29;
+  --pos-text: #202321;
+  --pos-text-muted: #6d736f;
+  --pos-accent: #a86f4a;
+  --pos-accent-dark: #815238;
+  --pos-accent-soft: #efe2d7;
+  --pos-accent-press: #815238;
+  --pos-ok: #39a86b;
+  --pos-success: #39a86b;
+  --pos-success-soft: #e3f3e9;
+  --pos-warn: #d89a26;
+  --pos-danger: #d9534f;
+  --pos-disabled: #a9aaa5;
+  --pos-radius: 6px;
+  --pos-control-radius: 4px;
+  --pos-panel-radius: 6px;
   --pos-space-1: 4px;
   --pos-space-2: 8px;
   --pos-space-3: 12px;
@@ -22,8 +30,8 @@
   --pos-tile-min: 96px;
   --pos-touch: 48px;
   --pos-header-h: 56px;
-  --pos-nav-w: 160px;
-  --pos-basket-w: 320px;
+  --pos-nav-w: 216px;
+  --pos-basket-w: 380px;
 }
 
 *,
@@ -47,7 +55,8 @@ body {
 }
 
 button:focus-visible,
-select:focus-visible {
-  outline: 2px solid var(--pos-accent);
+select:focus-visible,
+input:focus-visible {
+  outline: 3px solid var(--pos-accent);
   outline-offset: 2px;
 }

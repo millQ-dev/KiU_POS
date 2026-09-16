@@ -24,6 +24,26 @@ export type ResolvedPosSlot = {
   colorToken: string | null;
   state: PosSlotState;
   unitPrice: MoneyDto | null;
+  modifierGroups?: ModifierGroup[];
+};
+
+export type ModifierOption = {
+  modifierOptionId: string;
+  label: string;
+  priceDeltaMinor: string;
+  currencyCode: string;
+  minorUnitExponent: number;
+  position: number;
+  active: boolean;
+};
+
+export type ModifierGroup = {
+  modifierGroupId: string;
+  code: string;
+  label: string;
+  minSelections: number;
+  maxSelections: number;
+  options: ModifierOption[];
 };
 
 export type ResolvedPosPage = {
@@ -64,6 +84,13 @@ export type OrderLine = {
   quantity: string;
   unit: string;
   dimension: string;
+  modifiers?: Array<{
+    modifierGroupId: string;
+    modifierOptionId: string;
+    groupLabel: string;
+    optionLabel: string;
+    priceDeltaMinor: string;
+  }>;
 };
 
 export type OrderBasket = {
@@ -149,6 +176,57 @@ export type CashierContext = {
   legalEntityId: string;
   legalEntityName: string;
   orderChannel: string;
+  cashShiftId: string;
+  cashierId: string;
+  deviceId: string;
+  openingCashMinor: string;
+  shiftStatus: 'OPEN';
+};
+
+export type CashCheckoutResult = {
+  order: OrderBasket;
+  settlement: {
+    settlement_group_id: string;
+    settlement_state: string;
+    customer_payable_minor: string;
+    settlement_check_id: string;
+    check_state: string;
+    check_payable_minor: string;
+  };
+  payment: {
+    payment_id: string;
+    status: string;
+    tender_kind: string;
+    amount_minor: string;
+    tendered_minor: string;
+    change_minor: string;
+    currency_code: string;
+  };
+  productionTasks: Array<{
+    production_task_id: string;
+    order_line_id: string;
+    catalog_item_id: string;
+    status: string;
+    quantity: string;
+    unit: string;
+    label: string;
+    modifier_snapshot_json: unknown;
+  }>;
+  receipt: {
+    orderId: string;
+    issuedAt: string;
+    outletId: string;
+    terminalId: string;
+    cashierId: string;
+    currencyCode: string;
+    minorUnitExponent: number;
+    lines: unknown[];
+    subtotalMinor: string;
+    totalMinor: string;
+    paymentMethod: string;
+    cashTenderedMinor: string;
+    changeMinor: string;
+  };
 };
 
 export type ApiErrorBody = {

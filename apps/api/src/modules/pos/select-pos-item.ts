@@ -72,6 +72,7 @@ export class PosSelectionService {
       quantity: '1',
       unit: slot.baseUnit,
       dimension: 'COUNT',
+      modifierSelections: cmd.modifierSelections,
     });
   }
 
@@ -115,6 +116,7 @@ export class PosSelectionService {
       quantity: cmd.quantity,
       unit: slot.baseUnit,
       dimension: slot.dimension,
+      modifierSelections: cmd.modifierSelections,
     });
   }
 
@@ -205,6 +207,7 @@ export class PosSelectionService {
       quantity: cmd.quantity,
       unit: cmd.unit,
       dimension: cmd.dimension,
+      modifierSelections: cmd.modifierSelections,
     });
 
     return {

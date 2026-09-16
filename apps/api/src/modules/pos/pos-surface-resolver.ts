@@ -6,6 +6,7 @@ import {
   type ResolvedMenuItem,
 } from '../menu/index.js';
 import { DomainValidationError } from './errors.js';
+import { ModifierService, type ModifierGroupDto } from '../modifiers/modifier-service.js';
 import { LayoutResolver, type LayoutAssignmentProvenance, type ResolvedLayout } from './layout-resolver.js';
 import { resolvePosSurfaceSchema } from './types.js';
 
@@ -38,6 +39,7 @@ export type ResolvedPosSlot = {
   readonly colorToken: string | null;
   readonly state: Exclude<PosSlotState, 'HIDDEN'>;
   readonly unitPrice: ResolvedUnitMoney | null;
+  readonly modifierGroups: ModifierGroupDto[];
   readonly availabilityProvenance: AvailabilityProvenance | null;
   readonly menuProvenance: ResolvedMenuItem['menuProvenance'] | null;
   readonly layoutProvenance: {
@@ -122,6 +124,7 @@ function intersectSlot(
     labelOverride: slot.label_override,
     colorToken: slot.color_token,
     layoutProvenance,
+    modifierGroups: [],
   };
 
   if (!menuItem) {
@@ -175,6 +178,7 @@ function intersectSlot(
 }
 
 export class PosSurfaceResolver {
+  private readonly modifiers = new ModifierService();
   private readonly layoutResolver: LayoutResolver;
   private readonly menuResolver: MenuResolver;
 
@@ -279,6 +283,7 @@ export class PosSurfaceResolver {
           colorToken: s.color_token,
           state: 'CONFIGURATION_ERROR',
           unitPrice: null,
+          modifierGroups: [],
           availabilityProvenance: menuItem.availabilityProvenance,
           menuProvenance: menuItem.menuProvenance,
           layoutProvenance: {
@@ -290,7 +295,14 @@ export class PosSurfaceResolver {
         continue;
       }
       const resolved = intersectSlot(s, menuByCatalog, layout, catalog);
-      if (resolved) resolvedSlots.push(resolved);
+      if (resolved) {
+        const modifierGroups = await this.modifiers.getForCatalogItem(
+          this.pool,
+          layout.presentationContext.tenantId,
+          s.catalog_item_id,
+        );
+        resolvedSlots.push({ ...resolved, modifierGroups });
+      }
     }
 
     const pageSlots = new Map<string, ResolvedPosSlot[]>();

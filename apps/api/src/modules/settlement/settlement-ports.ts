@@ -1,3 +1,5 @@
+import type { Pool } from 'pg';
+
 /**
  * Narrow Ports for S1.1 Settlement consumption (ADR-0032).
  * Production has no Payment/Fiscal writers — only readers/gates.
@@ -25,6 +27,34 @@ export function emptyPaymentCoverageReader(): EmptyPaymentCoverageReader {
   return {
     async listQualifyingAllocations() {
       return [];
+    },
+  };
+}
+
+/** Production read-side adapter for Payments. Payments still owns its source rows. */
+export function databasePaymentCoverageReader(pool: Pool): QualifyingPaymentCoverageReader {
+  return {
+    async listQualifyingAllocations(input) {
+      const result = await pool.query<{
+        payment_allocation_id: string;
+        settlement_check_id: string;
+        amount_minor: string;
+      }>(
+        `SELECT pa.payment_allocation_id, pa.settlement_check_id, pa.amount_minor
+         FROM payment_allocation pa
+         JOIN payment p ON p.payment_id = pa.payment_id
+         WHERE pa.settlement_check_id = ANY($1::uuid[])
+           AND pa.active = TRUE
+           AND p.lifecycle_state = 'SUCCEEDED'
+         ORDER BY pa.created_at, pa.payment_allocation_id`,
+        [input.settlementCheckIds],
+      );
+      return result.rows.map((row) => ({
+        allocationIdentity: row.payment_allocation_id,
+        settlementCheckId: row.settlement_check_id,
+        amountMinor: row.amount_minor,
+        qualifies: true as const,
+      }));
     },
   };
 }

@@ -87,6 +87,7 @@ export function assembleBaseCommercialLineTerms(input: {
     quantity: string;
     unit: string;
     dimension: string;
+    modifierPriceDeltaMinor?: string;
   }>;
   resolvedLines: ReadonlyArray<{
     orderLineId: string;
@@ -145,8 +146,13 @@ export function assembleBaseCommercialLineTerms(input: {
       );
     }
 
+    const modifierPriceDeltaMinor = BigInt(orderLine.modifierPriceDeltaMinor ?? '0');
+    const effectiveUnitPriceMinor = (BigInt(line.resolvedUnitPriceMinor) + modifierPriceDeltaMinor).toString();
+    if (BigInt(effectiveUnitPriceMinor) < 0n) {
+      throw new DomainValidationError('MODIFIER_PRICE_INVALID', `Modifier price makes line ${line.orderLineId} negative`);
+    }
     const rounded = calculateRoundedLineGross({
-      unitMoney: createMoney(line.resolvedUnitPriceMinor, line.currencyCode, line.minorUnitExponent),
+      unitMoney: createMoney(effectiveUnitPriceMinor, line.currencyCode, line.minorUnitExponent),
       quantity: orderLine.quantity,
       roundingPolicy: policySnap,
     });
@@ -157,7 +163,7 @@ export function assembleBaseCommercialLineTerms(input: {
       quantity: orderLine.quantity,
       unit: orderLine.unit,
       dimension: orderLine.dimension,
-      resolvedUnitPriceMinor: line.resolvedUnitPriceMinor,
+      resolvedUnitPriceMinor: effectiveUnitPriceMinor,
       currencyCode: line.currencyCode,
       minorUnitExponent: line.minorUnitExponent,
       exactUnroundedMinorBasis: rounded.exactUnroundedMinorBasis,
@@ -171,6 +177,8 @@ export function assembleBaseCommercialLineTerms(input: {
       menuPublicationId: line.menuPublicationId,
       priceRuleId: line.priceRuleId,
       availabilityStatus: line.availabilityStatus,
+      modifierPriceDeltaMinor: modifierPriceDeltaMinor.toString(),
+      baseResolvedUnitPriceMinor: line.resolvedUnitPriceMinor,
     });
   }
 
