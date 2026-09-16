@@ -3,9 +3,11 @@ import type {
   MenuPriceResolution,
   OrderBasket,
   OrderLine,
+  SettlementProjection,
 } from '../api/types.js';
 import { CommercialStatusPanel } from './CommercialStatus.js';
 import { OrderLineEditor } from './OrderLineEditor.js';
+import { SettlementCheckoutPanel } from './SettlementCheckout.js';
 import './OrderBasket.css';
 
 type Props = {
@@ -18,11 +20,15 @@ type Props = {
   priceResolution: MenuPriceResolution | null;
   refreshingPrices: boolean;
   acceptingCommercial: boolean;
+  settlement: SettlementProjection | null;
+  settlementBusy: boolean;
   onSelectLine: (lineId: string | null) => void;
   onUpdateQuantity: (line: OrderLine, quantity: string) => void;
   onRemoveLine: (line: OrderLine) => void;
   onRefreshPrices: () => void;
   onAcceptCurrentPrices: () => void;
+  onOpenCheckout: () => void;
+  onAbortCheckout: () => void;
   onCancelOrder: () => void;
   onNewOrder: () => void;
 };
@@ -41,15 +47,20 @@ export function OrderBasketPanel({
   priceResolution,
   refreshingPrices,
   acceptingCommercial,
+  settlement,
+  settlementBusy,
   onSelectLine,
   onUpdateQuantity,
   onRemoveLine,
   onRefreshPrices,
   onAcceptCurrentPrices,
+  onOpenCheckout,
+  onAbortCheckout,
   onCancelOrder,
   onNewOrder,
 }: Props) {
   const selected = order?.lines.find((l) => l.orderLineId === selectedLineId) ?? null;
+  const commercialAccepted = commercial?.commercialState === 'ACCEPTED';
 
   return (
     <aside className="pos-basket" aria-label="Order basket">
@@ -131,6 +142,15 @@ export function OrderBasketPanel({
         onAcceptCurrentPrices={onAcceptCurrentPrices}
       />
 
+      <SettlementCheckoutPanel
+        settlement={settlement}
+        commercialAccepted={!!commercialAccepted}
+        editableOrder={editable && !!order}
+        busy={mutationBusy || settlementBusy || loading}
+        onOpenCheckout={onOpenCheckout}
+        onAbortCheckout={onAbortCheckout}
+      />
+
       <footer className="pos-basket__footer">
         {editable && order && (
           <button
@@ -143,8 +163,8 @@ export function OrderBasketPanel({
           </button>
         )}
         <p className="pos-basket__note">
-          Authoritative merchandise gross comes from backend after calculate &amp; accept. No frontend
-          unit×qty arithmetic. No pay in this shell.
+          Authoritative merchandise gross and Customer Payable come from backend. No frontend Money
+          arithmetic. No Cash/Card/QR in this shell.
         </p>
       </footer>
     </aside>

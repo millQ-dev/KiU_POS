@@ -40,6 +40,9 @@ vi.mock('./api/client.js', () => ({
     resolveMenuPrices: vi.fn(),
     calculateAndAcceptCommercialTerms: vi.fn(),
     repriceAndAcceptCommercialTerms: vi.fn(),
+    openSettlement: vi.fn(),
+    getLiveSettlement: vi.fn(),
+    abortSettlement: vi.fn(),
   },
 }));
 
@@ -167,11 +170,15 @@ const basketProps = {
   priceResolution: null,
   refreshingPrices: false,
   acceptingCommercial: false,
+  settlement: null,
+  settlementBusy: false,
   onSelectLine: vi.fn(),
   onUpdateQuantity: vi.fn(),
   onRemoveLine: vi.fn(),
   onRefreshPrices: vi.fn(),
   onAcceptCurrentPrices: vi.fn(),
+  onOpenCheckout: vi.fn(),
+  onAbortCheckout: vi.fn(),
   onCancelOrder: vi.fn(),
   onNewOrder: vi.fn(),
 };
@@ -319,7 +326,7 @@ describe('cashier components', () => {
   it('empty basket state and no line-gross math in panel', () => {
     render(<OrderBasketPanel order={null} {...basketProps} />);
     expect(screen.getByText(/Empty/i)).toBeTruthy();
-    expect(screen.getByText(/No frontend unit/i)).toBeTruthy();
+    expect(screen.getByText(/No Cash\/Card\/QR/i)).toBeTruthy();
   });
 
   it('selects basket line and shows selected visual + editor', () => {
@@ -434,7 +441,11 @@ describe('CashierShell integration (mocked API)', () => {
     mockedApi.resolveMenuPrices.mockReset();
     mockedApi.calculateAndAcceptCommercialTerms.mockReset();
     mockedApi.repriceAndAcceptCommercialTerms.mockReset();
+    mockedApi.openSettlement.mockReset();
+    mockedApi.getLiveSettlement.mockReset();
+    mockedApi.abortSettlement.mockReset();
     mockedApi.getCommercialStatus.mockResolvedValue(needsReacceptance);
+    mockedApi.getLiveSettlement.mockResolvedValue({ orderId: emptyOrder.orderId, settlement: null });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
   });
 

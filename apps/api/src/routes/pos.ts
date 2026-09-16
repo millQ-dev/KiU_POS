@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
+import { CheckoutOrchestrator } from '../modules/checkout/checkout-orchestrator.js';
 import { BaseCommercialAcceptanceService } from '../modules/commercial-rounding/base-commercial-acceptance.js';
 import { GoodsIssueService } from '../modules/inventory/goods-issue-service.js';
 import { MenuResolver } from '../modules/menu/index.js';
@@ -12,6 +13,7 @@ import {
   PosSurfaceResolver,
   PublishedImmutableError,
 } from '../modules/pos/index.js';
+import { SettlementService } from '../modules/settlement/settlement-service.js';
 
 function mapError(err: unknown): { status: number; body: Record<string, unknown> } {
   if (err instanceof DomainValidationError) {
@@ -32,7 +34,15 @@ function mapError(err: unknown): { status: number; body: Record<string, unknown>
     // Domain/application codes are SCREAMING_SNAKE; ignore driver codes (e.g. 42703).
     if (/^[A-Z][A-Z0-9_]+$/.test(code)) {
       if (code === 'NOT_FOUND') return { status: 404, body: { error: code, message } };
-      if (code === 'ORDER_IMMUTABLE' || code === 'PUBLISHED_IMMUTABLE' || code === 'IDEMPOTENCY_CONFLICT') {
+      if (
+        code === 'ORDER_IMMUTABLE' ||
+        code === 'PUBLISHED_IMMUTABLE' ||
+        code === 'IDEMPOTENCY_CONFLICT' ||
+        code === 'SETTLEMENT_ALREADY_OPEN' ||
+        code === 'SETTLEMENT_STALE_VERSION' ||
+        code === 'SETTLEMENT_ABORT_FORBIDDEN' ||
+        code === 'SETTLEMENT_EDIT_LOCKED'
+      ) {
         return { status: 409, body: { error: code, message } };
       }
       return { status: 400, body: { error: code, message } };
@@ -285,6 +295,127 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
           idempotencyKey: body.idempotencyKey,
           ...(body.actorId ? { actorId: body.actorId } : {}),
           ...(body.deviceId ? { deviceId: body.deviceId } : {}),
+        });
+      } catch (err) {
+        const mapped = mapError(err);
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    },
+  );
+
+  // --- S1.1 Settlement / Checkout (Orders-coordinated; no Payment writer) ---
+  const settlements = new SettlementService(pool);
+  const checkout = new CheckoutOrchestrator(pool, orders, settlements);
+
+  app.post<{ Params: { orderId: string } }>(
+    '/api/v1/orders/:orderId/open-settlement',
+    async (req, reply) => {
+      try {
+        const body = (req.body ?? {}) as {
+          idempotencyKey?: string;
+          actorId?: string;
+          deviceId?: string;
+        };
+        if (!body.idempotencyKey) {
+          return reply.code(400).send({ error: 'VALIDATION', message: 'idempotencyKey required' });
+        }
+        return await settlements.openSettlement({
+          orderId: req.params.orderId,
+          idempotencyKey: body.idempotencyKey,
+          actorId: body.actorId ?? null,
+          deviceId: body.deviceId ?? null,
+        });
+      } catch (err) {
+        const mapped = mapError(err);
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    },
+  );
+
+  app.get<{ Params: { orderId: string } }>(
+    '/api/v1/orders/:orderId/settlement',
+    async (req, reply) => {
+      try {
+        const live = await settlements.getLiveSettlementForOrder(req.params.orderId);
+        if (!live) {
+          return { orderId: req.params.orderId, settlement: null };
+        }
+        return { orderId: req.params.orderId, settlement: live };
+      } catch (err) {
+        const mapped = mapError(err);
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    },
+  );
+
+  app.get<{ Params: { settlementGroupId: string } }>(
+    '/api/v1/settlements/:settlementGroupId',
+    async (req, reply) => {
+      try {
+        return await settlements.getSettlement(req.params.settlementGroupId);
+      } catch (err) {
+        const mapped = mapError(err);
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    },
+  );
+
+  app.post<{ Params: { settlementGroupId: string } }>(
+    '/api/v1/settlements/:settlementGroupId/abort',
+    async (req, reply) => {
+      try {
+        const body = (req.body ?? {}) as { expectedVersion?: number };
+        return await settlements.abortSettlement({
+          settlementGroupId: req.params.settlementGroupId,
+          ...(body.expectedVersion != null ? { expectedVersion: body.expectedVersion } : {}),
+        });
+      } catch (err) {
+        const mapped = mapError(err);
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    },
+  );
+
+  app.post<{ Params: { settlementGroupId: string } }>(
+    '/api/v1/settlements/:settlementGroupId/reconcile-coverage',
+    async (req, reply) => {
+      try {
+        // Production: empty Payments reader → no allocations. Tests inject via service, not this route.
+        return await settlements.reconcileSettlementCoverage(req.params.settlementGroupId);
+      } catch (err) {
+        const mapped = mapError(err);
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    },
+  );
+
+  app.post<{ Params: { settlementGroupId: string } }>(
+    '/api/v1/settlements/:settlementGroupId/advance-checkout',
+    async (req, reply) => {
+      try {
+        const body = (req.body ?? {}) as {
+          completeIdempotencyKey?: string;
+          businessDate?: string;
+          businessOrder?: number;
+          businessTime?: string | null;
+          actorId?: string;
+          deviceId?: string;
+        };
+        if (!body.completeIdempotencyKey || !body.businessDate || body.businessOrder == null) {
+          return reply.code(400).send({
+            error: 'VALIDATION',
+            message: 'completeIdempotencyKey, businessDate, businessOrder required',
+          });
+        }
+        // Production fiscal gate is UNAVAILABLE (fail closed) until Fiscalization runtime exists.
+        return await checkout.tryAdvanceCheckout({
+          settlementGroupId: req.params.settlementGroupId,
+          completeIdempotencyKey: body.completeIdempotencyKey,
+          businessDate: body.businessDate,
+          businessOrder: body.businessOrder,
+          businessTime: body.businessTime ?? null,
+          actorId: body.actorId ?? null,
+          deviceId: body.deviceId ?? null,
         });
       } catch (err) {
         const mapped = mapError(err);

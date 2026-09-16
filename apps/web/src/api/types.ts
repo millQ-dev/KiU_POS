@@ -118,6 +118,27 @@ export type MenuPriceResolution = {
   }>;
 };
 
+/** Backend Settlement projection (S1.1 / ADR-0032). */
+export type SettlementProjection = {
+  settlementGroupId: string;
+  orderId: string;
+  state: 'COLLECTING' | 'SATISFIED' | 'ABORTED';
+  currencyCode: string;
+  merchandiseGrossMinor: string;
+  customerPayableMinor: string;
+  allocatedAmountMinor: string;
+  outstandingAmountMinor: string;
+  version: number;
+  checks: Array<{
+    settlementCheckId: string;
+    checkNumber: number;
+    state: string;
+    customerPayableMinor: string;
+    allocatedAmountMinor: string;
+    outstandingAmountMinor: string;
+  }>;
+};
+
 export type CashierContext = {
   tenantId: string;
   tenantName: string;

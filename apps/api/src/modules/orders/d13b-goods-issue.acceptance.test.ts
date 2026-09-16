@@ -1047,7 +1047,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
     expect(revCount.rows[0]!.c).toBe('1');
   });
 
-  it('16 — scope: no food_cost / payment / settlement tables used', async () => {
+  it('16 — scope: no food_cost / payment tables (Settlement foundation is S1.1)', async () => {
     await receiveMilkStock(3, '10000');
     const order = await openMilkOrder('1');
     await completeOrderWithCommercial({
@@ -1059,7 +1059,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
     const tables = await pool.query<{ tablename: string }>(
       `SELECT tablename FROM pg_tables
        WHERE schemaname = 'public'
-         AND tablename ~* '(food_cost|payment|settlement)'`,
+         AND tablename ~* '(food_cost|^payment)'`,
     );
     expect(tables.rows).toEqual([]);
   });
