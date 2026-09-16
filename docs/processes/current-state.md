@@ -1,26 +1,27 @@
 # MillQ Current State
 
-**Checkpoint:** Block D1.4B Order Commercial Snapshot **in review** — branch from Origin `main` @ `614daed` (2026-09-15)
+**Checkpoint:** Block D1.4C Revenue Basis Read Model **in review** — branch from Origin `main` @ `878264f` (2026-09-16)
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)
 **Backup host:** GitHub `https://github.com/millQ-dev/MillQ.git` (mirror only)
-**ADR-0028 PR #37:** merged @ `614daed6a1e6473b1a1c0e4a3cf8cf9f544d3b74`
-**Updated:** 2026-09-15
+**D1.4B PR #38:** merged @ `878264fff885f71984cf34df578aa67333d842f1`
+**Updated:** 2026-09-16
 
 ## Runtime / CI / backup
 
 | Item | State |
 | --- | --- |
 | D1.4A Actual COGS | **Merged** (unchanged by this block) |
+| D1.4B Order Commercial Snapshot | **Merged** @ `878264f` |
 | ADR-0028 | **Accepted** |
-| Block D1.4B Order Commercial Snapshot | **This PR** |
-| Revenue Basis read model / Food Cost Ratio / Operational Gross Profit | **STOP** — not started |
+| Block D1.4C Revenue Basis Read Model | **This PR** |
+| Food Cost Ratio / Operational Gross Profit | **STOP** — not started |
 
-## This PR (D1.4B)
+## This PR (D1.4C)
 
-- Migration `011_order_commercial_snapshot.sql`
-- `SetOrderCommercialTerms` + immutable freeze at `CompleteOrder`
-- Largest-remainder order-discount allocation (domain)
-- **No** Revenue reporting / Food Cost / Gross Profit
+- `RevenueBasisService` — read-only Reporting query over D1.4B snapshots
+- SALE + REVERSAL line/order effects with ADR-0027 reversal chronology
+- **No migration** — no reporting ledger / materialized Revenue table
+- **No** Food Cost Ratio / Operational Gross Profit
 
 ## Next
 
