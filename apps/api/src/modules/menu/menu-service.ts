@@ -92,6 +92,34 @@ async function assertPublicationInTenant(
   }
 }
 
+async function assertBrandInTenant(
+  client: PoolClient,
+  tenantId: string,
+  brandId: string,
+): Promise<void> {
+  const b = await client.query(`SELECT 1 FROM brand WHERE brand_id = $1 AND tenant_id = $2`, [
+    brandId,
+    tenantId,
+  ]);
+  if (b.rowCount !== 1) {
+    throw new DomainValidationError('INVALID_SALES_CONTEXT', 'Brand not in tenant (cross-tenant rejected)');
+  }
+}
+
+async function assertOutletInTenant(
+  client: PoolClient,
+  tenantId: string,
+  outletId: string,
+): Promise<void> {
+  const o = await client.query(`SELECT 1 FROM outlet WHERE outlet_id = $1 AND tenant_id = $2`, [
+    outletId,
+    tenantId,
+  ]);
+  if (o.rowCount !== 1) {
+    throw new DomainValidationError('INVALID_SALES_CONTEXT', 'Outlet not in tenant (cross-tenant rejected)');
+  }
+}
+
 function isExclusionViolation(err: unknown): boolean {
   return (
     typeof err === 'object' &&
@@ -394,22 +422,10 @@ export class MenuService {
       await assertPublicationInTenant(client, cmd.tenantId, cmd.menuPublicationId);
 
       if (cmd.scopeKind === 'BRAND' && cmd.brandId) {
-        const b = await client.query(`SELECT 1 FROM brand WHERE brand_id = $1 AND tenant_id = $2`, [
-          cmd.brandId,
-          cmd.tenantId,
-        ]);
-        if (b.rowCount !== 1) {
-          throw new DomainValidationError('INVALID_SALES_CONTEXT', 'Brand not in tenant');
-        }
+        await assertBrandInTenant(client, cmd.tenantId, cmd.brandId);
       }
       if (cmd.scopeKind === 'OUTLET' && cmd.outletId) {
-        const o = await client.query(
-          `SELECT brand_id FROM outlet WHERE outlet_id = $1 AND tenant_id = $2`,
-          [cmd.outletId, cmd.tenantId],
-        );
-        if (o.rowCount !== 1) {
-          throw new DomainValidationError('INVALID_SALES_CONTEXT', 'Outlet not in tenant');
-        }
+        await assertOutletInTenant(client, cmd.tenantId, cmd.outletId);
       }
 
       // Serialize assignment activation per tenant BEFORE idempotency lookup (retry-safe).
@@ -501,6 +517,12 @@ export class MenuService {
     try {
       await client.query('BEGIN');
       await assertCatalogItemInTenant(client, cmd.tenantId, cmd.catalogItemId);
+      if (cmd.scopeKind === 'BRAND' && cmd.brandId) {
+        await assertBrandInTenant(client, cmd.tenantId, cmd.brandId);
+      }
+      if (cmd.scopeKind === 'OUTLET' && cmd.outletId) {
+        await assertOutletInTenant(client, cmd.tenantId, cmd.outletId);
+      }
       await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [
         `availability_rule:${cmd.tenantId}`,
       ]);
@@ -612,6 +634,12 @@ export class MenuService {
     try {
       await client.query('BEGIN');
       await assertCatalogItemInTenant(client, cmd.tenantId, cmd.catalogItemId);
+      if (cmd.scopeKind === 'BRAND' && cmd.brandId) {
+        await assertBrandInTenant(client, cmd.tenantId, cmd.brandId);
+      }
+      if (cmd.scopeKind === 'OUTLET' && cmd.outletId) {
+        await assertOutletInTenant(client, cmd.tenantId, cmd.outletId);
+      }
       await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [
         `price_rule:${cmd.tenantId}`,
       ]);

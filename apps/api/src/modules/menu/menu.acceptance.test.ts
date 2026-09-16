@@ -545,6 +545,20 @@ describe('M1.1 Menu Configuration & Resolution Runtime', () => {
         idempotencyKey: idem('xt-as'),
       }),
     ).rejects.toMatchObject({ code: 'INVALID_SALES_CONTEXT' });
+
+    await expect(
+      menu.activatePriceRule({
+        tenantId: fx.tenantId,
+        catalogItemId: fx.milkItemId,
+        scopeKind: 'OUTLET',
+        outletId: randomUUID(),
+        amountMinor: '1',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+        idempotencyKey: idem('xt-out'),
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_SALES_CONTEXT' });
   });
 
   it('36–39 — resolveMenu provenance; resolveMenuItem same kernel', async () => {
