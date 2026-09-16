@@ -269,3 +269,185 @@ describe('P1.2 POS HTTP transport', () => {
     expect(src).toContain('orders.openOrder');
   });
 });
+
+describe('P1.3 Order Interaction HTTP transport', () => {
+  async function openWithEggLine(app: Awaited<ReturnType<typeof Fastify>>) {
+    const surface = await app.inject({
+      method: 'POST',
+      url: '/api/v1/pos/surface/resolve',
+      payload: payload(),
+    });
+    const eggSlot = (
+      surface.json() as { pages: { slots: { layoutPublicationSlotId: string; catalogItemId: string }[] }[] }
+    ).pages[0]!.slots.find((s) => s.catalogItemId === fx.eggItemId)!;
+    const milkSlot = (
+      surface.json() as { pages: { slots: { layoutPublicationSlotId: string; catalogItemId: string }[] }[] }
+    ).pages[0]!.slots.find((s) => s.catalogItemId === fx.milkItemId)!;
+    const opened = await app.inject({
+      method: 'POST',
+      url: '/api/v1/orders',
+      payload: {
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        outletId: fx.outletId,
+        channel: 'DIRECT',
+      },
+    });
+    const order = opened.json() as { orderId: string };
+    const selected = await app.inject({
+      method: 'POST',
+      url: '/api/v1/pos/select-count',
+      payload: {
+        ...payload(),
+        orderId: order.orderId,
+        layoutPublicationSlotId: eggSlot.layoutPublicationSlotId,
+      },
+    });
+    const body = selected.json() as {
+      order: { orderId: string; lines: { orderLineId: string; quantity: string }[] };
+    };
+    return { orderId: body.order.orderId, lineId: body.order.lines[0]!.orderLineId, milkSlot };
+  }
+
+  it('PATCH update / DELETE remove / cancel / commercial-status / resolve-menu-prices', async () => {
+    const app = Fastify();
+    await registerPosRoutes(app, pool);
+    await app.ready();
+    const { orderId, lineId, milkSlot } = await openWithEggLine(app);
+
+    const status0 = await app.inject({
+      method: 'GET',
+      url: `/api/v1/orders/${orderId}/commercial-status`,
+    });
+    expect(status0.statusCode).toBe(200);
+    expect(status0.json()).toMatchObject({
+      commercialState: 'NOT_ACCEPTED',
+      presentationHint: 'NEEDS_REACCEPTANCE',
+    });
+
+    // Explicit accept via domain (not HTTP) so we can prove invalidation
+    const { OrdersService } = await import('../modules/orders/orders-service.js');
+    const { GoodsIssueService } = await import('../modules/inventory/goods-issue-service.js');
+    const { acceptFinalMerchandiseTerms } = await import('../test/commercial-terms.js');
+    const orders = new OrdersService(pool, { saleWriteOffPort: new GoodsIssueService(pool) });
+    await acceptFinalMerchandiseTerms(orders, orderId, { defaultGrossMinor: '5000' });
+    const statusAccepted = await app.inject({
+      method: 'GET',
+      url: `/api/v1/orders/${orderId}/commercial-status`,
+    });
+    expect(statusAccepted.json()).toMatchObject({
+      commercialState: 'ACCEPTED',
+      presentationHint: 'COMMERCIAL_CURRENT',
+    });
+
+    const patched = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/orders/${orderId}/lines/${lineId}`,
+      payload: { quantity: '3' },
+    });
+    expect(patched.statusCode).toBe(200);
+    expect((patched.json() as { lines: { quantity: string }[] }).lines[0]!.quantity).toBe('3');
+    const statusAfter = await app.inject({
+      method: 'GET',
+      url: `/api/v1/orders/${orderId}/commercial-status`,
+    });
+    expect(statusAfter.json()).toMatchObject({
+      commercialState: 'NOT_ACCEPTED',
+      presentationHint: 'NEEDS_REACCEPTANCE',
+    });
+
+    const fractional = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/orders/${orderId}/lines/${lineId}`,
+      payload: { quantity: '1.5' },
+    });
+    expect(fractional.statusCode).toBe(400);
+    expect(fractional.json()).toMatchObject({ error: 'INVALID_QUANTITY' });
+
+    const resolved = await app.inject({
+      method: 'POST',
+      url: `/api/v1/orders/${orderId}/resolve-menu-prices`,
+      payload: { salesContext: payload().salesContext },
+    });
+    expect(resolved.statusCode).toBe(200);
+    const resolvedBody = resolved.json() as {
+      commercialGrossPolicy: string;
+      lines: { resolvedUnitPriceMinor: string | null }[];
+    };
+    expect(resolvedBody.commercialGrossPolicy).toBe('EXPLICIT_GROSS_ONLY');
+    expect(resolvedBody.lines[0]!.resolvedUnitPriceMinor).toBe('5000');
+    const termsStillClear = await pool.query(
+      `SELECT 1 FROM sales_order_commercial_terms WHERE order_id = $1`,
+      [orderId],
+    );
+    expect(termsStillClear.rowCount).toBe(0);
+
+    const weighted = await app.inject({
+      method: 'POST',
+      url: '/api/v1/pos/select-quantity',
+      payload: {
+        ...payload(),
+        orderId,
+        layoutPublicationSlotId: milkSlot.layoutPublicationSlotId,
+        quantity: '0.5',
+      },
+    });
+    expect(weighted.statusCode).toBe(200);
+    const wBody = weighted.json() as {
+      order: { lines: { catalogItemId: string; quantity: string; dimension: string }[] };
+    };
+    const milkLine = wBody.order.lines.find((l) => l.catalogItemId === fx.milkItemId)!;
+    expect(milkLine.quantity).toBe('0.5');
+    expect(milkLine.dimension).toBe('VOLUME');
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/orders/${orderId}/lines/${lineId}`,
+    });
+    expect(removed.statusCode).toBe(200);
+    expect(
+      (removed.json() as { lines: { catalogItemId: string }[] }).lines.every(
+        (l) => l.catalogItemId !== fx.eggItemId,
+      ),
+    ).toBe(true);
+
+    const cancelled = await app.inject({
+      method: 'POST',
+      url: `/api/v1/orders/${orderId}/cancel`,
+      payload: { reason: 'cashier_cancel' },
+    });
+    expect(cancelled.statusCode).toBe(200);
+    expect((cancelled.json() as { status: string }).status).toBe('CANCELLED');
+
+    const mutateClosed = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/orders/${orderId}/lines/${lineId}`,
+      payload: { quantity: '2' },
+    });
+    expect(mutateClosed.statusCode).toBe(409);
+
+    await app.close();
+  });
+
+  it('rejects cross-tenant / nonexistent line and does not derive gross', async () => {
+    const app = Fastify();
+    await registerPosRoutes(app, pool);
+    await app.ready();
+    const { orderId } = await openWithEggLine(app);
+    const bogus = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/orders/${orderId}/lines/${randomUUID()}`,
+    });
+    expect(bogus.statusCode).toBe(404);
+
+    const src = readFileSync(fileURLToPath(new URL('../routes/pos.ts', import.meta.url)), 'utf8');
+    expect(src).not.toMatch(/unitPrice\s*\*|amountMinor\s*\*|grossMerchandiseMinor\s*=/);
+    expect(src).toContain('UNIT_PRICE_RESOLUTION_ONLY');
+    expect(src).toContain('updateOrderLine');
+    expect(src).toContain('removeOrderLine');
+    expect(src).toContain('cancelOrder');
+    expect(src).toContain('getOpenCommercialStatus');
+    expect(src).toContain('selectPosQuantityTap');
+    await app.close();
+  });
+});

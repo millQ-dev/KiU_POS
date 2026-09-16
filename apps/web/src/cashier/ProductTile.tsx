@@ -12,7 +12,7 @@ type Props = {
 function stateLabel(slot: ResolvedPosSlot): string {
   switch (slot.state) {
     case 'ACTIVE':
-      return slot.quantityEntry === 'DEFERRED_WEIGHTED' ? 'Qty entry later' : 'Add';
+      return slot.quantityEntry === 'DEFERRED_WEIGHTED' ? 'Enter qty' : 'Add';
     case 'DISABLED_UNAVAILABLE':
       return 'Unavailable';
     case 'DISABLED_PRICE_UNAVAILABLE':
@@ -25,9 +25,9 @@ function stateLabel(slot: ResolvedPosSlot): string {
 }
 
 export function ProductTile({ slot, busy, onSelect }: Props) {
-  const isCountActive = slot.state === 'ACTIVE' && slot.quantityEntry === 'COUNT_ONE';
-  const isWeightedActive = slot.state === 'ACTIVE' && slot.quantityEntry === 'DEFERRED_WEIGHTED';
-  const disabled = !isCountActive || busy;
+  const isActive = slot.state === 'ACTIVE';
+  const isWeightedActive = isActive && slot.quantityEntry === 'DEFERRED_WEIGHTED';
+  const disabled = !isActive || busy;
   const style: CSSProperties = {};
   if (slot.colorToken) {
     style.borderColor = `var(--pos-slot-${slot.colorToken}, var(--pos-border))`;
@@ -49,7 +49,7 @@ export function ProductTile({ slot, busy, onSelect }: Props) {
       aria-label={`${slot.displayLabel}${slot.unitPrice ? `, ${formatMoneyDisplay(slot.unitPrice)}` : ''}, ${stateLabel(slot)}`}
       aria-disabled={disabled}
       onClick={() => {
-        if (isCountActive) onSelect(slot);
+        if (isActive) onSelect(slot);
       }}
     >
       <span className="pos-tile__label">{slot.displayLabel}</span>

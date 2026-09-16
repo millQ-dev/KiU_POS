@@ -8,7 +8,10 @@ import {
 import {
   DomainError,
   assertExactlyOneConsumptionPath,
+  assertPositive,
   consumptionPlanProvenanceHash,
+  createQuantity,
+  parseCanonicalDecimal,
   resolveSaleLineConsumption,
   type GraphCatalogItem,
   type GraphPreparationVersion,
@@ -201,6 +204,7 @@ export class OrdersService {
       const order = await this.lockOrder(client, cmd.orderId);
       this.assertOpenMutable(order);
       await this.assertCatalogItem(client, order.tenant_id, cmd.catalogItemId, cmd.dimension);
+      const qty = this.assertLineQuantity(cmd.quantity, cmd.dimension, cmd.unit);
 
       const maxLine = await client.query<{ max: number | null }>(
         `SELECT MAX(line_number) AS max FROM sales_order_line WHERE order_id = $1`,
@@ -217,9 +221,9 @@ export class OrdersService {
           cmd.orderId,
           lineNumber,
           cmd.catalogItemId,
-          cmd.quantity,
-          cmd.unit,
-          cmd.dimension,
+          qty.value,
+          qty.unit,
+          qty.dimension,
         ],
       );
       // Line mutation invalidates accepted commercial terms (must re-accept before CompleteOrder).
@@ -231,7 +235,7 @@ export class OrdersService {
           orderId: cmd.orderId,
           orderItemId: orderLineId,
           menuItemId: cmd.catalogItemId,
-          quantity: { value: cmd.quantity, unit: cmd.unit, dimension: cmd.dimension },
+          quantity: { value: qty.value, unit: qty.unit, dimension: qty.dimension },
         },
         context: {
           tenantId: order.tenant_id,
@@ -260,15 +264,16 @@ export class OrdersService {
       this.assertOpenMutable(order);
       const line = await this.lockLine(client, cmd.orderId, cmd.orderLineId);
       const catalogItemId = cmd.catalogItemId ?? line.catalog_item_id;
-      const quantity = cmd.quantity ?? line.quantity;
+      const quantityRaw = cmd.quantity ?? line.quantity;
       const unit = cmd.unit ?? line.unit;
       const dimension = cmd.dimension ?? line.dimension;
       await this.assertCatalogItem(client, order.tenant_id, catalogItemId, dimension);
+      const qty = this.assertLineQuantity(quantityRaw, dimension, unit);
       await client.query(
         `UPDATE sales_order_line
          SET catalog_item_id = $1, quantity = $2, unit = $3, dimension = $4
          WHERE order_line_id = $5`,
-        [catalogItemId, quantity, unit, dimension, cmd.orderLineId],
+        [catalogItemId, qty.value, qty.unit, qty.dimension, cmd.orderLineId],
       );
       await this.clearOpenCommercialTerms(client, cmd.orderId);
       await client.query('COMMIT');
@@ -1176,6 +1181,67 @@ export class OrdersService {
     };
   }
 
+  /**
+   * OPEN commercial acceptance status for cashier UX (D1.4B).
+   * Absence after line mutation = NEEDS_REACCEPTANCE (terms cleared, not a STALE row).
+   */
+  async getOpenCommercialStatus(orderId: string) {
+    const order = await this.requireOrder(orderId);
+    const head = await this.pool.query<{
+      currency_code: string;
+      minor_unit_exponent: number;
+      semantic_fingerprint: string;
+    }>(
+      `SELECT currency_code, minor_unit_exponent, semantic_fingerprint
+       FROM sales_order_commercial_terms WHERE order_id = $1`,
+      [orderId],
+    );
+    if (head.rowCount !== 1) {
+      return {
+        orderId,
+        orderStatus: order.status,
+        commercialState: 'NOT_ACCEPTED' as const,
+        presentationHint: 'NEEDS_REACCEPTANCE' as const,
+        currencyCode: null,
+        minorUnitExponent: null,
+        acceptedGrossMerchandiseMinor: null,
+        lines: [] as Array<{
+          orderLineId: string;
+          resolvedUnitPriceMinor: string | null;
+          grossMerchandiseMinor: string;
+        }>,
+      };
+    }
+    const h = head.rows[0]!;
+    const lines = await this.pool.query<{
+      order_line_id: string;
+      resolved_unit_price_minor: string | null;
+      gross_merchandise_minor: string;
+    }>(
+      `SELECT order_line_id, resolved_unit_price_minor, gross_merchandise_minor
+       FROM sales_order_commercial_line_terms WHERE order_id = $1 ORDER BY line_number ASC`,
+      [orderId],
+    );
+    let acceptedGross = 0n;
+    for (const l of lines.rows) {
+      acceptedGross += BigInt(l.gross_merchandise_minor);
+    }
+    return {
+      orderId,
+      orderStatus: order.status,
+      commercialState: 'ACCEPTED' as const,
+      presentationHint: 'COMMERCIAL_CURRENT' as const,
+      currencyCode: h.currency_code,
+      minorUnitExponent: h.minor_unit_exponent,
+      acceptedGrossMerchandiseMinor: acceptedGross.toString(),
+      lines: lines.rows.map((l) => ({
+        orderLineId: l.order_line_id,
+        resolvedUnitPriceMinor: l.resolved_unit_price_minor,
+        grossMerchandiseMinor: l.gross_merchandise_minor,
+      })),
+    };
+  }
+
   async getCommercialSnapshot(orderId: string) {
     const snap = await this.pool.query(
       `SELECT * FROM order_commercial_snapshot WHERE order_id = $1`,
@@ -1296,6 +1362,19 @@ export class OrdersService {
     const row = res.rows[0];
     if (!row || row.tenant_id !== tenantId || row.legal_entity_id !== legalEntityId) {
       throw new NotFoundError(`Outlet not found for tenant/legal entity: ${outletId}`);
+    }
+  }
+
+  private assertLineQuantity(value: string, dimension: UnitDimension, unit: string) {
+    try {
+      const q = createQuantity(value, dimension, unit);
+      assertPositive(parseCanonicalDecimal(q.value), 'quantity');
+      return q;
+    } catch (err) {
+      if (err instanceof DomainError) {
+        throw new DomainValidationError('INVALID_QUANTITY', err.message);
+      }
+      throw err;
     }
   }
 

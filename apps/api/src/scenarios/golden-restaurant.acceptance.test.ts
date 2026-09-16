@@ -1448,6 +1448,215 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
     });
   });
 
+  describe('VARIATION — Order Interaction (P1.3 COUNT mutate + commercial invalidate + re-resolve)', () => {
+    it('POS COUNT select → accept → qty change clears terms → re-resolve unit → explicit re-accept → CompleteOrder economics', async () => {
+      // Stock eggs (DIRECT_STOCK COUNT)
+      receiptSeq += 1;
+      const eggDraft = await receipts.createDraft({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        warehouseId: fx.warehouseId,
+        supplierId: fx.supplierId,
+        supplierDocumentNumber: `GOLDEN-EGG-${receiptSeq}`,
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        businessDate: DAY.PROCURE_1,
+        businessOrder: 1,
+        actorId: fx.actorId,
+        lines: [
+          {
+            lineNumber: 1,
+            catalogItemId: fx.eggItemId,
+            supplierItemId: fx.eggSupplierItemId,
+            inputKind: 'COUNT',
+            packageCount: 24,
+            acceptedBaseQuantity: '24',
+            baseUnit: 'ea',
+            dimension: 'COUNT',
+            unitPriceMinor: '2000',
+            lineAcquisitionCostMinor: '48000',
+          },
+        ],
+      });
+      await receipts.post(eggDraft!.goodsReceiptId, {
+        idempotencyKey: `golden-egg-${eggDraft!.goodsReceiptId}`,
+        actorId: fx.actorId,
+      });
+
+      const menuSvc = new MenuService(pool);
+      const menuResolver = new MenuResolver(pool);
+      const layoutSvc = new LayoutService(pool);
+      const posSurface = new PosSurfaceResolver(pool);
+      const posSelect = new PosSelectionService(pool, orders);
+
+      await menuSvc.setOutletTimezone({
+        tenantId: fx.tenantId,
+        outletId: fx.outletId,
+        timezone: 'Asia/Ho_Chi_Minh',
+      });
+      const def = await menuSvc.createMenuDefinition({
+        tenantId: fx.tenantId,
+        code: 'golden-p13',
+        name: 'Golden P1.3',
+      });
+      await menuSvc.setMenuDefinitionItems({
+        menuDefinitionId: def.menuDefinitionId,
+        catalogItemIds: [fx.eggItemId],
+      });
+      const menuPub = await menuSvc.publishMenu({
+        menuDefinitionId: def.menuDefinitionId,
+        idempotencyKey: 'golden-p13-menu-pub',
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+      });
+      await menuSvc.assignMenu({
+        tenantId: fx.tenantId,
+        menuPublicationId: menuPub.menuPublicationId,
+        scopeKind: 'OUTLET',
+        outletId: fx.outletId,
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+        idempotencyKey: 'golden-p13-menu-assign',
+      });
+      await menuSvc.activatePriceRule({
+        tenantId: fx.tenantId,
+        catalogItemId: fx.eggItemId,
+        scopeKind: 'OUTLET',
+        outletId: fx.outletId,
+        amountMinor: '5000',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+        idempotencyKey: 'golden-p13-price-v1',
+      });
+
+      const layoutDef = await layoutSvc.createLayoutDefinition({
+        tenantId: fx.tenantId,
+        code: 'golden-p13-layout',
+        name: 'P1.3 Layout',
+      });
+      await layoutSvc.setLayoutPages({
+        layoutDefinitionId: layoutDef.layoutDefinitionId,
+        pages: [{ pageCode: 'main', label: 'Main', sortOrder: 0 }],
+      });
+      await layoutSvc.setLayoutSlots({
+        layoutDefinitionId: layoutDef.layoutDefinitionId,
+        slots: [{ zone: 'PAGE', pageCode: 'main', catalogItemId: fx.eggItemId, position: 1 }],
+      });
+      const layoutPub = await layoutSvc.publishLayout({
+        layoutDefinitionId: layoutDef.layoutDefinitionId,
+        idempotencyKey: 'golden-p13-layout-pub',
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+      });
+      await layoutSvc.assignLayout({
+        tenantId: fx.tenantId,
+        layoutPublicationId: layoutPub.layoutPublicationId,
+        scopeKind: 'OUTLET',
+        outletId: fx.outletId,
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+        idempotencyKey: 'golden-p13-layout-assign',
+      });
+
+      const presentationContext = {
+        tenantId: fx.tenantId,
+        brandId: fx.brandId,
+        outletId: fx.outletId,
+      };
+      const salesContext = {
+        ...presentationContext,
+        orderChannel: 'DIRECT',
+        businessDateTime: '2026-03-10T10:00:00.000Z',
+      };
+
+      const surface = await posSurface.resolvePosSurface({ presentationContext, salesContext });
+      const eggSlot = surface.pages[0]!.slots.find((s) => s.catalogItemId === fx.eggItemId)!;
+      expect(eggSlot.state).toBe('ACTIVE');
+      expect(eggSlot.quantityEntry).toBe('COUNT_ONE');
+
+      const order = await orders.openOrder({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        outletId: fx.outletId,
+        channel: 'DIRECT',
+      });
+      expect(order).not.toHaveProperty('tableId');
+
+      const selected = await posSelect.selectPosCountTap({
+        orderId: order.orderId,
+        layoutPublicationSlotId: eggSlot.layoutPublicationSlotId,
+        presentationContext,
+        salesContext,
+      });
+      expect(selected.order.lines).toHaveLength(1);
+      expect(selected.order.lines[0]!.quantity).toBe('1');
+      const lineId = selected.order.lines[0]!.orderLineId;
+
+      const resolved1 = await menuResolver.resolveOrderLinesFromMenu({
+        orderId: order.orderId,
+        salesContext,
+      });
+      expect(resolved1.lines[0]!.resolvedUnitPriceMinor).toBe('5000');
+      const grossV1 = '5000';
+      await orders.setOrderCommercialTerms(
+        buildMenuResolvedCommercialTermsInput({
+          orderId: order.orderId,
+          idempotencyKey: 'golden-p13-commercial-v1',
+          resolvedLines: resolved1.lines,
+          explicitLineCommercialAmounts: [
+            { orderLineId: lineId, grossMerchandiseMinor: grossV1 },
+          ],
+        }),
+      );
+      let commercial = await orders.getOpenCommercialStatus(order.orderId);
+      expect(commercial.commercialState).toBe('ACCEPTED');
+
+      // D — COUNT quantity mutation
+      await orders.updateOrderLine({
+        orderId: order.orderId,
+        orderLineId: lineId,
+        quantity: '2',
+      });
+      commercial = await orders.getOpenCommercialStatus(order.orderId);
+      expect(commercial.commercialState).toBe('NOT_ACCEPTED');
+      expect(commercial.presentationHint).toBe('NEEDS_REACCEPTANCE');
+
+      // F — re-resolve current unit prices (does not accept)
+      const resolved2 = await menuResolver.resolveOrderLinesFromMenu({
+        orderId: order.orderId,
+        salesContext,
+      });
+      expect(resolved2.lines[0]!.resolvedUnitPriceMinor).toBe('5000');
+      const stillClear = await pool.query(
+        `SELECT 1 FROM sales_order_commercial_terms WHERE order_id = $1`,
+        [order.orderId],
+      );
+      expect(stillClear.rowCount).toBe(0);
+
+      // G/H — caller explicitly re-supplies gross (NOT unit×qty derivation)
+      const explicitGrossV2 = '10000';
+      await orders.setOrderCommercialTerms(
+        buildMenuResolvedCommercialTermsInput({
+          orderId: order.orderId,
+          idempotencyKey: 'golden-p13-commercial-v2',
+          resolvedLines: resolved2.lines,
+          explicitLineCommercialAmounts: [
+            { orderLineId: lineId, grossMerchandiseMinor: explicitGrossV2 },
+          ],
+        }),
+      );
+
+      await orders.completeOrder({
+        orderId: order.orderId,
+        idempotencyKey: 'golden-p13-complete',
+        businessDate: DAY.SALE,
+        businessOrder: 1,
+      });
+
+      const oe = await economics.compute(q({ orderId: order.orderId }));
+      expect(oe.denominatorRevenueBasisMinor).toBe(explicitGrossV2);
+      expect(oe.numeratorActualCogsMinor).toBe('4000'); // 2 × 2000
+      expect(oe.operationalGrossProfitMinor).toBe('6000');
+    });
+  });
+
   describe('DEFERRED markers (must remain explicit — do not fake PASS)', () => {
     it('documents unsupported torture steps as EXPECTED STOP', () => {
       const deferred = [
@@ -1459,16 +1668,17 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
         'Contribution Margin / channel commissions / payment fees → ADR-0019 future',
         'Explainable Intelligence → later reads proven economic evidence only',
         'TOTAL_LOSS production variation → covered in D1.2B suite; not on main sale path',
-        'React cashier Order Interaction UX → DEFERRED P1.3 (P1.2 shell PASS)',
-        'MASS/VOLUME quantity entry UX → DEFERRED P1.3',
+        'React cashier Order Interaction UX → PASS P1.3 (domain Golden variation + web suite)',
+        'MASS/VOLUME quantity entry UX → PASS P1.3 (authoritative dimension/unit metadata)',
         'COMMERCIAL ROUNDING POLICY (unit Money × fractional qty) → DEFERRED Level C; ADR-0030 reserved NOT created',
-        'Floor/Table runtime → DEFERRED (P1.1/P1.2 tableless POS proven without Floor/Table)',
+        'Floor/Table runtime → DEFERRED (P1.1/P1.2/P1.3 tableless POS proven without Floor/Table)',
         'Payments / Fiscalization → DEFERRED',
       ] as const;
       expect(deferred.length).toBeGreaterThanOrEqual(8);
       for (const d of deferred) {
         expect(d).toMatch(/→/);
       }
+      expect(deferred.some((d) => d.includes('ADR-0030'))).toBe(true);
     });
   });
 });

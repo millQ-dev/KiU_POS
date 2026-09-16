@@ -1,6 +1,8 @@
 import type {
   ApiErrorBody,
   CashierContext,
+  CommercialStatus,
+  MenuPriceResolution,
   OrderBasket,
   ResolvedPosSurface,
 } from './types.js';
@@ -72,10 +74,49 @@ export const posApi = {
     return request('GET', `/api/v1/orders/${orderId}`);
   },
 
-  selectCountTap(payload: PresentationSalesPayload & {
-    orderId: string;
-    layoutPublicationSlotId: string;
-  }): Promise<{ order: OrderBasket }> {
+  selectCountTap(
+    payload: PresentationSalesPayload & {
+      orderId: string;
+      layoutPublicationSlotId: string;
+    },
+  ): Promise<{ order: OrderBasket }> {
     return request('POST', '/api/v1/pos/select-count', payload);
+  },
+
+  selectQuantityTap(
+    payload: PresentationSalesPayload & {
+      orderId: string;
+      layoutPublicationSlotId: string;
+      quantity: string;
+    },
+  ): Promise<{ order: OrderBasket }> {
+    return request('POST', '/api/v1/pos/select-quantity', payload);
+  },
+
+  updateOrderLine(
+    orderId: string,
+    lineId: string,
+    body: { quantity: string; unit?: string; dimension?: string },
+  ): Promise<OrderBasket> {
+    return request('PATCH', `/api/v1/orders/${orderId}/lines/${lineId}`, body);
+  },
+
+  removeOrderLine(orderId: string, lineId: string): Promise<OrderBasket> {
+    return request('DELETE', `/api/v1/orders/${orderId}/lines/${lineId}`);
+  },
+
+  cancelOrder(orderId: string, body: { reason: string; actorId?: string }): Promise<OrderBasket> {
+    return request('POST', `/api/v1/orders/${orderId}/cancel`, body);
+  },
+
+  getCommercialStatus(orderId: string): Promise<CommercialStatus> {
+    return request('GET', `/api/v1/orders/${orderId}/commercial-status`);
+  },
+
+  resolveMenuPrices(
+    orderId: string,
+    payload: { salesContext: PresentationSalesPayload['salesContext'] },
+  ): Promise<MenuPriceResolution> {
+    return request('POST', `/api/v1/orders/${orderId}/resolve-menu-prices`, payload);
   },
 };

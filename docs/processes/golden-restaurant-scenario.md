@@ -46,6 +46,8 @@
 | POS Presentation / live cashier selection (Layout ∩ Menu → AddOrderLine) | PASS |
 | Historical economics stable after LayoutPublication v2 | PASS |
 | First React KiU cashier shell (consumes P1.1 HTTP contracts) | PASS |
+| Cashier Order Interaction (COUNT mutate → commercial invalidate → re-resolve → explicit re-accept) | PASS |
+| MASS/VOLUME quantity entry (authoritative metadata; no unit×qty gross) | PASS (web + HTTP) |
 
 ## DEFERRED / EXPECTED STOP
 
@@ -59,8 +61,8 @@
 | Contribution Margin / channel fees | ADR-0019 future ladder |
 | Explainable Intelligence | Intelligence reads proven evidence only |
 | TOTAL_LOSS on main sale path | Keep on D1.2B suite (not main economic day) |
-| React cashier shell / Order Interaction UX | **PASS** shell in P1.2; Order Interaction UX → **P1.3** |
-| Floor/Table runtime | DEFERRED — P1.1 proves tableless POS without Floor/Table |
+| React cashier Order Interaction UX | **PASS** P1.3 |
+| Floor/Table runtime | DEFERRED — P1.1–P1.3 prove tableless POS without Floor/Table |
 | Commercial RoundingPolicy (unit Money × fractional qty) | DEFERRED Level C — **ADR-0030 reserved, NOT created** |
 
 ## Bugs discovered by Golden

@@ -1,5 +1,5 @@
 export { DomainError, IncompatibleUnitError, InvalidDecimalError, InvalidMoneyError } from './errors.js';
-export { Decimal, parseCanonicalDecimal, toCanonicalDecimal } from './decimal.js';
+export { Decimal, parseCanonicalDecimal, toCanonicalDecimal, assertPositive, assertNonNegative } from './decimal.js';
 export {
   createMoney,
   addMoney,
