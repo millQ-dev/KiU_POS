@@ -41,7 +41,8 @@
 | ORDER_UNRESOLVED | PASS |
 | Revenue Coverage Gap | PASS |
 | Tenant isolation | PASS |
-| Provenance / drill-down | PASS |
+| Live Menu/Pricing resolution (unit price + explicit gross) | PASS |
+| Historical Revenue/COGS/FC/OGP stable after later PriceRule/Publication | PASS |
 
 ## DEFERRED / EXPECTED STOP
 
@@ -55,7 +56,8 @@
 | Contribution Margin / channel fees | ADR-0019 future ladder |
 | Explainable Intelligence | Intelligence reads proven evidence only |
 | TOTAL_LOSS on main sale path | Keep on D1.2B suite (not main economic day) |
-| Live Menu/Pricing mutation | **DEFERRED** — depends on ADR-0029 + MenuResolver runtime |
+| POS Presentation / MenuLayout | Next vertical after M1.1 |
+| Commercial RoundingPolicy (unit Money × fractional qty) | DEFERRED Level C — ADR-0030 NOT created |
 
 ## Bugs discovered by Golden
 
