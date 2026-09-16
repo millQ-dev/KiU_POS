@@ -76,7 +76,7 @@ export type OrderBasket = {
   lines: OrderLine[];
 };
 
-/** Backend commercial acceptance read (D1.4B). Absence after mutation = NEEDS_REACCEPTANCE. */
+/** Backend commercial acceptance read (D1.4B / C1.1). Absence after mutation = NEEDS_REACCEPTANCE. */
 export type CommercialStatus = {
   orderId: string;
   orderStatus: string;
@@ -85,10 +85,18 @@ export type CommercialStatus = {
   currencyCode: string | null;
   minorUnitExponent: number | null;
   acceptedGrossMerchandiseMinor: string | null;
+  /** Authoritative Σ rounded line gross when accepted (C1.1). */
+  merchandiseGrossMinor?: string | null;
+  commercialGrossPolicy?: string | null;
+  roundingProvenance?: unknown;
   lines: Array<{
     orderLineId: string;
     resolvedUnitPriceMinor: string | null;
     grossMerchandiseMinor: string;
+    exactUnroundedMinorBasis?: string | null;
+    roundingDelta?: string | null;
+    roundingPolicyId?: string | null;
+    roundingPolicyVersion?: number | null;
   }>;
 };
 

@@ -54,11 +54,11 @@ export async function seedBlockCFixture(pool: pg.Pool): Promise<BlockCFixture> {
   try {
     await client.query('BEGIN');
     await client.query(`INSERT INTO tenant (tenant_id, name) VALUES ($1, 'MillQ Demo')`, [ids.tenantId]);
-    await client.query(`INSERT INTO legal_entity (legal_entity_id, tenant_id, name) VALUES ($1,$2,'LE A'), ($3,$2,'LE B')`, [
-      ids.legalEntityId,
-      ids.tenantId,
-      ids.otherLegalEntityId,
-    ]);
+    await client.query(
+      `INSERT INTO legal_entity (legal_entity_id, tenant_id, name, jurisdiction_code)
+       VALUES ($1,$2,'LE A','VN'), ($3,$2,'LE B','VN')`,
+      [ids.legalEntityId, ids.tenantId, ids.otherLegalEntityId],
+    );
     await client.query(`INSERT INTO brand (brand_id, tenant_id, name) VALUES ($1,$2,'Brand')`, [
       ids.brandId,
       ids.tenantId,

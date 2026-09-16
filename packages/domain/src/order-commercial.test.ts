@@ -95,6 +95,13 @@ describe('commercialSnapshotSemanticHash', () => {
       taxMinor: null,
       certainty: 'FINAL' as const,
       fundingProvenance: null,
+      exactUnroundedMinorBasis: null,
+      roundingDelta: null,
+      roundingPolicyId: null,
+      roundingPolicyVersion: null,
+      roundingMode: null,
+      quantumMinor: null,
+      calculationContext: null,
     };
     const lineB = { ...lineA, lineNumber: 2, orderLineId: 'cccccccc-cccc-cccc-cccc-cccccccccccc' };
     const h1 = commercialSnapshotSemanticHash({ ...base, lines: [lineA, lineB] });

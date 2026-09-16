@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
+import { BaseCommercialAcceptanceService } from '../modules/commercial-rounding/base-commercial-acceptance.js';
 import { GoodsIssueService } from '../modules/inventory/goods-issue-service.js';
 import { MenuResolver } from '../modules/menu/index.js';
 import { OrdersService } from '../modules/orders/orders-service.js';
@@ -70,6 +71,7 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
   const surfaceResolver = new PosSurfaceResolver(pool);
   const selection = new PosSelectionService(pool, orders);
   const menuResolver = new MenuResolver(pool);
+  const baseCommercial = new BaseCommercialAcceptanceService(pool, orders);
 
   app.post('/api/v1/pos/surface/resolve', async (req, reply) => {
     try {
@@ -205,7 +207,7 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
         });
         return {
           orderId: resolved.orderId,
-          note: 'UNIT_PRICE_RESOLUTION_ONLY — does not accept commercial terms; OPTION A / ADR-0030 reserved',
+          note: 'UNIT_PRICE_RESOLUTION_ONLY — does not accept commercial terms; use calculate-and-accept for BASE_LIST_LINE_GROSS',
           commercialGrossPolicy: 'EXPLICIT_GROSS_ONLY',
           lines: resolved.lines.map((l) => ({
             orderLineId: l.orderLineId,
@@ -219,6 +221,71 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
             priceRuleId: l.priceRuleId,
           })),
         };
+      } catch (err) {
+        const mapped = mapError(err);
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    },
+  );
+
+  /**
+   * C1.1 — calculate BASE_LIST_LINE_GROSS via RoundingPolicy and explicitly accept.
+   * Same kernel for calculate-and-accept and reprice-and-accept.
+   */
+  app.post<{ Params: { orderId: string } }>(
+    '/api/v1/orders/:orderId/calculate-and-accept-commercial-terms',
+    async (req, reply) => {
+      try {
+        const body = (req.body ?? {}) as {
+          salesContext?: unknown;
+          idempotencyKey?: string;
+          actorId?: string;
+          deviceId?: string;
+        };
+        if (!body.salesContext) {
+          return reply.code(400).send({ error: 'VALIDATION', message: 'salesContext required' });
+        }
+        if (!body.idempotencyKey) {
+          return reply.code(400).send({ error: 'VALIDATION', message: 'idempotencyKey required' });
+        }
+        return await baseCommercial.calculateAndAcceptBaseCommercialTerms({
+          orderId: req.params.orderId,
+          salesContext: body.salesContext,
+          idempotencyKey: body.idempotencyKey,
+          ...(body.actorId ? { actorId: body.actorId } : {}),
+          ...(body.deviceId ? { deviceId: body.deviceId } : {}),
+        });
+      } catch (err) {
+        const mapped = mapError(err);
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    },
+  );
+
+  app.post<{ Params: { orderId: string } }>(
+    '/api/v1/orders/:orderId/reprice-and-accept-commercial-terms',
+    async (req, reply) => {
+      try {
+        const body = (req.body ?? {}) as {
+          salesContext?: unknown;
+          idempotencyKey?: string;
+          actorId?: string;
+          deviceId?: string;
+        };
+        if (!body.salesContext) {
+          return reply.code(400).send({ error: 'VALIDATION', message: 'salesContext required' });
+        }
+        if (!body.idempotencyKey) {
+          return reply.code(400).send({ error: 'VALIDATION', message: 'idempotencyKey required' });
+        }
+        // Same acceptance kernel — explicit reprice uses current Menu + current policy.
+        return await baseCommercial.calculateAndAcceptBaseCommercialTerms({
+          orderId: req.params.orderId,
+          salesContext: body.salesContext,
+          idempotencyKey: body.idempotencyKey,
+          ...(body.actorId ? { actorId: body.actorId } : {}),
+          ...(body.deviceId ? { deviceId: body.deviceId } : {}),
+        });
       } catch (err) {
         const mapped = mapError(err);
         return reply.code(mapped.status).send(mapped.body);

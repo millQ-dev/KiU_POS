@@ -867,12 +867,13 @@ describe('P1.1 POS Presentation Runtime', () => {
         orderId: order.orderId,
         idempotencyKey: idem('comm'),
         resolvedLines: resolvedLines.lines,
-        explicitLineCommercialAmounts: [
-          {
-            orderLineId: resolvedLines.lines[0]!.orderLineId,
-            grossMerchandiseMinor: '100000',
+        roundingPolicy: {
+            roundingPolicyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            policyVersion: 1,
+            calculationContext: 'BASE_LIST_LINE_GROSS',
+            roundingMode: 'HALF_UP',
+            quantumMinor: '1',
           },
-        ],
       }),
     );
     // Without goods receipt COGS may fail — skip complete if write-off needs stock; use commercial snapshot path

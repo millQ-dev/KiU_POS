@@ -122,6 +122,14 @@ export const setOrderCommercialTermsSchema = z
             certainty: commercialCertaintySchema.optional(),
             fundingProvenance: z.string().min(1).nullable().optional(),
             provenance: z.unknown().optional(),
+            /** C1.1 / ADR-0030 rounding provenance (optional; legacy OPTION A omits). */
+            exactUnroundedMinorBasis: z.string().min(1).optional(),
+            roundingDelta: z.string().min(1).optional(),
+            roundingPolicyId: uuid.optional(),
+            roundingPolicyVersion: z.number().int().positive().optional(),
+            roundingMode: z.enum(['HALF_UP', 'HALF_EVEN', 'DOWN', 'UP']).optional(),
+            quantumMinor: z.string().regex(/^[1-9]\d*$/).optional(),
+            calculationContext: z.literal('BASE_LIST_LINE_GROSS').optional(),
           })
           .strict(),
       )

@@ -443,6 +443,9 @@ describe('P1.3 Order Interaction HTTP transport', () => {
     const src = readFileSync(fileURLToPath(new URL('../routes/pos.ts', import.meta.url)), 'utf8');
     expect(src).not.toMatch(/unitPrice\s*\*|amountMinor\s*\*|grossMerchandiseMinor\s*=/);
     expect(src).toContain('UNIT_PRICE_RESOLUTION_ONLY');
+    expect(src).toContain('calculate-and-accept-commercial-terms');
+    expect(src).toContain('reprice-and-accept-commercial-terms');
+    expect(src).toContain('BaseCommercialAcceptanceService');
     expect(src).toContain('updateOrderLine');
     expect(src).toContain('removeOrderLine');
     expect(src).toContain('cancelOrder');

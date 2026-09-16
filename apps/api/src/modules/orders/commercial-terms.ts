@@ -2,11 +2,14 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import {
   allocateOrderMerchantDiscount,
+  calculateRoundedLineGross,
   commercialSnapshotSemanticHash,
   commercialTermsSemanticFingerprint,
   computeLineNetMerchandiseSalesMinor,
+  createMoney,
   InvalidMoneyError,
   type CommercialCertainty,
+  type CommercialRoundingMode,
 } from '@millq/domain';
 import { DomainValidationError } from './errors.js';
 import type { SetOrderCommercialTermsInput } from './types.js';
@@ -37,6 +40,13 @@ export type BuiltCommercialLine = {
   fundingProvenance: string | null;
   provenance: unknown;
   eligibleForOrderDiscount: boolean;
+  exactUnroundedMinorBasis: string | null;
+  roundingDelta: string | null;
+  roundingPolicyId: string | null;
+  roundingPolicyVersion: number | null;
+  roundingMode: string | null;
+  quantumMinor: string | null;
+  calculationContext: string | null;
 };
 
 export type BuiltCommercialState = {
@@ -63,6 +73,129 @@ function mapMoney(err: unknown): never {
     throw new DomainValidationError(err.code, err.message);
   }
   throw err;
+}
+
+/**
+ * ADR-0030 / C1.1: every NEW accepted line must carry complete RoundingPolicy provenance
+ * that matches the pure calculation kernel. OPTION A bare explicit gross is rejected.
+ */
+function assertValidatedRoundingProvenance(input: {
+  currencyCode: string;
+  minorUnitExponent: number;
+  quantity: string;
+  resolvedUnitPriceMinor: string | null;
+  grossMerchandiseMinor: string;
+  exactUnroundedMinorBasis?: string;
+  roundingDelta?: string;
+  roundingPolicyId?: string;
+  roundingPolicyVersion?: number;
+  roundingMode?: string;
+  quantumMinor?: string;
+  calculationContext?: string;
+}): {
+  exactUnroundedMinorBasis: string;
+  roundingDelta: string;
+  roundingPolicyId: string;
+  roundingPolicyVersion: number;
+  roundingMode: CommercialRoundingMode;
+  quantumMinor: string;
+  calculationContext: 'BASE_LIST_LINE_GROSS';
+} {
+  const hasAny =
+    input.exactUnroundedMinorBasis != null ||
+    input.roundingDelta != null ||
+    input.roundingPolicyId != null ||
+    input.roundingPolicyVersion != null ||
+    input.roundingMode != null ||
+    input.quantumMinor != null ||
+    input.calculationContext != null;
+
+  if (!hasAny) {
+    throw new DomainValidationError(
+      'COMMERCIAL_ROUNDING_POLICY_REQUIRED',
+      'ADR-0030: official merchandise gross requires RoundingPolicy provenance; OPTION A explicit-gross without policy is superseded',
+    );
+  }
+
+  if (
+    input.exactUnroundedMinorBasis == null ||
+    input.roundingDelta == null ||
+    input.roundingPolicyId == null ||
+    input.roundingPolicyVersion == null ||
+    input.roundingMode == null ||
+    input.quantumMinor == null ||
+    input.calculationContext == null ||
+    input.resolvedUnitPriceMinor == null
+  ) {
+    throw new DomainValidationError(
+      'COMMERCIAL_ROUNDING_POLICY_INVALID',
+      'Rounding provenance must be complete (basis, delta, policy id/version/mode/quantum/context, unit Money)',
+    );
+  }
+
+  if (input.calculationContext !== 'BASE_LIST_LINE_GROSS') {
+    throw new DomainValidationError(
+      'COMMERCIAL_ROUNDING_POLICY_INVALID',
+      'calculationContext must be BASE_LIST_LINE_GROSS',
+    );
+  }
+
+  if (!['HALF_UP', 'HALF_EVEN', 'DOWN', 'UP'].includes(input.roundingMode)) {
+    throw new DomainValidationError(
+      'COMMERCIAL_ROUNDING_POLICY_INVALID',
+      `Unsupported roundingMode: ${input.roundingMode}`,
+    );
+  }
+
+  let expected;
+  try {
+    expected = calculateRoundedLineGross({
+      unitMoney: createMoney(
+        input.resolvedUnitPriceMinor,
+        input.currencyCode,
+        input.minorUnitExponent,
+      ),
+      quantity: input.quantity,
+      roundingPolicy: {
+        roundingPolicyId: input.roundingPolicyId,
+        policyVersion: input.roundingPolicyVersion,
+        calculationContext: 'BASE_LIST_LINE_GROSS',
+        roundingMode: input.roundingMode as CommercialRoundingMode,
+        quantumMinor: input.quantumMinor,
+      },
+    });
+  } catch (e) {
+    mapMoney(e);
+  }
+
+  if (expected.roundedGrossMoney.amountMinor !== input.grossMerchandiseMinor) {
+    throw new DomainValidationError(
+      'COMMERCIAL_ROUNDING_POLICY_INVALID',
+      'grossMerchandiseMinor does not match RoundingPolicy kernel result',
+    );
+  }
+  if (expected.exactUnroundedMinorBasis !== input.exactUnroundedMinorBasis) {
+    throw new DomainValidationError(
+      'COMMERCIAL_ROUNDING_POLICY_INVALID',
+      'exactUnroundedMinorBasis does not match RoundingPolicy kernel result',
+    );
+  }
+  if (expected.roundingDelta !== input.roundingDelta) {
+    throw new DomainValidationError(
+      'COMMERCIAL_ROUNDING_POLICY_INVALID',
+      'roundingDelta does not match RoundingPolicy kernel result',
+    );
+  }
+
+  return {
+    exactUnroundedMinorBasis: expected.exactUnroundedMinorBasis,
+    roundingDelta: expected.roundingDelta,
+    roundingPolicyId: input.roundingPolicyId,
+    roundingPolicyVersion: input.roundingPolicyVersion,
+    roundingMode: input.roundingMode as CommercialRoundingMode,
+    quantumMinor: input.quantumMinor,
+    calculationContext: 'BASE_LIST_LINE_GROSS',
+  };
 }
 
 /** Validate command against authoritative OrderLines and build computed commercial state. */
@@ -126,6 +259,13 @@ export function buildCommercialStateFromCommand(
     fundingProvenance: string | null;
     provenance: unknown;
     basisMinor: string;
+    exactUnroundedMinorBasis: string;
+    roundingDelta: string;
+    roundingPolicyId: string;
+    roundingPolicyVersion: number;
+    roundingMode: string;
+    quantumMinor: string;
+    calculationContext: string;
   };
 
   const prepared: Prep[] = [];
@@ -139,6 +279,26 @@ export function buildCommercialStateFromCommand(
           `lineMerchantFundedDiscountMinor exceeds grossMerchandiseMinor for line ${ol.line_number}`,
         );
       }
+      const rounding = assertValidatedRoundingProvenance({
+        currencyCode,
+        minorUnitExponent: cmd.minorUnitExponent,
+        quantity: ol.quantity,
+        resolvedUnitPriceMinor: lt.resolvedUnitPriceMinor ?? null,
+        grossMerchandiseMinor: lt.grossMerchandiseMinor,
+        ...(lt.exactUnroundedMinorBasis != null
+          ? { exactUnroundedMinorBasis: lt.exactUnroundedMinorBasis }
+          : {}),
+        ...(lt.roundingDelta != null ? { roundingDelta: lt.roundingDelta } : {}),
+        ...(lt.roundingPolicyId != null ? { roundingPolicyId: lt.roundingPolicyId } : {}),
+        ...(lt.roundingPolicyVersion != null
+          ? { roundingPolicyVersion: lt.roundingPolicyVersion }
+          : {}),
+        ...(lt.roundingMode != null ? { roundingMode: lt.roundingMode } : {}),
+        ...(lt.quantumMinor != null ? { quantumMinor: lt.quantumMinor } : {}),
+        ...(lt.calculationContext != null
+          ? { calculationContext: lt.calculationContext }
+          : {}),
+      });
       const basis =
         lt.eligibleForOrderDiscount !== false ? (gross - lineDisc).toString() : '0';
       prepared.push({
@@ -156,6 +316,13 @@ export function buildCommercialStateFromCommand(
         fundingProvenance: lt.fundingProvenance ?? null,
         provenance: lt.provenance ?? null,
         basisMinor: basis,
+        exactUnroundedMinorBasis: rounding.exactUnroundedMinorBasis,
+        roundingDelta: rounding.roundingDelta,
+        roundingPolicyId: rounding.roundingPolicyId,
+        roundingPolicyVersion: rounding.roundingPolicyVersion,
+        roundingMode: rounding.roundingMode,
+        quantumMinor: rounding.quantumMinor,
+        calculationContext: rounding.calculationContext,
       });
     }
 
@@ -198,6 +365,13 @@ export function buildCommercialStateFromCommand(
           fundingProvenance: p.fundingProvenance,
           provenance: p.provenance,
           eligibleForOrderDiscount: p.eligibleForOrderDiscount,
+          exactUnroundedMinorBasis: p.exactUnroundedMinorBasis,
+          roundingDelta: p.roundingDelta,
+          roundingPolicyId: p.roundingPolicyId,
+          roundingPolicyVersion: p.roundingPolicyVersion,
+          roundingMode: p.roundingMode,
+          quantumMinor: p.quantumMinor,
+          calculationContext: p.calculationContext,
         };
       })
       .sort((a, b) => a.lineNumber - b.lineNumber);
@@ -239,7 +413,19 @@ export function buildCommercialStateFromCommand(
       taxMinor: l.taxMinor,
       certainty: l.certainty,
       fundingProvenance: l.fundingProvenance,
-      provenance: l.provenance,
+      // Policy provenance participates in semantic equality (ADR-0030 / C1.1).
+      provenance: {
+        ...(l.provenance && typeof l.provenance === 'object'
+          ? (l.provenance as Record<string, unknown>)
+          : { value: l.provenance }),
+        exactUnroundedMinorBasis: l.exactUnroundedMinorBasis,
+        roundingDelta: l.roundingDelta,
+        roundingPolicyId: l.roundingPolicyId,
+        roundingPolicyVersion: l.roundingPolicyVersion,
+        roundingMode: l.roundingMode,
+        quantumMinor: l.quantumMinor,
+        calculationContext: l.calculationContext,
+      },
     }));
 
     const semanticFingerprint = commercialTermsSemanticFingerprint({
@@ -328,8 +514,10 @@ export async function persistOpenCommercialTerms(
          order_line_id, order_id, line_number, sold_catalog_item_id,
          resolved_unit_price_minor, gross_merchandise_minor, line_merchant_funded_discount_minor,
          eligible_for_order_discount, third_party_merchandise_funding_minor, tax_minor,
-         certainty, funding_provenance, provenance_json
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)`,
+         certainty, funding_provenance, provenance_json,
+         exact_unrounded_minor_basis, rounding_delta, rounding_policy_id,
+         rounding_policy_version, rounding_mode, quantum_minor, calculation_context
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16,$17,$18,$19,$20)`,
       [
         l.orderLineId,
         input.orderId,
@@ -344,6 +532,13 @@ export async function persistOpenCommercialTerms(
         l.certainty,
         l.fundingProvenance,
         JSON.stringify(l.provenance ?? {}),
+        l.exactUnroundedMinorBasis,
+        l.roundingDelta,
+        l.roundingPolicyId,
+        l.roundingPolicyVersion,
+        l.roundingMode,
+        l.quantumMinor,
+        l.calculationContext,
       ],
     );
   }
@@ -382,12 +577,22 @@ export async function loadBuiltCommercialState(
     certainty: CommercialCertainty;
     funding_provenance: string | null;
     provenance_json: unknown;
+    exact_unrounded_minor_basis: string | null;
+    rounding_delta: string | null;
+    rounding_policy_id: string | null;
+    rounding_policy_version: number | null;
+    rounding_mode: string | null;
+    quantum_minor: string | null;
+    calculation_context: string | null;
   }>(
     `SELECT clt.order_line_id, clt.line_number, clt.sold_catalog_item_id,
             clt.resolved_unit_price_minor, clt.gross_merchandise_minor,
             clt.line_merchant_funded_discount_minor, clt.eligible_for_order_discount,
             clt.third_party_merchandise_funding_minor, clt.tax_minor, clt.certainty,
-            clt.funding_provenance, clt.provenance_json
+            clt.funding_provenance, clt.provenance_json,
+            clt.exact_unrounded_minor_basis, clt.rounding_delta, clt.rounding_policy_id,
+            clt.rounding_policy_version, clt.rounding_mode, clt.quantum_minor,
+            clt.calculation_context
      FROM sales_order_commercial_line_terms clt
      WHERE clt.order_id = $1
      ORDER BY clt.line_number ASC`,
@@ -488,6 +693,13 @@ export async function loadBuiltCommercialState(
       fundingProvenance: p.funding_provenance,
       provenance: p.provenance_json,
       eligibleForOrderDiscount: p.eligible_for_order_discount,
+      exactUnroundedMinorBasis: p.exact_unrounded_minor_basis,
+      roundingDelta: p.rounding_delta,
+      roundingPolicyId: p.rounding_policy_id,
+      roundingPolicyVersion: p.rounding_policy_version,
+      roundingMode: p.rounding_mode,
+      quantumMinor: p.quantum_minor,
+      calculationContext: p.calculation_context,
     };
   });
 
@@ -570,6 +782,13 @@ export async function freezeCommercialSnapshot(
       taxMinor: l.taxMinor,
       certainty: l.certainty,
       fundingProvenance: l.fundingProvenance,
+      exactUnroundedMinorBasis: l.exactUnroundedMinorBasis,
+      roundingDelta: l.roundingDelta,
+      roundingPolicyId: l.roundingPolicyId,
+      roundingPolicyVersion: l.roundingPolicyVersion,
+      roundingMode: l.roundingMode,
+      quantumMinor: l.quantumMinor,
+      calculationContext: l.calculationContext,
     })),
   });
 
@@ -617,8 +836,10 @@ export async function freezeCommercialSnapshot(
          line_number, sold_catalog_item_id, quantity, resolved_unit_price_minor,
          gross_merchandise_minor, line_merchant_funded_discount_minor,
          allocated_order_merchant_discount_minor, third_party_merchandise_funding_minor,
-         net_merchandise_sales_minor, tax_minor, certainty, funding_provenance, provenance_json
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb)`,
+         net_merchandise_sales_minor, tax_minor, certainty, funding_provenance, provenance_json,
+         exact_unrounded_minor_basis, rounding_delta, rounding_policy_id,
+         rounding_policy_version, rounding_mode, quantum_minor, calculation_context
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17,$18,$19,$20,$21,$22,$23)`,
       [
         randomUUID(),
         snapshotId,
@@ -636,6 +857,13 @@ export async function freezeCommercialSnapshot(
         l.certainty,
         l.fundingProvenance,
         JSON.stringify(l.provenance ?? {}),
+        l.exactUnroundedMinorBasis,
+        l.roundingDelta,
+        l.roundingPolicyId,
+        l.roundingPolicyVersion,
+        l.roundingMode,
+        l.quantumMinor,
+        l.calculationContext,
       ],
     );
   }

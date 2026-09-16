@@ -659,22 +659,22 @@ describe('M1.1 Menu Configuration & Resolution Runtime', () => {
     expect(resolved.lines[0]!.quantity).toBe('2');
     expect(resolved.lines[0]!.resolvedUnitPriceMinor).toBe('100000');
 
-    // OPTION A: caller supplies explicitCommercialGrossMinor — NOT derived by M1.1
-    const explicitCommercialGrossMinor = '200000';
+    // C1.1: Menu unit × qty via RoundingPolicy kernel (OPTION A superseded)
     const termsInput = buildMenuResolvedCommercialTermsInput({
       orderId: order.orderId,
       idempotencyKey: idem('terms'),
       resolvedLines: resolved.lines,
-      explicitLineCommercialAmounts: [
-        {
-          orderLineId: resolved.lines[0]!.orderLineId,
-          grossMerchandiseMinor: explicitCommercialGrossMinor,
-        },
-      ],
+      roundingPolicy: {
+        roundingPolicyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        policyVersion: 1,
+        calculationContext: 'BASE_LIST_LINE_GROSS',
+        roundingMode: 'HALF_UP',
+        quantumMinor: '1',
+      },
     });
-    expect(termsInput.lineTerms[0]!.grossMerchandiseMinor).toBe(explicitCommercialGrossMinor);
+    expect(termsInput.lineTerms[0]!.grossMerchandiseMinor).toBe('200000');
     expect(termsInput.lineTerms[0]!.resolvedUnitPriceMinor).toBe('100000');
-    expect(JSON.stringify(termsInput)).toContain('EXPLICIT_GROSS_ONLY');
+    expect(JSON.stringify(termsInput)).toContain('BASE_LIST_LINE_GROSS_ROUNDED');
 
     await orders.setOrderCommercialTerms(termsInput);
 
@@ -696,18 +696,18 @@ describe('M1.1 Menu Configuration & Resolution Runtime', () => {
       salesContext: ctx({ businessDateTime: '2026-09-17T01:00:00.000Z' }),
     });
     expect(reResolved.lines[0]!.resolvedUnitPriceMinor).toBe('120000');
-    const explicitRepriceGrossMinor = '240000';
     await orders.setOrderCommercialTerms(
       buildMenuResolvedCommercialTermsInput({
         orderId: order.orderId,
         idempotencyKey: idem('reprice'),
         resolvedLines: reResolved.lines,
-        explicitLineCommercialAmounts: [
-          {
-            orderLineId: reResolved.lines[0]!.orderLineId,
-            grossMerchandiseMinor: explicitRepriceGrossMinor,
-          },
-        ],
+        roundingPolicy: {
+          roundingPolicyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          policyVersion: 1,
+          calculationContext: 'BASE_LIST_LINE_GROSS',
+          roundingMode: 'HALF_UP',
+          quantumMinor: '1',
+        },
       }),
     );
     const afterReprice = await pool.query<{
@@ -748,12 +748,13 @@ describe('M1.1 Menu Configuration & Resolution Runtime', () => {
         orderId: order.orderId,
         idempotencyKey: idem('restore'),
         resolvedLines: restored.lines,
-        explicitLineCommercialAmounts: [
-          {
-            orderLineId: restored.lines[0]!.orderLineId,
-            grossMerchandiseMinor: '360000',
+        roundingPolicy: {
+            roundingPolicyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            policyVersion: 1,
+            calculationContext: 'BASE_LIST_LINE_GROSS',
+            roundingMode: 'HALF_UP',
+            quantumMinor: '1',
           },
-        ],
       }),
     );
   });
