@@ -116,3 +116,13 @@ export {
   type CommercialSnapshotCanonical,
   type EligibleDiscountLine,
 } from './order-commercial.js';
+export {
+  evaluateCheckCoverage,
+  assertExactCheckPayableConservation,
+  assertExactLineAllocationConservation,
+  presentOrAbsent,
+  componentContribution,
+  type CheckCoverageInput,
+  type CheckCoverageResult,
+  type PayableComponent,
+} from './settlement-coverage.js';

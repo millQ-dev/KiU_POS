@@ -147,4 +147,24 @@ export const posApi = {
       payload,
     );
   },
+
+  openSettlement(
+    orderId: string,
+    payload: { idempotencyKey: string },
+  ): Promise<import('./types.js').SettlementProjection> {
+    return request('POST', `/api/v1/orders/${orderId}/open-settlement`, payload);
+  },
+
+  getLiveSettlement(
+    orderId: string,
+  ): Promise<{ orderId: string; settlement: import('./types.js').SettlementProjection | null }> {
+    return request('GET', `/api/v1/orders/${orderId}/settlement`);
+  },
+
+  abortSettlement(
+    settlementGroupId: string,
+    payload?: { expectedVersion?: number },
+  ): Promise<import('./types.js').SettlementProjection> {
+    return request('POST', `/api/v1/settlements/${settlementGroupId}/abort`, payload ?? {});
+  },
 };

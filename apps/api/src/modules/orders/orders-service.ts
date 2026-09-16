@@ -203,6 +203,7 @@ export class OrdersService {
       await client.query('BEGIN');
       const order = await this.lockOrder(client, cmd.orderId);
       this.assertOpenMutable(order);
+      await this.assertNoLiveSettlement(client, cmd.orderId);
       await this.assertCatalogItem(client, order.tenant_id, cmd.catalogItemId, cmd.dimension);
       const qty = this.assertLineQuantity(cmd.quantity, cmd.dimension, cmd.unit);
 
@@ -262,6 +263,7 @@ export class OrdersService {
       await client.query('BEGIN');
       const order = await this.lockOrder(client, cmd.orderId);
       this.assertOpenMutable(order);
+      await this.assertNoLiveSettlement(client, cmd.orderId);
       const line = await this.lockLine(client, cmd.orderId, cmd.orderLineId);
       const catalogItemId = cmd.catalogItemId ?? line.catalog_item_id;
       const quantityRaw = cmd.quantity ?? line.quantity;
@@ -293,6 +295,7 @@ export class OrdersService {
       await client.query('BEGIN');
       const order = await this.lockOrder(client, cmd.orderId);
       this.assertOpenMutable(order);
+      await this.assertNoLiveSettlement(client, cmd.orderId);
       await this.lockLine(client, cmd.orderId, cmd.orderLineId);
       await client.query(`DELETE FROM sales_order_line WHERE order_line_id = $1`, [cmd.orderLineId]);
       await this.clearOpenCommercialTerms(client, cmd.orderId);
@@ -370,6 +373,7 @@ export class OrdersService {
       if (order.status !== 'OPEN') {
         throw new OrderImmutableError('Only OPEN orders accept commercial terms');
       }
+      await this.assertNoLiveSettlement(client, cmd.orderId);
 
       const lines = await this.loadLines(client, cmd.orderId);
       const state = buildCommercialStateFromCommand(cmd, lines);
@@ -501,6 +505,7 @@ export class OrdersService {
           'Only OPEN Orders can calculate base commercial terms',
         );
       }
+      await this.assertNoLiveSettlement(client, input.orderId);
 
       const lockedLines = await this.loadLines(client, input.orderId);
       const policy = await input.policies.resolveForOrder(
@@ -1604,6 +1609,22 @@ export class OrdersService {
     if (order.status !== 'OPEN') {
       throw new OrderImmutableError(
         `Cannot mutate order in status ${order.status}; COMPLETED/CANCELLED content is immutable`,
+      );
+    }
+  }
+
+  /** ADR-0032: live Settlement freezes Order commercial edits (backend authoritative). */
+  private async assertNoLiveSettlement(client: Client, orderId: string): Promise<void> {
+    const res = await client.query(
+      `SELECT 1 FROM settlement_group
+       WHERE order_id = $1 AND state IN ('COLLECTING', 'SATISFIED')
+       LIMIT 1`,
+      [orderId],
+    );
+    if ((res.rowCount ?? 0) > 0) {
+      throw new DomainValidationError(
+        'SETTLEMENT_EDIT_LOCKED',
+        'Order commercial content cannot mutate while a live Settlement exists',
       );
     }
   }

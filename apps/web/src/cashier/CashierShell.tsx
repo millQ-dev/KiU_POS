@@ -9,6 +9,7 @@ import type {
   OrderLine,
   ResolvedPosSlot,
   ResolvedPosSurface,
+  SettlementProjection,
 } from '../api/types.js';
 import { OrderBasketPanel } from './OrderBasket.js';
 import { PosPageNavigation } from './PosPageNavigation.js';
@@ -59,9 +60,15 @@ export function CashierShell({ context, onChangeContext }: Props) {
   const [refreshingPrices, setRefreshingPrices] = useState(false);
   const [acceptingCommercial, setAcceptingCommercial] = useState(false);
   const [quantitySlot, setQuantitySlot] = useState<ResolvedPosSlot | null>(null);
+  const [settlement, setSettlement] = useState<SettlementProjection | null>(null);
+  const [settlementBusy, setSettlementBusy] = useState(false);
   const inFlightRef = useRef(false);
 
-  const editable = order?.status === 'OPEN';
+  const liveSettlement =
+    settlement && (settlement.state === 'COLLECTING' || settlement.state === 'SATISFIED')
+      ? settlement
+      : null;
+  const editable = order?.status === 'OPEN' && !liveSettlement;
 
   const applyOrder = useCallback((next: OrderBasket, preferLineId?: string | null) => {
     setOrder(next);
@@ -82,14 +89,24 @@ export function CashierShell({ context, onChangeContext }: Props) {
     }
   }, []);
 
+  const reloadSettlement = useCallback(async (orderId: string) => {
+    try {
+      const res = await posApi.getLiveSettlement(orderId);
+      setSettlement(res.settlement);
+    } catch {
+      setSettlement(null);
+    }
+  }, []);
+
   const reloadAuthoritativeOrder = useCallback(
     async (orderId: string, preferLineId?: string | null) => {
       const next = await posApi.getOrder(orderId);
       applyOrder(next, preferLineId);
       await reloadCommercial(orderId);
+      await reloadSettlement(orderId);
       return next;
     },
-    [applyOrder, reloadCommercial],
+    [applyOrder, reloadCommercial, reloadSettlement],
   );
 
   const loadSurface = useCallback(async () => {
@@ -118,6 +135,7 @@ export function CashierShell({ context, onChangeContext }: Props) {
     setSelectedLineId(null);
     setCommercial(null);
     setPriceResolution(null);
+    setSettlement(null);
     try {
       const created = await posApi.openOrder({
         tenantId: context.tenantId,
@@ -127,13 +145,14 @@ export function CashierShell({ context, onChangeContext }: Props) {
       });
       applyOrder(created, null);
       await reloadCommercial(created.orderId);
+      await reloadSettlement(created.orderId);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to open order';
       setFeedback(message);
     } finally {
       setOrderLoading(false);
     }
-  }, [context, applyOrder, reloadCommercial]);
+  }, [context, applyOrder, reloadCommercial, reloadSettlement]);
 
   useEffect(() => {
     void loadSurface();
@@ -180,6 +199,10 @@ export function CashierShell({ context, onChangeContext }: Props) {
   const onSelectSlot = async (slot: ResolvedPosSlot) => {
     if (!order || order.status !== 'OPEN') {
       setFeedback('Open an order first');
+      return;
+    }
+    if (liveSettlement) {
+      setFeedback('Checkout active — abort checkout to edit the order');
       return;
     }
     if (slot.state !== 'ACTIVE') return;
@@ -345,6 +368,43 @@ export function CashierShell({ context, onChangeContext }: Props) {
     });
   };
 
+  const onOpenCheckout = () => {
+    if (!order || !editable) return;
+    void withMutationGuard(async () => {
+      setSettlementBusy(true);
+      try {
+        const next = await posApi.openSettlement(order.orderId, {
+          idempotencyKey: `open-settlement:${order.orderId}:${Date.now()}`,
+        });
+        setSettlement(next);
+        setFeedback('Checkout opened — Customer Payable frozen');
+      } catch (err) {
+        await handleMutationError(err, order.orderId);
+      } finally {
+        setSettlementBusy(false);
+      }
+    });
+  };
+
+  const onAbortCheckout = () => {
+    if (!order || !liveSettlement) return;
+    void withMutationGuard(async () => {
+      setSettlementBusy(true);
+      try {
+        const next = await posApi.abortSettlement(liveSettlement.settlementGroupId, {
+          expectedVersion: liveSettlement.version,
+        });
+        setSettlement(next.state === 'ABORTED' ? null : next);
+        setFeedback('Checkout aborted — order editable again');
+        await reloadCommercial(order.orderId);
+      } catch (err) {
+        await handleMutationError(err, order.orderId);
+      } finally {
+        setSettlementBusy(false);
+      }
+    });
+  };
+
   return (
     <div className="pos-shell">
       <header className="pos-shell__header">
@@ -371,7 +431,13 @@ export function CashierShell({ context, onChangeContext }: Props) {
         </div>
       )}
 
-      {!editable && order && (
+      {!editable && order && order.status === 'OPEN' && liveSettlement && (
+        <div className="pos-shell__feedback" role="status">
+          Checkout active ({liveSettlement.state}) — basket editing locked until abort.
+        </div>
+      )}
+
+      {!editable && order && order.status !== 'OPEN' && (
         <div className="pos-shell__feedback" role="status">
           Order is {order.status} — editing disabled. Start a new order to continue.
         </div>
@@ -418,14 +484,19 @@ export function CashierShell({ context, onChangeContext }: Props) {
             priceResolution={priceResolution}
             refreshingPrices={refreshingPrices}
             acceptingCommercial={acceptingCommercial}
+            settlement={liveSettlement}
+            settlementBusy={settlementBusy}
             onSelectLine={setSelectedLineId}
             onUpdateQuantity={onUpdateQuantity}
             onRemoveLine={onRemoveLine}
             onRefreshPrices={onRefreshPrices}
             onAcceptCurrentPrices={onAcceptCurrentPrices}
+            onOpenCheckout={onOpenCheckout}
+            onAbortCheckout={onAbortCheckout}
             onCancelOrder={onCancelOrder}
             onNewOrder={() => {
               setOrder(null);
+              setSettlement(null);
             }}
           />
         </div>

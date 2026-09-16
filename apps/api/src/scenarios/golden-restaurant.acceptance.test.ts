@@ -1899,12 +1899,88 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
     });
   });
 
+  describe('VARIATION — Settlement / Checkout foundation (S1.1)', () => {
+    it('OpenSettlement → edit lock → Abort → reaccept → Open → zero-payable SATISFIED → fiscal fixture → CompleteOrder', async () => {
+      const { SettlementService } = await import('../modules/settlement/settlement-service.js');
+      const { CheckoutOrchestrator } = await import('../modules/checkout/checkout-orchestrator.js');
+      const { fixedFiscalCheckoutGate } = await import('../modules/settlement/settlement-ports.js');
+
+      const order = await orders.openOrder({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        outletId: fx.outletId,
+        actorId: fx.actorId,
+      });
+      await orders.addOrderLine({
+        orderId: order.orderId,
+        catalogItemId: fx.eggItemId,
+        quantity: '1',
+        unit: 'ea',
+        dimension: 'COUNT',
+      });
+      await acceptFinalMerchandiseTerms(orders, order.orderId, {
+        defaultGrossMinor: '100000',
+        idempotencyKey: `golden-s11-${order.orderId}`,
+      });
+
+      const settlements = new SettlementService(pool);
+      const s1 = await settlements.openSettlement({
+        orderId: order.orderId,
+        idempotencyKey: `golden-open-${order.orderId}`,
+      });
+      expect(s1.checks).toHaveLength(1);
+      expect(s1.customerPayableMinor).toBe('100000');
+      expect(s1.merchandiseGrossMinor).toBe('100000');
+      expect(s1.payableSnapshot.tax.presence).toBe('ABSENT');
+
+      await expect(
+        orders.updateOrderLine({
+          orderId: order.orderId,
+          orderLineId: (await orders.getOrder(order.orderId)).lines[0]!.orderLineId,
+          quantity: '2',
+        }),
+      ).rejects.toMatchObject({ code: 'SETTLEMENT_EDIT_LOCKED' });
+
+      await settlements.abortSettlement({ settlementGroupId: s1.settlementGroupId });
+      await orders.updateOrderLine({
+        orderId: order.orderId,
+        orderLineId: (await orders.getOrder(order.orderId)).lines[0]!.orderLineId,
+        quantity: '1',
+      });
+      await acceptFinalMerchandiseTerms(orders, order.orderId, {
+        defaultGrossMinor: '0',
+        idempotencyKey: `golden-s11-zero-${order.orderId}`,
+      });
+
+      const s2 = await settlements.openSettlement({
+        orderId: order.orderId,
+        idempotencyKey: `golden-open2-${order.orderId}`,
+      });
+      expect(s2.state).toBe('SATISFIED');
+      expect(s2.customerPayableMinor).toBe('0');
+
+      const orch = new CheckoutOrchestrator(
+        pool,
+        orders,
+        settlements.withDeps({ fiscalGate: fixedFiscalCheckoutGate('NOT_REQUIRED') }),
+      );
+      const advanced = await orch.tryAdvanceCheckout({
+        settlementGroupId: s2.settlementGroupId,
+        completeIdempotencyKey: `golden-s11-complete-${order.orderId}`,
+        businessDate: '2026-09-16',
+        businessOrder: 900,
+      });
+      expect(advanced.settlement.state).toBe('SATISFIED');
+      expect((await orders.getOrder(order.orderId)).status).toBe('COMPLETED');
+    });
+  });
+
   describe('DEFERRED markers (must remain explicit — do not fake PASS)', () => {
     it('documents unsupported torture steps as EXPECTED STOP', () => {
       const deferred = [
         'MODIFIER commercial + physical semantics → future Modifier / Effective Recipe vertical',
         'DANGEROUS OPERATION / MANAGER OVERRIDE → future Authorization / Roles vertical',
-        'SPLIT PAYMENT / SETTLEMENT → Settlement boundary future implementation',
+        'SPLIT PAYMENT / SETTLEMENT runtime payments → Payments Core after S1.1',
         'PARTIAL RETURN → Partial Return / Partial Commercial Correction model',
         'PERIOD LOCK → PeriodLock vertical',
         'Contribution Margin / channel commissions / payment fees → ADR-0019 future',
@@ -1913,15 +1989,17 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
         'React cashier Order Interaction UX → PASS P1.3 (domain Golden variation + web suite)',
         'MASS/VOLUME quantity entry UX → PASS P1.3 (authoritative dimension/unit metadata)',
         'COMMERCIAL ROUNDING POLICY runtime → PASS C1.1 (ADR-0030 BASE_LIST_LINE_GROSS)',
+        'Settlement / Checkout foundation → PASS S1.1 (ADR-0032)',
         'Floor/Table runtime → DEFERRED (P1.1/P1.2/P1.3 tableless POS proven without Floor/Table)',
-        'Payments / Fiscalization → DEFERRED (after Settlement/Checkout boundary)',
-        'Settlement / Checkout orchestration boundary → NEXT architecture after C1.1',
+        'Payments / Fiscalization → DEFERRED (after S1.1; Payments Core before provider adapters)',
+        'Settlement / Checkout orchestration boundary → PASS ADR-0032',
       ] as const;
       expect(deferred.length).toBeGreaterThanOrEqual(8);
       for (const d of deferred) {
         expect(d).toMatch(/→/);
       }
       expect(deferred.some((d) => d.includes('ADR-0030'))).toBe(true);
+      expect(deferred.some((d) => d.includes('S1.1'))).toBe(true);
     });
   });
 });
