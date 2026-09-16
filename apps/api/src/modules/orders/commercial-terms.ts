@@ -37,6 +37,13 @@ export type BuiltCommercialLine = {
   fundingProvenance: string | null;
   provenance: unknown;
   eligibleForOrderDiscount: boolean;
+  exactUnroundedMinorBasis: string | null;
+  roundingDelta: string | null;
+  roundingPolicyId: string | null;
+  roundingPolicyVersion: number | null;
+  roundingMode: string | null;
+  quantumMinor: string | null;
+  calculationContext: string | null;
 };
 
 export type BuiltCommercialState = {
@@ -126,6 +133,13 @@ export function buildCommercialStateFromCommand(
     fundingProvenance: string | null;
     provenance: unknown;
     basisMinor: string;
+    exactUnroundedMinorBasis: string | null;
+    roundingDelta: string | null;
+    roundingPolicyId: string | null;
+    roundingPolicyVersion: number | null;
+    roundingMode: string | null;
+    quantumMinor: string | null;
+    calculationContext: string | null;
   };
 
   const prepared: Prep[] = [];
@@ -156,6 +170,13 @@ export function buildCommercialStateFromCommand(
         fundingProvenance: lt.fundingProvenance ?? null,
         provenance: lt.provenance ?? null,
         basisMinor: basis,
+        exactUnroundedMinorBasis: lt.exactUnroundedMinorBasis ?? null,
+        roundingDelta: lt.roundingDelta ?? null,
+        roundingPolicyId: lt.roundingPolicyId ?? null,
+        roundingPolicyVersion: lt.roundingPolicyVersion ?? null,
+        roundingMode: lt.roundingMode ?? null,
+        quantumMinor: lt.quantumMinor ?? null,
+        calculationContext: lt.calculationContext ?? null,
       });
     }
 
@@ -198,6 +219,13 @@ export function buildCommercialStateFromCommand(
           fundingProvenance: p.fundingProvenance,
           provenance: p.provenance,
           eligibleForOrderDiscount: p.eligibleForOrderDiscount,
+          exactUnroundedMinorBasis: p.exactUnroundedMinorBasis,
+          roundingDelta: p.roundingDelta,
+          roundingPolicyId: p.roundingPolicyId,
+          roundingPolicyVersion: p.roundingPolicyVersion,
+          roundingMode: p.roundingMode,
+          quantumMinor: p.quantumMinor,
+          calculationContext: p.calculationContext,
         };
       })
       .sort((a, b) => a.lineNumber - b.lineNumber);
@@ -239,7 +267,19 @@ export function buildCommercialStateFromCommand(
       taxMinor: l.taxMinor,
       certainty: l.certainty,
       fundingProvenance: l.fundingProvenance,
-      provenance: l.provenance,
+      // Policy provenance participates in semantic equality (ADR-0030 / C1.1).
+      provenance: {
+        ...(l.provenance && typeof l.provenance === 'object'
+          ? (l.provenance as Record<string, unknown>)
+          : { value: l.provenance }),
+        exactUnroundedMinorBasis: l.exactUnroundedMinorBasis,
+        roundingDelta: l.roundingDelta,
+        roundingPolicyId: l.roundingPolicyId,
+        roundingPolicyVersion: l.roundingPolicyVersion,
+        roundingMode: l.roundingMode,
+        quantumMinor: l.quantumMinor,
+        calculationContext: l.calculationContext,
+      },
     }));
 
     const semanticFingerprint = commercialTermsSemanticFingerprint({
@@ -328,8 +368,10 @@ export async function persistOpenCommercialTerms(
          order_line_id, order_id, line_number, sold_catalog_item_id,
          resolved_unit_price_minor, gross_merchandise_minor, line_merchant_funded_discount_minor,
          eligible_for_order_discount, third_party_merchandise_funding_minor, tax_minor,
-         certainty, funding_provenance, provenance_json
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)`,
+         certainty, funding_provenance, provenance_json,
+         exact_unrounded_minor_basis, rounding_delta, rounding_policy_id,
+         rounding_policy_version, rounding_mode, quantum_minor, calculation_context
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16,$17,$18,$19,$20)`,
       [
         l.orderLineId,
         input.orderId,
@@ -344,6 +386,13 @@ export async function persistOpenCommercialTerms(
         l.certainty,
         l.fundingProvenance,
         JSON.stringify(l.provenance ?? {}),
+        l.exactUnroundedMinorBasis,
+        l.roundingDelta,
+        l.roundingPolicyId,
+        l.roundingPolicyVersion,
+        l.roundingMode,
+        l.quantumMinor,
+        l.calculationContext,
       ],
     );
   }
@@ -382,12 +431,22 @@ export async function loadBuiltCommercialState(
     certainty: CommercialCertainty;
     funding_provenance: string | null;
     provenance_json: unknown;
+    exact_unrounded_minor_basis: string | null;
+    rounding_delta: string | null;
+    rounding_policy_id: string | null;
+    rounding_policy_version: number | null;
+    rounding_mode: string | null;
+    quantum_minor: string | null;
+    calculation_context: string | null;
   }>(
     `SELECT clt.order_line_id, clt.line_number, clt.sold_catalog_item_id,
             clt.resolved_unit_price_minor, clt.gross_merchandise_minor,
             clt.line_merchant_funded_discount_minor, clt.eligible_for_order_discount,
             clt.third_party_merchandise_funding_minor, clt.tax_minor, clt.certainty,
-            clt.funding_provenance, clt.provenance_json
+            clt.funding_provenance, clt.provenance_json,
+            clt.exact_unrounded_minor_basis, clt.rounding_delta, clt.rounding_policy_id,
+            clt.rounding_policy_version, clt.rounding_mode, clt.quantum_minor,
+            clt.calculation_context
      FROM sales_order_commercial_line_terms clt
      WHERE clt.order_id = $1
      ORDER BY clt.line_number ASC`,
@@ -488,6 +547,13 @@ export async function loadBuiltCommercialState(
       fundingProvenance: p.funding_provenance,
       provenance: p.provenance_json,
       eligibleForOrderDiscount: p.eligible_for_order_discount,
+      exactUnroundedMinorBasis: p.exact_unrounded_minor_basis,
+      roundingDelta: p.rounding_delta,
+      roundingPolicyId: p.rounding_policy_id,
+      roundingPolicyVersion: p.rounding_policy_version,
+      roundingMode: p.rounding_mode,
+      quantumMinor: p.quantum_minor,
+      calculationContext: p.calculation_context,
     };
   });
 
@@ -617,8 +683,10 @@ export async function freezeCommercialSnapshot(
          line_number, sold_catalog_item_id, quantity, resolved_unit_price_minor,
          gross_merchandise_minor, line_merchant_funded_discount_minor,
          allocated_order_merchant_discount_minor, third_party_merchandise_funding_minor,
-         net_merchandise_sales_minor, tax_minor, certainty, funding_provenance, provenance_json
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb)`,
+         net_merchandise_sales_minor, tax_minor, certainty, funding_provenance, provenance_json,
+         exact_unrounded_minor_basis, rounding_delta, rounding_policy_id,
+         rounding_policy_version, rounding_mode, quantum_minor, calculation_context
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17,$18,$19,$20,$21,$22,$23)`,
       [
         randomUUID(),
         snapshotId,
@@ -636,6 +704,13 @@ export async function freezeCommercialSnapshot(
         l.certainty,
         l.fundingProvenance,
         JSON.stringify(l.provenance ?? {}),
+        l.exactUnroundedMinorBasis,
+        l.roundingDelta,
+        l.roundingPolicyId,
+        l.roundingPolicyVersion,
+        l.roundingMode,
+        l.quantumMinor,
+        l.calculationContext,
       ],
     );
   }

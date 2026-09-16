@@ -34,6 +34,8 @@ import {
   PosSelectionService,
   PosSurfaceResolver,
 } from '../modules/pos/index.js';
+import { BaseCommercialAcceptanceService } from '../modules/commercial-rounding/base-commercial-acceptance.js';
+import { CommercialRoundingPolicyService } from '../modules/commercial-rounding/rounding-policy-service.js';
 
 const DATABASE_URL = process.env.DATABASE_URL ?? 'postgresql://millq:millq@localhost:5432/millq_dev';
 
@@ -1655,6 +1657,237 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
       expect(oe.numeratorActualCogsMinor).toBe('4000'); // 2 × 2000
       expect(oe.operationalGrossProfitMinor).toBe('6000');
     });
+
+    it('C1.1 — RoundingPolicy HALF_UP fractional + explicit accept + invalidate + reaccept + history stable + reverse', async () => {
+      const policies = new CommercialRoundingPolicyService(pool);
+      const acceptance = new BaseCommercialAcceptanceService(pool, orders);
+      const menuSvc = new MenuService(pool);
+
+      await policies.createPolicy({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        jurisdictionCode: 'VN',
+        calculationContext: 'BASE_LIST_LINE_GROSS',
+        roundingMode: 'HALF_UP',
+        quantumMinor: '1',
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+        effectiveTo: '2026-12-01T00:00:00.000Z',
+      });
+
+      await menuSvc.setOutletTimezone({
+        tenantId: fx.tenantId,
+        outletId: fx.outletId,
+        timezone: 'Asia/Ho_Chi_Minh',
+      });
+      const def = await menuSvc.createMenuDefinition({
+        tenantId: fx.tenantId,
+        code: 'golden-c11',
+        name: 'Golden C1.1',
+      });
+      await menuSvc.setMenuDefinitionItems({
+        menuDefinitionId: def.menuDefinitionId,
+        catalogItemIds: [fx.eggItemId, fx.milkItemId],
+      });
+      const menuPub = await menuSvc.publishMenu({
+        menuDefinitionId: def.menuDefinitionId,
+        idempotencyKey: 'golden-c11-menu-pub',
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+      });
+      await menuSvc.assignMenu({
+        tenantId: fx.tenantId,
+        menuPublicationId: menuPub.menuPublicationId,
+        scopeKind: 'OUTLET',
+        outletId: fx.outletId,
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+        idempotencyKey: 'golden-c11-menu-assign',
+      });
+      await menuSvc.activatePriceRule({
+        tenantId: fx.tenantId,
+        catalogItemId: fx.eggItemId,
+        scopeKind: 'OUTLET',
+        outletId: fx.outletId,
+        amountMinor: '65000',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+        idempotencyKey: 'golden-c11-egg-price',
+      });
+      await menuSvc.activatePriceRule({
+        tenantId: fx.tenantId,
+        catalogItemId: fx.milkItemId,
+        scopeKind: 'OUTLET',
+        outletId: fx.outletId,
+        amountMinor: '10001',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+        idempotencyKey: 'golden-c11-milk-price',
+      });
+
+      // Receive milk for VOLUME sale write-off
+      const milkDraft = await receipts.createDraft({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        warehouseId: fx.warehouseId,
+        supplierId: fx.supplierId,
+        supplierDocumentNumber: 'GOLDEN-C11-MILK',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        businessDate: DAY.PROCURE_1,
+        businessOrder: 90,
+        actorId: fx.actorId,
+        lines: [
+          {
+            lineNumber: 1,
+            catalogItemId: fx.milkItemId,
+            supplierItemId: fx.milkSupplierItemId,
+            inputKind: 'FIXED_PACKAGE',
+            packageCount: 20,
+            acceptedBaseQuantity: '20',
+            baseUnit: 'L',
+            dimension: 'VOLUME',
+            unitPriceMinor: '2000',
+            lineAcquisitionCostMinor: '40000',
+          },
+        ],
+      });
+      await receipts.post(milkDraft!.goodsReceiptId, {
+        idempotencyKey: `golden-c11-milk-${milkDraft!.goodsReceiptId}`,
+        actorId: fx.actorId,
+      });
+      // Eggs for COUNT sale write-off
+      const eggDraft = await receipts.createDraft({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        warehouseId: fx.warehouseId,
+        supplierId: fx.supplierId,
+        supplierDocumentNumber: 'GOLDEN-C11-EGG',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        businessDate: DAY.PROCURE_1,
+        businessOrder: 91,
+        actorId: fx.actorId,
+        lines: [
+          {
+            lineNumber: 1,
+            catalogItemId: fx.eggItemId,
+            supplierItemId: fx.eggSupplierItemId,
+            inputKind: 'COUNT',
+            packageCount: 50,
+            acceptedBaseQuantity: '50',
+            baseUnit: 'ea',
+            dimension: 'COUNT',
+            unitPriceMinor: '2000',
+            lineAcquisitionCostMinor: '100000',
+          },
+        ],
+      });
+      await receipts.post(eggDraft!.goodsReceiptId, {
+        idempotencyKey: `golden-c11-egg-${eggDraft!.goodsReceiptId}`,
+        actorId: fx.actorId,
+      });
+
+      const salesContext = {
+        tenantId: fx.tenantId,
+        brandId: fx.brandId,
+        outletId: fx.outletId,
+        orderChannel: 'DIRECT',
+        businessDateTime: '2026-03-10T10:00:00.000Z',
+      };
+
+      const order = await orders.openOrder({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        outletId: fx.outletId,
+        channel: 'DIRECT',
+      });
+      await orders.addOrderLine({
+        orderId: order.orderId,
+        catalogItemId: fx.eggItemId,
+        quantity: '2',
+        unit: 'ea',
+        dimension: 'COUNT',
+      });
+      await orders.addOrderLine({
+        orderId: order.orderId,
+        catalogItemId: fx.milkItemId,
+        quantity: '0.5',
+        unit: 'L',
+        dimension: 'VOLUME',
+      });
+
+      const accepted = await acceptance.calculateAndAcceptBaseCommercialTerms({
+        orderId: order.orderId,
+        salesContext,
+        idempotencyKey: 'golden-c11-accept',
+      });
+      expect(accepted.calculated.merchandiseGrossMinor).toBe('135001'); // 130000 + 5001
+      expect(accepted.commercialStatus.commercialState).toBe('ACCEPTED');
+      const frac = accepted.calculated.lines.find((l) => l.grossMerchandiseMinor === '5001')!;
+      expect(frac.exactUnroundedMinorBasis).toBe('5000.5');
+      expect(frac.roundingDelta).toBe('0.5');
+
+      const live = await orders.getOrder(order.orderId);
+      const eggLine = live.lines.find((l) => l.catalogItemId === fx.eggItemId)!;
+      await orders.updateOrderLine({
+        orderId: order.orderId,
+        orderLineId: eggLine.orderLineId,
+        quantity: '3',
+      });
+      let commercial = await orders.getOpenCommercialStatus(order.orderId);
+      expect(commercial.commercialState).toBe('NOT_ACCEPTED');
+
+      await acceptance.calculateAndAcceptBaseCommercialTerms({
+        orderId: order.orderId,
+        salesContext,
+        idempotencyKey: 'golden-c11-reaccept',
+      });
+      commercial = await orders.getOpenCommercialStatus(order.orderId);
+      expect(commercial.merchandiseGrossMinor).toBe('200001'); // 195000 + 5001
+
+      await orders.completeOrder({
+        orderId: order.orderId,
+        idempotencyKey: 'golden-c11-complete',
+        businessDate: DAY.SALE,
+        businessOrder: 50,
+      });
+
+      const oe = await economics.compute(q({ orderId: order.orderId }));
+      expect(oe.denominatorRevenueBasisMinor).toBe('200001');
+      expect(oe.numeratorActualCogsMinor).toBeTruthy();
+      const cogsBefore = oe.numeratorActualCogsMinor;
+      const ogpBefore = oe.operationalGrossProfitMinor;
+
+      await policies.createPolicy({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        jurisdictionCode: 'VN',
+        calculationContext: 'BASE_LIST_LINE_GROSS',
+        roundingMode: 'HALF_UP',
+        quantumMinor: '1',
+        effectiveFrom: '2026-12-01T00:00:00.000Z',
+        policyVersion: 2,
+      });
+      const oeAfterPolicy = await economics.compute(q({ orderId: order.orderId }));
+      expect(oeAfterPolicy.denominatorRevenueBasisMinor).toBe('200001');
+      expect(oeAfterPolicy.numeratorActualCogsMinor).toBe(cogsBefore);
+      expect(oeAfterPolicy.operationalGrossProfitMinor).toBe(ogpBefore);
+
+      const snap = await orders.getCommercialSnapshot(order.orderId);
+      expect(snap!.lines.find((l) => l.grossMerchandiseMinor === '5001')!.roundingDelta).toBe('0.5');
+
+      await orders.reverseCompletedOrder({
+        orderId: order.orderId,
+        idempotencyKey: 'golden-c11-rev',
+        businessDate: DAY.REVERSE_LATER,
+        businessOrder: 1,
+      });
+      const snapAfterRev = await orders.getCommercialSnapshot(order.orderId);
+      expect(snapAfterRev!.grossMerchandiseMinor).toBe('200001');
+      expect(snapAfterRev!.lines.find((l) => l.grossMerchandiseMinor === '5001')!.exactUnroundedMinorBasis).toBe(
+        '5000.5',
+      );
+    });
   });
 
   describe('DEFERRED markers (must remain explicit — do not fake PASS)', () => {
@@ -1670,9 +1903,10 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
         'TOTAL_LOSS production variation → covered in D1.2B suite; not on main sale path',
         'React cashier Order Interaction UX → PASS P1.3 (domain Golden variation + web suite)',
         'MASS/VOLUME quantity entry UX → PASS P1.3 (authoritative dimension/unit metadata)',
-        'COMMERCIAL ROUNDING POLICY (unit Money × fractional qty) → ADR-0030 Accepted (architecture); runtime → C1.1',
+        'COMMERCIAL ROUNDING POLICY runtime → PASS C1.1 (ADR-0030 BASE_LIST_LINE_GROSS)',
         'Floor/Table runtime → DEFERRED (P1.1/P1.2/P1.3 tableless POS proven without Floor/Table)',
-        'Payments / Fiscalization → DEFERRED',
+        'Payments / Fiscalization → DEFERRED (after Settlement/Checkout boundary)',
+        'Settlement / Checkout orchestration boundary → NEXT architecture after C1.1',
       ] as const;
       expect(deferred.length).toBeGreaterThanOrEqual(8);
       for (const d of deferred) {

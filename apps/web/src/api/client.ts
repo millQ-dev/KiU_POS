@@ -119,4 +119,32 @@ export const posApi = {
   ): Promise<MenuPriceResolution> {
     return request('POST', `/api/v1/orders/${orderId}/resolve-menu-prices`, payload);
   },
+
+  calculateAndAcceptCommercialTerms(
+    orderId: string,
+    payload: {
+      salesContext: PresentationSalesPayload['salesContext'];
+      idempotencyKey: string;
+    },
+  ): Promise<{ commercialStatus: CommercialStatus }> {
+    return request(
+      'POST',
+      `/api/v1/orders/${orderId}/calculate-and-accept-commercial-terms`,
+      payload,
+    );
+  },
+
+  repriceAndAcceptCommercialTerms(
+    orderId: string,
+    payload: {
+      salesContext: PresentationSalesPayload['salesContext'];
+      idempotencyKey: string;
+    },
+  ): Promise<{ commercialStatus: CommercialStatus }> {
+    return request(
+      'POST',
+      `/api/v1/orders/${orderId}/reprice-and-accept-commercial-terms`,
+      payload,
+    );
+  },
 };

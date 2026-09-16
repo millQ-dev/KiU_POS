@@ -1191,8 +1191,9 @@ export class OrdersService {
       currency_code: string;
       minor_unit_exponent: number;
       semantic_fingerprint: string;
+      provenance_json: unknown;
     }>(
-      `SELECT currency_code, minor_unit_exponent, semantic_fingerprint
+      `SELECT currency_code, minor_unit_exponent, semantic_fingerprint, provenance_json
        FROM sales_order_commercial_terms WHERE order_id = $1`,
       [orderId],
     );
@@ -1205,10 +1206,17 @@ export class OrdersService {
         currencyCode: null,
         minorUnitExponent: null,
         acceptedGrossMerchandiseMinor: null,
+        merchandiseGrossMinor: null,
+        commercialGrossPolicy: null,
+        roundingProvenance: null,
         lines: [] as Array<{
           orderLineId: string;
           resolvedUnitPriceMinor: string | null;
           grossMerchandiseMinor: string;
+          exactUnroundedMinorBasis: string | null;
+          roundingDelta: string | null;
+          roundingPolicyId: string | null;
+          roundingPolicyVersion: number | null;
         }>,
       };
     }
@@ -1217,8 +1225,17 @@ export class OrdersService {
       order_line_id: string;
       resolved_unit_price_minor: string | null;
       gross_merchandise_minor: string;
+      exact_unrounded_minor_basis: string | null;
+      rounding_delta: string | null;
+      rounding_policy_id: string | null;
+      rounding_policy_version: number | null;
+      rounding_mode: string | null;
+      quantum_minor: string | null;
+      calculation_context: string | null;
     }>(
-      `SELECT order_line_id, resolved_unit_price_minor, gross_merchandise_minor
+      `SELECT order_line_id, resolved_unit_price_minor, gross_merchandise_minor,
+              exact_unrounded_minor_basis, rounding_delta, rounding_policy_id,
+              rounding_policy_version, rounding_mode, quantum_minor, calculation_context
        FROM sales_order_commercial_line_terms WHERE order_id = $1 ORDER BY line_number ASC`,
       [orderId],
     );
@@ -1226,6 +1243,12 @@ export class OrdersService {
     for (const l of lines.rows) {
       acceptedGross += BigInt(l.gross_merchandise_minor);
     }
+    const first = lines.rows[0];
+    const hasRounding = first?.rounding_policy_id != null;
+    const provenance =
+      h.provenance_json && typeof h.provenance_json === 'object'
+        ? (h.provenance_json as Record<string, unknown>)
+        : null;
     return {
       orderId,
       orderStatus: order.status,
@@ -1233,11 +1256,30 @@ export class OrdersService {
       presentationHint: 'COMMERCIAL_CURRENT' as const,
       currencyCode: h.currency_code,
       minorUnitExponent: h.minor_unit_exponent,
+      /** Authoritative merchandise gross = Σ accepted rounded line gross (no Order re-round). */
       acceptedGrossMerchandiseMinor: acceptedGross.toString(),
+      merchandiseGrossMinor: acceptedGross.toString(),
+      commercialGrossPolicy: hasRounding
+        ? ('BASE_LIST_LINE_GROSS_ROUNDED' as const)
+        : ('EXPLICIT_GROSS_ONLY' as const),
+      roundingProvenance: hasRounding
+        ? {
+            roundingPolicyId: first!.rounding_policy_id,
+            roundingPolicyVersion: first!.rounding_policy_version,
+            roundingMode: first!.rounding_mode,
+            quantumMinor: first!.quantum_minor,
+            calculationContext: first!.calculation_context,
+            orderProvenance: provenance,
+          }
+        : null,
       lines: lines.rows.map((l) => ({
         orderLineId: l.order_line_id,
         resolvedUnitPriceMinor: l.resolved_unit_price_minor,
         grossMerchandiseMinor: l.gross_merchandise_minor,
+        exactUnroundedMinorBasis: l.exact_unrounded_minor_basis,
+        roundingDelta: l.rounding_delta,
+        roundingPolicyId: l.rounding_policy_id,
+        roundingPolicyVersion: l.rounding_policy_version,
       })),
     };
   }
@@ -1295,6 +1337,13 @@ export class OrdersService {
         taxMinor: l.tax_minor,
         certainty: l.certainty,
         fundingProvenance: l.funding_provenance,
+        exactUnroundedMinorBasis: l.exact_unrounded_minor_basis ?? null,
+        roundingDelta: l.rounding_delta ?? null,
+        roundingPolicyId: l.rounding_policy_id ?? null,
+        roundingPolicyVersion: l.rounding_policy_version ?? null,
+        roundingMode: l.rounding_mode ?? null,
+        quantumMinor: l.quantum_minor ?? null,
+        calculationContext: l.calculation_context ?? null,
       })),
     };
   }

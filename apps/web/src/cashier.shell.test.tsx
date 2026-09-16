@@ -38,6 +38,8 @@ vi.mock('./api/client.js', () => ({
     cancelOrder: vi.fn(),
     getCommercialStatus: vi.fn(),
     resolveMenuPrices: vi.fn(),
+    calculateAndAcceptCommercialTerms: vi.fn(),
+    repriceAndAcceptCommercialTerms: vi.fn(),
   },
 }));
 
@@ -164,10 +166,12 @@ const basketProps = {
   commercial: needsReacceptance,
   priceResolution: null,
   refreshingPrices: false,
+  acceptingCommercial: false,
   onSelectLine: vi.fn(),
   onUpdateQuantity: vi.fn(),
   onRemoveLine: vi.fn(),
   onRefreshPrices: vi.fn(),
+  onAcceptCurrentPrices: vi.fn(),
   onCancelOrder: vi.fn(),
   onNewOrder: vi.fn(),
 };
@@ -315,7 +319,7 @@ describe('cashier components', () => {
   it('empty basket state and no line-gross math in panel', () => {
     render(<OrderBasketPanel order={null} {...basketProps} />);
     expect(screen.getByText(/Empty/i)).toBeTruthy();
-    expect(screen.getByText(/No invented line/i)).toBeTruthy();
+    expect(screen.getByText(/No frontend unit/i)).toBeTruthy();
   });
 
   it('selects basket line and shows selected visual + editor', () => {
@@ -404,13 +408,15 @@ describe('cashier components', () => {
     const { rerender } = render(
       <OrderBasketPanel order={orderWithEgg} {...basketProps} commercial={needsReacceptance} />,
     );
-    expect(screen.getByText(/Order changed — refresh/i)).toBeTruthy();
+    expect(screen.getByText(/Order changed — calculate/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Calculate & accept current prices/i })).toBeTruthy();
     rerender(
       <OrderBasketPanel order={orderWithEgg} {...basketProps} commercial={acceptedCommercial} />,
     );
     expect(screen.getByText(/Commercial terms accepted/i)).toBeTruthy();
-    expect(screen.getByText(/Accepted order gross \(authoritative\)/i)).toBeTruthy();
-    expect(screen.getByText(/No invented line \/ order totals/i)).toBeTruthy();
+    expect(screen.getByText(/Merchandise gross \(authoritative\)/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Reprice & accept current prices/i })).toBeTruthy();
+    expect(screen.getByText(/Line gross \(backend\): 10000/i)).toBeTruthy();
   });
 });
 
@@ -426,6 +432,8 @@ describe('CashierShell integration (mocked API)', () => {
     mockedApi.cancelOrder.mockReset();
     mockedApi.getCommercialStatus.mockReset();
     mockedApi.resolveMenuPrices.mockReset();
+    mockedApi.calculateAndAcceptCommercialTerms.mockReset();
+    mockedApi.repriceAndAcceptCommercialTerms.mockReset();
     mockedApi.getCommercialStatus.mockResolvedValue(needsReacceptance);
     vi.spyOn(window, 'confirm').mockReturnValue(true);
   });
@@ -489,7 +497,7 @@ describe('CashierShell integration (mocked API)', () => {
       eggLine.orderLineId,
       expect.objectContaining({ quantity: '3' }),
     ));
-    expect(await screen.findByText(/Order changed — refresh/i)).toBeTruthy();
+    expect(await screen.findByText(/Order changed — calculate/i)).toBeTruthy();
   });
 
   it('remove line clears selection and updates basket', async () => {
@@ -591,6 +599,44 @@ describe('CashierShell integration (mocked API)', () => {
     expect(await screen.findByText(/Current unit price: 120000 VND/i)).toBeTruthy();
     expect(mockedApi.resolveMenuPrices.mock.calls[0]).toBeTruthy();
     expect(JSON.stringify(mockedApi)).not.toMatch(/setOrderCommercialTerms/);
+  });
+
+  it('Calculate & accept uses backend path and shows merchandise gross', async () => {
+    const egg = activeCount();
+    mockedApi.resolveSurface.mockResolvedValue(surfaceWith(egg));
+    mockedApi.openOrder.mockResolvedValue(orderWithEgg);
+    mockedApi.getCommercialStatus.mockResolvedValue(needsReacceptance);
+    const accepted: CommercialStatus = {
+      ...acceptedCommercial,
+      merchandiseGrossMinor: '10000',
+      commercialGrossPolicy: 'BASE_LIST_LINE_GROSS_ROUNDED',
+    };
+    mockedApi.calculateAndAcceptCommercialTerms.mockResolvedValue({ commercialStatus: accepted });
+
+    render(<CashierShell context={ctx} onChangeContext={vi.fn()} />);
+    await screen.findByText(/2 ea/);
+    fireEvent.click(screen.getByRole('button', { name: /Calculate & accept current prices/i }));
+    await waitFor(() => expect(mockedApi.calculateAndAcceptCommercialTerms).toHaveBeenCalled());
+    expect(await screen.findByText(/Merchandise gross \(authoritative\): 10000 VND/i)).toBeTruthy();
+    expect(JSON.stringify(mockedApi.calculateAndAcceptCommercialTerms.mock.calls)).not.toMatch(
+      /amountMinor\s*\*|Math\.round|parseFloat/,
+    );
+  });
+
+  it('policy-required error surfaces without inventing totals', async () => {
+    const egg = activeCount();
+    mockedApi.resolveSurface.mockResolvedValue(surfaceWith(egg));
+    mockedApi.openOrder.mockResolvedValue(orderWithEgg);
+    mockedApi.getCommercialStatus.mockResolvedValue(needsReacceptance);
+    mockedApi.calculateAndAcceptCommercialTerms.mockRejectedValue(
+      new ApiError(400, 'COMMERCIAL_ROUNDING_POLICY_REQUIRED', 'No policy'),
+    );
+
+    render(<CashierShell context={ctx} onChangeContext={vi.fn()} />);
+    await screen.findByText(/2 ea/);
+    fireEvent.click(screen.getByRole('button', { name: /Calculate & accept current prices/i }));
+    expect(await screen.findByText(/COMMERCIAL_ROUNDING_POLICY_REQUIRED/i)).toBeTruthy();
+    expect(screen.queryByText(/Merchandise gross \(authoritative\)/i)).toBeNull();
   });
 
   it('weighted tile opens quantity modal and posts explicit quantity', async () => {

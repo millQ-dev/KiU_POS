@@ -57,6 +57,7 @@ export function CashierShell({ context, onChangeContext }: Props) {
   const [commercial, setCommercial] = useState<CommercialStatus | null>(null);
   const [priceResolution, setPriceResolution] = useState<MenuPriceResolution | null>(null);
   const [refreshingPrices, setRefreshingPrices] = useState(false);
+  const [acceptingCommercial, setAcceptingCommercial] = useState(false);
   const [quantitySlot, setQuantitySlot] = useState<ResolvedPosSlot | null>(null);
   const inFlightRef = useRef(false);
 
@@ -313,6 +314,37 @@ export function CashierShell({ context, onChangeContext }: Props) {
     });
   };
 
+  const onAcceptCurrentPrices = () => {
+    if (!order || !editable) return;
+    void withMutationGuard(async () => {
+      setAcceptingCommercial(true);
+      try {
+        const salesContext = salesPayload(context).salesContext;
+        const key = `c11-accept:${order.orderId}:${Date.now()}`;
+        const result =
+          commercial?.commercialState === 'ACCEPTED'
+            ? await posApi.repriceAndAcceptCommercialTerms(order.orderId, {
+                salesContext,
+                idempotencyKey: key,
+              })
+            : await posApi.calculateAndAcceptCommercialTerms(order.orderId, {
+                salesContext,
+                idempotencyKey: key,
+              });
+        setCommercial(result.commercialStatus);
+        setFeedback(
+          commercial?.commercialState === 'ACCEPTED'
+            ? 'Repriced and accepted merchandise gross'
+            : 'Calculated and accepted merchandise gross',
+        );
+      } catch (err) {
+        await handleMutationError(err, order.orderId);
+      } finally {
+        setAcceptingCommercial(false);
+      }
+    });
+  };
+
   return (
     <div className="pos-shell">
       <header className="pos-shell__header">
@@ -385,10 +417,12 @@ export function CashierShell({ context, onChangeContext }: Props) {
             commercial={commercial}
             priceResolution={priceResolution}
             refreshingPrices={refreshingPrices}
+            acceptingCommercial={acceptingCommercial}
             onSelectLine={setSelectedLineId}
             onUpdateQuantity={onUpdateQuantity}
             onRemoveLine={onRemoveLine}
             onRefreshPrices={onRefreshPrices}
+            onAcceptCurrentPrices={onAcceptCurrentPrices}
             onCancelOrder={onCancelOrder}
             onNewOrder={() => {
               setOrder(null);

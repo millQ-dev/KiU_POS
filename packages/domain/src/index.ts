@@ -17,6 +17,12 @@ export {
   type CostValue,
 } from './cost-value.js';
 export {
+  calculateRoundedLineGross,
+  type CommercialRoundingMode,
+  type CommercialRoundingPolicySnapshot,
+  type RoundedLineGrossResult,
+} from './commercial-rounding.js';
+export {
   createQuantity,
   addQuantities,
   multiplyQuantity,

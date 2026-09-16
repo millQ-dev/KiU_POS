@@ -63,7 +63,9 @@
 | TOTAL_LOSS on main sale path | Keep on D1.2B suite (not main economic day) |
 | React cashier Order Interaction UX | **PASS** P1.3 |
 | Floor/Table runtime | DEFERRED — P1.1–P1.3 prove tableless POS without Floor/Table |
-| Commercial RoundingPolicy (unit Money × fractional qty) | **ADR-0030 Accepted (architecture)** — runtime → **C1.1** |
+| Commercial RoundingPolicy (unit Money × fractional qty) | **PASS** C1.1 (ADR-0030 BASE_LIST_LINE_GROSS HALF_UP) |
+| Settlement / Checkout orchestration boundary | DEFERRED — next architecture after C1.1 |
+| Payments / Fiscalization | DEFERRED — after Settlement/Checkout boundary |
 
 ## Bugs discovered by Golden
 

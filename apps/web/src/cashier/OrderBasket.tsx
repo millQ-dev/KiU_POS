@@ -17,10 +17,12 @@ type Props = {
   commercial: CommercialStatusDto | null;
   priceResolution: MenuPriceResolution | null;
   refreshingPrices: boolean;
+  acceptingCommercial: boolean;
   onSelectLine: (lineId: string | null) => void;
   onUpdateQuantity: (line: OrderLine, quantity: string) => void;
   onRemoveLine: (line: OrderLine) => void;
   onRefreshPrices: () => void;
+  onAcceptCurrentPrices: () => void;
   onCancelOrder: () => void;
   onNewOrder: () => void;
 };
@@ -38,10 +40,12 @@ export function OrderBasketPanel({
   commercial,
   priceResolution,
   refreshingPrices,
+  acceptingCommercial,
   onSelectLine,
   onUpdateQuantity,
   onRemoveLine,
   onRefreshPrices,
+  onAcceptCurrentPrices,
   onCancelOrder,
   onNewOrder,
 }: Props) {
@@ -73,6 +77,10 @@ export function OrderBasketPanel({
         <ul className="pos-basket__lines" role="listbox" aria-label="Order lines">
           {order.lines.map((line) => {
             const selectedHere = line.orderLineId === selectedLineId;
+            const acceptedLine =
+              commercial?.commercialState === 'ACCEPTED'
+                ? commercial.lines.find((l) => l.orderLineId === line.orderLineId)
+                : undefined;
             return (
               <li key={line.orderLineId}>
                 <button
@@ -89,6 +97,11 @@ export function OrderBasketPanel({
                 >
                   <span className="pos-basket__name">{line.catalogItemName}</span>
                   <span className="pos-basket__qty">{formatQty(line)}</span>
+                  {acceptedLine ? (
+                    <span className="pos-basket__gross">
+                      {acceptedLine.grossMerchandiseMinor} {commercial?.currencyCode ?? ''}
+                    </span>
+                  ) : null}
                 </button>
               </li>
             );
@@ -112,8 +125,10 @@ export function OrderBasketPanel({
         status={commercial}
         priceResolution={priceResolution}
         refreshing={refreshingPrices}
+        accepting={acceptingCommercial}
         editable={editable && !!order}
         onRefreshPrices={onRefreshPrices}
+        onAcceptCurrentPrices={onAcceptCurrentPrices}
       />
 
       <footer className="pos-basket__footer">
@@ -128,8 +143,8 @@ export function OrderBasketPanel({
           </button>
         )}
         <p className="pos-basket__note">
-          No invented line / order totals. Commercial acceptance needs explicit gross (OPTION A;
-          ADR-0030 reserved). No pay in this shell.
+          Authoritative merchandise gross comes from backend after calculate &amp; accept. No frontend
+          unit×qty arithmetic. No pay in this shell.
         </p>
       </footer>
     </aside>
