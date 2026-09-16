@@ -33,5 +33,5 @@ Launch suggested ADR-0030 for POS. ADR-0030 remains reserved for Commercial Roun
 
 ## Next
 
-Independent architecture review → merge → backup → **STOP**  
+Independent architecture review → merge → backup → **STOP**
 Immediate next product vertical after Accept: **P1.1 — POS Presentation Runtime** + first cashier-ready ResolvedPosSurface.
