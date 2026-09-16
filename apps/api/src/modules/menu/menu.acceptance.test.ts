@@ -60,7 +60,7 @@ async function truncateBusiness() {
 }
 
 async function setTz() {
-  await menu.setOutletTimezone({ outletId: fx.outletId, timezone: TZ });
+  await menu.setOutletTimezone({ tenantId: fx.tenantId, outletId: fx.outletId, timezone: TZ });
 }
 
 async function publishDefault(catalogItemIds: string[]) {
@@ -76,6 +76,7 @@ async function publishDefault(catalogItemIds: string[]) {
   const pub = await menu.publishMenu({
     menuDefinitionId: def.menuDefinitionId,
     idempotencyKey: idem('pub'),
+    effectiveFrom: '2026-01-01T00:00:00.000Z',
   });
   return { def, pub };
 }
@@ -122,6 +123,7 @@ describe('M1.1 Menu Configuration & Resolution Runtime', () => {
     const pub1 = await menu.publishMenu({
       menuDefinitionId: def.menuDefinitionId,
       idempotencyKey: idem('p1'),
+      effectiveFrom: '2026-01-01T00:00:00.000Z',
     });
     expect(pub1.publicationVersion).toBe(1);
     expect(pub1.catalogItemIds).toEqual([fx.milkItemId]);
@@ -151,9 +153,18 @@ describe('M1.1 Menu Configuration & Resolution Runtime', () => {
     );
     expect(frozen.rows.map((r) => r.catalog_item_id)).toEqual([fx.milkItemId]);
 
+    await expect(
+      pool.query(
+        `INSERT INTO menu_publication_item (menu_publication_item_id, tenant_id, menu_publication_id, catalog_item_id)
+         VALUES ($1,$2,$3,$4)`,
+        [randomUUID(), fx.tenantId, pub1.menuPublicationId, fx.oilItemId],
+      ),
+    ).rejects.toThrow(/PUBLISHED_IMMUTABLE/);
+
     const pub2 = await menu.publishMenu({
       menuDefinitionId: def.menuDefinitionId,
       idempotencyKey: idem('p2'),
+      effectiveFrom: '2026-01-01T00:00:00.000Z',
     });
     expect(pub2.publicationVersion).toBe(2);
     expect(pub2.catalogItemIds.sort()).toEqual([fx.milkItemId, fx.oilItemId].sort());
@@ -161,12 +172,14 @@ describe('M1.1 Menu Configuration & Resolution Runtime', () => {
     const same = await menu.publishMenu({
       menuDefinitionId: def.menuDefinitionId,
       idempotencyKey: 'retry-same-key',
+      effectiveFrom: '2026-01-01T00:00:00.000Z',
     });
     expect(same.publicationVersion).toBe(3);
 
     const dup = await menu.publishMenu({
       menuDefinitionId: def.menuDefinitionId,
       idempotencyKey: 'retry-same-key',
+      effectiveFrom: '2026-01-01T00:00:00.000Z',
     });
     expect(dup.duplicate).toBe(true);
     expect(dup.menuPublicationId).toBe(same.menuPublicationId);
@@ -792,9 +805,19 @@ describe('M1.1 Menu Configuration & Resolution Runtime', () => {
       resolver.resolveOrderLinesFromMenu({ orderId: orderUnav.orderId, salesContext: ctx() }),
     ).rejects.toMatchObject({ code: 'ITEM_UNAVAILABLE' });
 
-    // Price unavailable: membership + available, no rule
-    await pool.query(`DELETE FROM availability_rule`);
-    await pool.query(`DELETE FROM price_rule`);
+    // Price unavailable: membership + available, no rule — use fresh publication without price
+    await truncateBusiness();
+    fx = await seedBlockCFixture(pool);
+    await setTz();
+    const { pub: pubNoPrice } = await publishDefault([fx.milkItemId]);
+    await menu.assignMenu({
+      tenantId: fx.tenantId,
+      menuPublicationId: pubNoPrice.menuPublicationId,
+      scopeKind: 'OUTLET',
+      outletId: fx.outletId,
+      effectiveFrom: '2026-01-01T00:00:00.000Z',
+      idempotencyKey: idem('fail-np'),
+    });
     const orderNoPrice = await orders.openOrder({
       tenantId: fx.tenantId,
       legalEntityId: fx.legalEntityId,
@@ -940,6 +963,62 @@ describe('M1.1 Menu Configuration & Resolution Runtime', () => {
     });
     await expect(resolver.resolveMenu({ salesContext: ctx() })).rejects.toMatchObject({
       code: 'OUTLET_TIMEZONE_REQUIRED',
+    });
+  });
+
+  it('channel wildcard vs specific same-scope overlap rejected at write', async () => {
+    await menu.activatePriceRule({
+      tenantId: fx.tenantId,
+      catalogItemId: fx.milkItemId,
+      scopeKind: 'OUTLET',
+      outletId: fx.outletId,
+      amountMinor: '10000',
+      currencyCode: 'VND',
+      minorUnitExponent: 0,
+      effectiveFrom: '2026-01-01T00:00:00.000Z',
+      idempotencyKey: idem('ch-global'),
+    });
+    await expect(
+      menu.activatePriceRule({
+        tenantId: fx.tenantId,
+        catalogItemId: fx.milkItemId,
+        scopeKind: 'OUTLET',
+        outletId: fx.outletId,
+        amountMinor: '20000',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        orderChannel: 'DIRECT',
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+        idempotencyKey: idem('ch-direct'),
+      }),
+    ).rejects.toMatchObject({ code: 'AMBIGUOUS_PRICE_RULE' });
+  });
+
+  it('MENU_PUBLICATION_NOT_EFFECTIVE when publication outside interval', async () => {
+    const def = await menu.createMenuDefinition({
+      tenantId: fx.tenantId,
+      code: 'eff-pub',
+      name: 'Eff',
+    });
+    await menu.setMenuDefinitionItems({
+      menuDefinitionId: def.menuDefinitionId,
+      catalogItemIds: [fx.milkItemId],
+    });
+    const pub = await menu.publishMenu({
+      menuDefinitionId: def.menuDefinitionId,
+      idempotencyKey: idem('eff-pub'),
+      effectiveFrom: '2026-10-01T00:00:00.000Z',
+      effectiveTo: '2026-11-01T00:00:00.000Z',
+    });
+    await menu.assignMenu({
+      tenantId: fx.tenantId,
+      menuPublicationId: pub.menuPublicationId,
+      scopeKind: 'TENANT',
+      effectiveFrom: '2026-01-01T00:00:00.000Z',
+      idempotencyKey: idem('eff-asg'),
+    });
+    await expect(resolver.resolveMenu({ salesContext: ctx() })).rejects.toMatchObject({
+      code: 'MENU_PUBLICATION_NOT_EFFECTIVE',
     });
   });
 

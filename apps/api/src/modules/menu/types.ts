@@ -32,6 +32,8 @@ export const publishMenuSchema = z
   .object({
     menuDefinitionId: uuid,
     idempotencyKey: z.string().min(1),
+    effectiveFrom: isoInstant,
+    effectiveTo: isoInstant.nullable().optional(),
     actorId: uuid.optional(),
   })
   .strict();
@@ -90,6 +92,7 @@ export type ActivatePriceRuleInput = z.infer<typeof activatePriceRuleSchema>;
 
 export const setOutletTimezoneSchema = z
   .object({
+    tenantId: uuid,
     outletId: uuid,
     timezone: z.string().min(1),
   })
@@ -126,7 +129,7 @@ export const resolveMenuItemSchema = z
 export const resolveOrderLinesFromMenuSchema = z
   .object({
     orderId: uuid,
-    salesContext: salesContextSchema.optional(),
+    salesContext: salesContextSchema,
   })
   .strict();
 export type ResolveOrderLinesFromMenuInput = z.infer<typeof resolveOrderLinesFromMenuSchema>;

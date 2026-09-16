@@ -100,6 +100,8 @@ type AssignmentRow = {
   effective_from: Date;
   effective_to: Date | null;
   publication_version: number;
+  publication_effective_from: Date;
+  publication_effective_to: Date | null;
 };
 
 type RuleRow = {
@@ -215,28 +217,26 @@ export class MenuResolver {
         throw new DomainValidationError('INVALID_SALES_CONTEXT', 'Order must be OPEN for menu resolution');
       }
 
-      const outlet = await client.query<{ brand_id: string; timezone: string | null }>(
-        `SELECT brand_id, timezone FROM outlet WHERE outlet_id = $1`,
+      const outlet = await client.query<{ brand_id: string }>(
+        `SELECT brand_id FROM outlet WHERE outlet_id = $1`,
         [o.outlet_id],
       );
       if (outlet.rowCount !== 1) {
         throw new DomainValidationError('INVALID_SALES_CONTEXT', 'Order outlet missing');
       }
+      void outlet.rows[0]!.brand_id;
 
-      const salesContextInput: SalesContextInput =
-        cmd.salesContext ??
-        ({
-          tenantId: o.tenant_id,
-          brandId: outlet.rows[0]!.brand_id,
-          outletId: o.outlet_id,
-          orderChannel: o.channel,
-          businessDateTime: new Date().toISOString(),
-        } as SalesContextInput);
-
+      const salesContextInput = cmd.salesContext;
       if (salesContextInput.tenantId !== o.tenant_id || salesContextInput.outletId !== o.outlet_id) {
         throw new DomainValidationError(
           'INVALID_SALES_CONTEXT',
           'SalesContext tenant/outlet must match the Order',
+        );
+      }
+      if (salesContextInput.orderChannel !== o.channel) {
+        throw new DomainValidationError(
+          'INVALID_SALES_CONTEXT',
+          'SalesContext.orderChannel must match Order.channel',
         );
       }
 
@@ -359,7 +359,9 @@ export class MenuResolver {
     const rows = await client.query<AssignmentRow>(
       `SELECT a.menu_assignment_id, a.menu_publication_id, a.scope_kind,
               a.brand_id, a.outlet_id, a.effective_from, a.effective_to,
-              p.publication_version
+              p.publication_version,
+              p.effective_from AS publication_effective_from,
+              p.effective_to AS publication_effective_to
        FROM menu_assignment a
        JOIN menu_publication p ON p.menu_publication_id = a.menu_publication_id
        WHERE a.tenant_id = $1
@@ -372,18 +374,33 @@ export class MenuResolver {
       [ctx.tenantId, ctx.brandId, ctx.outletId],
     );
 
-    const effective = rows.rows.filter((r) =>
+    const effectiveAssignments = rows.rows.filter((r) =>
       isEffectiveAt(ctx.businessDateTime, new Date(r.effective_from), r.effective_to ? new Date(r.effective_to) : null),
     );
-    if (effective.length === 0) {
+    if (effectiveAssignments.length === 0) {
       throw new DomainValidationError('MENU_NOT_ASSIGNED', 'No effective MenuAssignment for SalesContext');
     }
 
-    return pickHighestSpecificity(
-      effective,
+    const winner = pickHighestSpecificity(
+      effectiveAssignments,
       'AMBIGUOUS_MENU_ASSIGNMENT',
       'Multiple MenuAssignments at the same winning specificity',
     );
+
+    if (
+      !isEffectiveAt(
+        ctx.businessDateTime,
+        new Date(winner.publication_effective_from),
+        winner.publication_effective_to ? new Date(winner.publication_effective_to) : null,
+      )
+    ) {
+      throw new DomainValidationError(
+        'MENU_PUBLICATION_NOT_EFFECTIVE',
+        'Winning MenuAssignment points to a MenuPublication outside its business-effective interval',
+      );
+    }
+
+    return winner;
   }
 
   private async resolveItemKernel(

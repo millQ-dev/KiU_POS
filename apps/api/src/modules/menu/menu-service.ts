@@ -101,6 +101,62 @@ function isExclusionViolation(err: unknown): boolean {
   );
 }
 
+/**
+ * Detect overlapping rules where a global (NULL) channel filter and a specific
+ * channel filter would both match the same SalesContext at resolution time.
+ */
+async function assertNoChannelAwareRuleOverlap(
+  client: PoolClient,
+  table: 'availability_rule' | 'price_rule',
+  args: {
+    tenantId: string;
+    catalogItemId: string;
+    scopeKind: MenuScopeKind;
+    brandId: string | null;
+    outletId: string | null;
+    orderChannel: string | null;
+    effectiveFrom: Date;
+    effectiveTo: Date | null;
+  },
+  ambiguousCode: string,
+): Promise<void> {
+  const r = await client.query(
+    `SELECT 1
+     FROM ${table} r
+     WHERE r.tenant_id = $1
+       AND r.catalog_item_id = $2
+       AND r.scope_kind = $3
+       AND COALESCE(r.brand_id, '00000000-0000-0000-0000-000000000000'::uuid)
+           = COALESCE($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
+       AND COALESCE(r.outlet_id, '00000000-0000-0000-0000-000000000000'::uuid)
+           = COALESCE($5::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
+       AND tstzrange(r.effective_from, COALESCE(r.effective_to, 'infinity'::timestamptz), '[)')
+           && tstzrange($6::timestamptz, COALESCE($7::timestamptz, 'infinity'::timestamptz), '[)')
+       AND (
+         r.order_channel IS NULL
+         OR $8::text IS NULL
+         OR r.order_channel = $8
+       )
+     LIMIT 1`,
+    [
+      args.tenantId,
+      args.catalogItemId,
+      args.scopeKind,
+      args.brandId,
+      args.outletId,
+      args.effectiveFrom.toISOString(),
+      args.effectiveTo?.toISOString() ?? null,
+      args.orderChannel,
+    ],
+  );
+  if ((r.rowCount ?? 0) > 0) {
+    throw new DomainValidationError(
+      ambiguousCode,
+      'Overlapping rule at same specificity including global vs channel-specific filters',
+    );
+  }
+}
+
 export class MenuService {
   constructor(private readonly pool: Pool) {}
 
@@ -112,10 +168,17 @@ export class MenuService {
       throw new DomainValidationError('OUTLET_TIMEZONE_REQUIRED', `Invalid IANA timezone: ${cmd.timezone}`);
     }
     const r = await this.pool.query(
-      `UPDATE outlet SET timezone = $2 WHERE outlet_id = $1 RETURNING outlet_id, timezone`,
-      [cmd.outletId, cmd.timezone],
+      `UPDATE outlet SET timezone = $3
+       WHERE outlet_id = $1 AND tenant_id = $2
+       RETURNING outlet_id, timezone`,
+      [cmd.outletId, cmd.tenantId, cmd.timezone],
     );
-    if (r.rowCount !== 1) throw new NotFoundError('Outlet not found');
+    if (r.rowCount !== 1) {
+      throw new DomainValidationError(
+        'INVALID_SALES_CONTEXT',
+        'Outlet not found for tenant (cross-tenant rejected)',
+      );
+    }
     return { outletId: cmd.outletId, timezone: cmd.timezone };
   }
 
@@ -182,6 +245,11 @@ export class MenuService {
 
   async publishMenu(raw: unknown) {
     const cmd = publishMenuSchema.parse(raw) as PublishMenuInput;
+    const effectiveFrom = parseInstant(cmd.effectiveFrom);
+    const effectiveTo = cmd.effectiveTo != null ? parseInstant(cmd.effectiveTo) : null;
+    if (effectiveTo && !(effectiveTo.getTime() > effectiveFrom.getTime())) {
+      throw new DomainValidationError('INVALID_SALES_CONTEXT', 'effectiveTo must be after effectiveFrom');
+    }
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -204,6 +272,8 @@ export class MenuService {
       const semanticFingerprint = fingerprint({
         menuDefinitionId: cmd.menuDefinitionId,
         catalogItemIds,
+        effectiveFrom: cmd.effectiveFrom,
+        effectiveTo: cmd.effectiveTo ?? null,
       });
 
       const existing = await client.query<{
@@ -244,8 +314,8 @@ export class MenuService {
       await client.query(
         `INSERT INTO menu_publication (
            menu_publication_id, tenant_id, menu_definition_id, publication_version,
-           idempotency_key, semantic_fingerprint, actor_id
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+           idempotency_key, semantic_fingerprint, actor_id, effective_from, effective_to
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
         [
           menuPublicationId,
           tenantId,
@@ -254,8 +324,11 @@ export class MenuService {
           cmd.idempotencyKey,
           semanticFingerprint,
           cmd.actorId ?? null,
+          effectiveFrom.toISOString(),
+          effectiveTo?.toISOString() ?? null,
         ],
       );
+      await client.query(`SELECT set_config('app.menu_publish', '1', true)`);
       for (const catalogItemId of catalogItemIds) {
         await client.query(
           `INSERT INTO menu_publication_item (
@@ -264,6 +337,7 @@ export class MenuService {
           [randomUUID(), tenantId, menuPublicationId, catalogItemId],
         );
       }
+      await client.query(`SELECT set_config('app.menu_publish', '0', true)`);
       await client.query('COMMIT');
       return {
         menuPublicationId,
@@ -338,12 +412,17 @@ export class MenuService {
         }
       }
 
+      // Serialize assignment activation per tenant BEFORE idempotency lookup (retry-safe).
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [
+        `menu_assignment:${cmd.tenantId}`,
+      ]);
+
       const existing = await client.query<{
         menu_assignment_id: string;
         semantic_fingerprint: string;
       }>(
         `SELECT menu_assignment_id, semantic_fingerprint FROM menu_assignment
-         WHERE tenant_id = $1 AND idempotency_key = $2 FOR UPDATE`,
+         WHERE tenant_id = $1 AND idempotency_key = $2`,
         [cmd.tenantId, cmd.idempotencyKey],
       );
       if (existing.rowCount === 1) {
@@ -356,11 +435,6 @@ export class MenuService {
         await client.query('COMMIT');
         return { menuAssignmentId: row.menu_assignment_id, duplicate: true as const };
       }
-
-      // Serialize assignment activation per tenant for overlap races (exclusion is the hard gate).
-      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [
-        `menu_assignment:${cmd.tenantId}`,
-      ]);
 
       const menuAssignmentId = randomUUID();
       try {
@@ -436,7 +510,7 @@ export class MenuService {
         semantic_fingerprint: string;
       }>(
         `SELECT availability_rule_id, semantic_fingerprint FROM availability_rule
-         WHERE tenant_id = $1 AND idempotency_key = $2 FOR UPDATE`,
+         WHERE tenant_id = $1 AND idempotency_key = $2`,
         [cmd.tenantId, cmd.idempotencyKey],
       );
       if (existing.rowCount === 1) {
@@ -449,6 +523,22 @@ export class MenuService {
         await client.query('COMMIT');
         return { availabilityRuleId: row.availability_rule_id, duplicate: true as const };
       }
+
+      await assertNoChannelAwareRuleOverlap(
+        client,
+        'availability_rule',
+        {
+          tenantId: cmd.tenantId,
+          catalogItemId: cmd.catalogItemId,
+          scopeKind: cmd.scopeKind,
+          brandId: cmd.brandId ?? null,
+          outletId: cmd.outletId ?? null,
+          orderChannel: cmd.orderChannel ?? null,
+          effectiveFrom,
+          effectiveTo,
+        },
+        'AMBIGUOUS_AVAILABILITY_RULE',
+      );
 
       const availabilityRuleId = randomUUID();
       try {
@@ -531,7 +621,7 @@ export class MenuService {
         semantic_fingerprint: string;
       }>(
         `SELECT price_rule_id, semantic_fingerprint FROM price_rule
-         WHERE tenant_id = $1 AND idempotency_key = $2 FOR UPDATE`,
+         WHERE tenant_id = $1 AND idempotency_key = $2`,
         [cmd.tenantId, cmd.idempotencyKey],
       );
       if (existing.rowCount === 1) {
@@ -544,6 +634,22 @@ export class MenuService {
         await client.query('COMMIT');
         return { priceRuleId: row.price_rule_id, duplicate: true as const };
       }
+
+      await assertNoChannelAwareRuleOverlap(
+        client,
+        'price_rule',
+        {
+          tenantId: cmd.tenantId,
+          catalogItemId: cmd.catalogItemId,
+          scopeKind: cmd.scopeKind,
+          brandId: cmd.brandId ?? null,
+          outletId: cmd.outletId ?? null,
+          orderChannel: cmd.orderChannel ?? null,
+          effectiveFrom,
+          effectiveTo,
+        },
+        'AMBIGUOUS_PRICE_RULE',
+      );
 
       const priceRuleId = randomUUID();
       try {

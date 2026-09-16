@@ -1054,7 +1054,11 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
 
       const menuSvc = new MenuService(pool);
       const menuResolver = new MenuResolver(pool);
-      await menuSvc.setOutletTimezone({ outletId: fx.outletId, timezone: 'Asia/Ho_Chi_Minh' });
+      await menuSvc.setOutletTimezone({
+        tenantId: fx.tenantId,
+        outletId: fx.outletId,
+        timezone: 'Asia/Ho_Chi_Minh',
+      });
 
       const def = await menuSvc.createMenuDefinition({
         tenantId: fx.tenantId,
@@ -1068,6 +1072,7 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
       const pub = await menuSvc.publishMenu({
         menuDefinitionId: def.menuDefinitionId,
         idempotencyKey: 'golden-menu-pub-v1',
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
       });
       await menuSvc.assignMenu({
         tenantId: fx.tenantId,
@@ -1187,6 +1192,7 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
       await menuSvc.publishMenu({
         menuDefinitionId: def.menuDefinitionId,
         idempotencyKey: 'golden-menu-pub-v2',
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
       });
 
       const afterOe = await economics.compute(q({ orderId: order.orderId }));
