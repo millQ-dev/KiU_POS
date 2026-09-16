@@ -24,6 +24,11 @@ import { RecipesService } from '../modules/recipes/recipes-service.js';
 import { ActualCogsService } from '../modules/reporting/actual-cogs-service.js';
 import { OperatingEconomicsService } from '../modules/reporting/operating-economics-service.js';
 import { RevenueBasisService } from '../modules/reporting/revenue-basis-service.js';
+import {
+  buildMenuResolvedCommercialTermsInput,
+  MenuResolver,
+  MenuService,
+} from '../modules/menu/index.js';
 
 const DATABASE_URL = process.env.DATABASE_URL ?? 'postgresql://millq:millq@localhost:5432/millq_dev';
 
@@ -65,6 +70,8 @@ async function truncateBusiness() {
       production_batch_reversal, production_batch_input, production_batch,
       recipe_component, recipe_version, recipe_specification,
       preparation_component, preparation_version, preparation_specification,
+      price_rule, availability_rule, menu_assignment,
+      menu_publication_item, menu_publication, menu_definition_item, menu_definition,
       supplier_item, supplier_pack, catalog_item, supplier,
       warehouse, outlet, brand, legal_entity, tenant
     RESTART IDENTITY CASCADE
@@ -1041,6 +1048,168 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
     });
   });
 
+  describe('VARIATION — Live Menu/Pricing (M1.1 OPTION A explicit gross)', () => {
+    it('MENU — publish/assign/price → unit resolve → explicitCommercialGrossMinor → freeze; later price does not rewrite', async () => {
+      await receiveMilk(5, '10000', DAY.PROCURE_1, 1);
+
+      const menuSvc = new MenuService(pool);
+      const menuResolver = new MenuResolver(pool);
+      await menuSvc.setOutletTimezone({
+        tenantId: fx.tenantId,
+        outletId: fx.outletId,
+        timezone: 'Asia/Ho_Chi_Minh',
+      });
+
+      const def = await menuSvc.createMenuDefinition({
+        tenantId: fx.tenantId,
+        code: 'golden-main',
+        name: 'Golden Main Menu',
+      });
+      await menuSvc.setMenuDefinitionItems({
+        menuDefinitionId: def.menuDefinitionId,
+        catalogItemIds: [fx.milkItemId],
+      });
+      const pub = await menuSvc.publishMenu({
+        menuDefinitionId: def.menuDefinitionId,
+        idempotencyKey: 'golden-menu-pub-v1',
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+      });
+      await menuSvc.assignMenu({
+        tenantId: fx.tenantId,
+        menuPublicationId: pub.menuPublicationId,
+        scopeKind: 'OUTLET',
+        outletId: fx.outletId,
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+        idempotencyKey: 'golden-menu-assign',
+      });
+      await menuSvc.activatePriceRule({
+        tenantId: fx.tenantId,
+        catalogItemId: fx.milkItemId,
+        scopeKind: 'OUTLET',
+        outletId: fx.outletId,
+        amountMinor: '100000',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+        effectiveTo: '2026-09-01T00:00:00.000Z',
+        idempotencyKey: 'golden-price-v1',
+      });
+
+      const salesContext = {
+        tenantId: fx.tenantId,
+        brandId: fx.brandId,
+        outletId: fx.outletId,
+        orderChannel: 'DIRECT',
+        businessDateTime: '2026-03-10T10:00:00.000Z',
+      };
+      const resolvedMenu = await menuResolver.resolveMenu({ salesContext });
+      expect(resolvedMenu.menuPublicationId).toBe(pub.menuPublicationId);
+      const milkItem = resolvedMenu.items.find((i) => i.catalogItemId === fx.milkItemId)!;
+      expect(milkItem.availabilityStatus).toBe('AVAILABLE');
+      expect(milkItem.price.status).toBe('RESOLVED');
+      if (milkItem.price.status !== 'RESOLVED') throw new Error('expected resolved unit price');
+      expect(milkItem.price.quote.resolvedUnitPriceMinor).toBe('100000');
+
+      const order = await orders.openOrder({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        outletId: fx.outletId,
+        channel: 'DIRECT',
+      });
+      await orders.addOrderLine({
+        orderId: order.orderId,
+        catalogItemId: fx.milkItemId,
+        quantity: '1',
+        unit: 'L',
+        dimension: 'VOLUME',
+      });
+
+      const resolvedLines = await menuResolver.resolveOrderLinesFromMenu({
+        orderId: order.orderId,
+        salesContext,
+      });
+      expect(resolvedLines.lines[0]!.resolvedUnitPriceMinor).toBe('100000');
+
+      // OPTION A — caller fixture supplies gross; M1.1 does not derive it from unit×qty
+      const explicitCommercialGrossMinor = '100000';
+      await orders.setOrderCommercialTerms(
+        buildMenuResolvedCommercialTermsInput({
+          orderId: order.orderId,
+          idempotencyKey: 'golden-menu-commercial',
+          resolvedLines: resolvedLines.lines,
+          explicitLineCommercialAmounts: [
+            {
+              orderLineId: resolvedLines.lines[0]!.orderLineId,
+              grossMerchandiseMinor: explicitCommercialGrossMinor,
+            },
+          ],
+        }),
+      );
+
+      // OPEN: activate new price — must NOT silently mutate accepted terms
+      await menuSvc.activatePriceRule({
+        tenantId: fx.tenantId,
+        catalogItemId: fx.milkItemId,
+        scopeKind: 'OUTLET',
+        outletId: fx.outletId,
+        amountMinor: '120000',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        effectiveFrom: '2026-09-01T00:00:00.000Z',
+        idempotencyKey: 'golden-price-v2',
+      });
+      const openTerms = await pool.query<{
+        gross_merchandise_minor: string;
+        resolved_unit_price_minor: string;
+        provenance_json: unknown;
+      }>(
+        `SELECT gross_merchandise_minor, resolved_unit_price_minor, provenance_json
+         FROM sales_order_commercial_line_terms WHERE order_id = $1`,
+        [order.orderId],
+      );
+      expect(openTerms.rows[0]!.gross_merchandise_minor).toBe(explicitCommercialGrossMinor);
+      expect(openTerms.rows[0]!.resolved_unit_price_minor).toBe('100000');
+      expect(JSON.stringify(openTerms.rows[0]!.provenance_json)).toContain('MENU_RESOLVER_M1_1');
+
+      await orders.completeOrder({
+        orderId: order.orderId,
+        idempotencyKey: 'golden-menu-complete',
+        businessDate: DAY.SALE,
+        businessOrder: 1,
+      });
+
+      const beforeOe = await economics.compute(q({ orderId: order.orderId }));
+      expect(beforeOe.denominatorRevenueBasisMinor).toBe('100000');
+      const beforeCogs = beforeOe.numeratorActualCogsMinor;
+      const beforeGp = beforeOe.operationalGrossProfitMinor;
+      const beforeFc = beforeOe.foodCostRatio;
+
+      // Post-completion menu/price change must not rewrite frozen economics
+      await menuSvc.setMenuDefinitionItems({
+        menuDefinitionId: def.menuDefinitionId,
+        catalogItemIds: [fx.milkItemId, fx.oilItemId],
+      });
+      await menuSvc.publishMenu({
+        menuDefinitionId: def.menuDefinitionId,
+        idempotencyKey: 'golden-menu-pub-v2',
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+      });
+
+      const afterOe = await economics.compute(q({ orderId: order.orderId }));
+      expect(afterOe.denominatorRevenueBasisMinor).toBe(beforeOe.denominatorRevenueBasisMinor);
+      expect(afterOe.numeratorActualCogsMinor).toBe(beforeCogs);
+      expect(afterOe.operationalGrossProfitMinor).toBe(beforeGp);
+      expect(afterOe.foodCostRatio).toBe(beforeFc);
+
+      const snapProv = await pool.query<{ provenance_json: unknown }>(
+        `SELECT provenance_json FROM order_commercial_snapshot WHERE order_id = $1`,
+        [order.orderId],
+      );
+      expect(JSON.stringify(snapProv.rows[0]!.provenance_json)).toContain('MENU_RESOLVER_M1_1');
+      expect(JSON.stringify(snapProv.rows[0]!.provenance_json)).toContain(pub.menuPublicationId);
+    });
+  });
+
   describe('DEFERRED markers (must remain explicit — do not fake PASS)', () => {
     it('documents unsupported torture steps as EXPECTED STOP', () => {
       const deferred = [
@@ -1052,7 +1221,8 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
         'Contribution Margin / channel commissions / payment fees → ADR-0019 future',
         'Explainable Intelligence → later reads proven economic evidence only',
         'TOTAL_LOSS production variation → covered in D1.2B suite; not on main sale path',
-        'Menu/Pricing live mutation → Menu/Pricing runtime not implemented',
+        'POS Presentation / MenuLayout → next vertical after M1.1',
+        'COMMERCIAL ROUNDING POLICY (unit Money × fractional qty) → DEFERRED Level C; ADR-0030 NOT created',
       ] as const;
       expect(deferred.length).toBeGreaterThanOrEqual(8);
       // Guard: this test exists so CI documents deferred surface; never delete to silence CI.
