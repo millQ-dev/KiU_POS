@@ -53,6 +53,8 @@ async function truncateBusiness() {
       preparation_component, preparation_version, preparation_specification,
       price_rule, availability_rule, menu_assignment,
       menu_publication_item, menu_publication, menu_definition_item, menu_definition,
+      layout_assignment, layout_publication_slot, layout_publication_page, layout_publication,
+      layout_definition_slot, layout_definition_page, layout_definition,
       supplier_item, supplier_pack, catalog_item, supplier,
       warehouse, outlet, brand, legal_entity, tenant
     RESTART IDENTITY CASCADE

@@ -29,6 +29,11 @@ import {
   MenuResolver,
   MenuService,
 } from '../modules/menu/index.js';
+import {
+  LayoutService,
+  PosSelectionService,
+  PosSurfaceResolver,
+} from '../modules/pos/index.js';
 
 const DATABASE_URL = process.env.DATABASE_URL ?? 'postgresql://millq:millq@localhost:5432/millq_dev';
 
@@ -72,6 +77,8 @@ async function truncateBusiness() {
       preparation_component, preparation_version, preparation_specification,
       price_rule, availability_rule, menu_assignment,
       menu_publication_item, menu_publication, menu_definition_item, menu_definition,
+      layout_assignment, layout_publication_slot, layout_publication_page, layout_publication,
+      layout_definition_slot, layout_definition_page, layout_definition,
       supplier_item, supplier_pack, catalog_item, supplier,
       warehouse, outlet, brand, legal_entity, tenant
     RESTART IDENTITY CASCADE
@@ -1210,6 +1217,237 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
     });
   });
 
+  describe('VARIATION — Live POS Presentation / Cashier Selection (P1.1)', () => {
+    it('POS — LayoutPublication ∩ ResolvedMenu → ACTIVE select → AddOrderLine → explicit gross → economics; Layout v2 stable', async () => {
+      await receiveMilk(5, '10000', DAY.PROCURE_1, 1);
+
+      const menuSvc = new MenuService(pool);
+      const menuResolver = new MenuResolver(pool);
+      const layoutSvc = new LayoutService(pool);
+      const posSurface = new PosSurfaceResolver(pool);
+      const posSelect = new PosSelectionService(pool, orders);
+
+      await menuSvc.setOutletTimezone({
+        tenantId: fx.tenantId,
+        outletId: fx.outletId,
+        timezone: 'Asia/Ho_Chi_Minh',
+      });
+
+      const menuDef = await menuSvc.createMenuDefinition({
+        tenantId: fx.tenantId,
+        code: 'golden-pos-menu',
+        name: 'Golden POS Menu',
+      });
+      await menuSvc.setMenuDefinitionItems({
+        menuDefinitionId: menuDef.menuDefinitionId,
+        catalogItemIds: [fx.milkItemId],
+      });
+      const menuPub = await menuSvc.publishMenu({
+        menuDefinitionId: menuDef.menuDefinitionId,
+        idempotencyKey: 'golden-pos-menu-pub-v1',
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+      });
+      await menuSvc.assignMenu({
+        tenantId: fx.tenantId,
+        menuPublicationId: menuPub.menuPublicationId,
+        scopeKind: 'OUTLET',
+        outletId: fx.outletId,
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+        idempotencyKey: 'golden-pos-menu-assign',
+      });
+      await menuSvc.activatePriceRule({
+        tenantId: fx.tenantId,
+        catalogItemId: fx.milkItemId,
+        scopeKind: 'OUTLET',
+        outletId: fx.outletId,
+        amountMinor: '100000',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+        effectiveTo: '2026-09-01T00:00:00.000Z',
+        idempotencyKey: 'golden-pos-price-v1',
+      });
+
+      const layoutDef = await layoutSvc.createLayoutDefinition({
+        tenantId: fx.tenantId,
+        code: 'golden-pos-layout',
+        name: 'Golden Cashier',
+      });
+      await layoutSvc.setLayoutPages({
+        layoutDefinitionId: layoutDef.layoutDefinitionId,
+        pages: [
+          { pageCode: 'drinks', label: 'Drinks', sortOrder: 0 },
+          { pageCode: 'food', label: 'Food', sortOrder: 1 },
+        ],
+      });
+      await layoutSvc.setLayoutSlots({
+        layoutDefinitionId: layoutDef.layoutDefinitionId,
+        slots: [
+          {
+            zone: 'PAGE',
+            pageCode: 'drinks',
+            catalogItemId: fx.milkItemId,
+            position: 1,
+            labelOverride: 'Milk',
+          },
+          { zone: 'QUICK_ACCESS', catalogItemId: fx.milkItemId, position: 1 },
+        ],
+      });
+      const layoutPub = await layoutSvc.publishLayout({
+        layoutDefinitionId: layoutDef.layoutDefinitionId,
+        idempotencyKey: 'golden-pos-layout-pub-v1',
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+      });
+      await layoutSvc.assignLayout({
+        tenantId: fx.tenantId,
+        layoutPublicationId: layoutPub.layoutPublicationId,
+        scopeKind: 'OUTLET',
+        outletId: fx.outletId,
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+        idempotencyKey: 'golden-pos-layout-assign',
+      });
+
+      const presentationContext = {
+        tenantId: fx.tenantId,
+        brandId: fx.brandId,
+        outletId: fx.outletId,
+      };
+      const salesContext = {
+        ...presentationContext,
+        orderChannel: 'DIRECT',
+        businessDateTime: '2026-03-10T10:00:00.000Z',
+      };
+
+      const surface = await posSurface.resolvePosSurface({ presentationContext, salesContext });
+      expect(surface.layoutPublicationId).toBe(layoutPub.layoutPublicationId);
+      expect(surface.menuPublicationId).toBe(menuPub.menuPublicationId);
+      expect(surface.pages.map((p) => p.pageCode)).toEqual(['drinks', 'food']);
+      const active = surface.pages[0]!.slots.find((s) => s.catalogItemId === fx.milkItemId)!;
+      expect(active.state).toBe('ACTIVE');
+      expect(active.unitPrice).toEqual({
+        amountMinor: '100000',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+      });
+      expect(surface.quickAccess[0]!.state).toBe('ACTIVE');
+
+      // Tableless Open Order → POS select → basket
+      const order = await orders.openOrder({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        outletId: fx.outletId,
+        channel: 'DIRECT',
+      });
+      expect(order).not.toHaveProperty('tableId');
+      const selected = await posSelect.selectPosItem({
+        orderId: order.orderId,
+        layoutPublicationSlotId: active.layoutPublicationSlotId,
+        presentationContext,
+        salesContext,
+        quantity: '1',
+        unit: 'L',
+        dimension: 'VOLUME',
+      });
+      expect(selected.order.status).toBe('OPEN');
+      expect(selected.order.lines).toHaveLength(1);
+      expect(selected.order.lines[0]!.catalogItemId).toBe(fx.milkItemId);
+      // Tap does not commercial-accept
+      const openTerms = await pool.query(
+        `SELECT 1 FROM sales_order_commercial_terms WHERE order_id = $1`,
+        [order.orderId],
+      );
+      expect(openTerms.rowCount).toBe(0);
+
+      const resolvedLines = await menuResolver.resolveOrderLinesFromMenu({
+        orderId: order.orderId,
+        salesContext,
+      });
+      const explicitCommercialGrossMinor = '100000';
+      await orders.setOrderCommercialTerms(
+        buildMenuResolvedCommercialTermsInput({
+          orderId: order.orderId,
+          idempotencyKey: 'golden-pos-commercial',
+          resolvedLines: resolvedLines.lines,
+          explicitLineCommercialAmounts: [
+            {
+              orderLineId: resolvedLines.lines[0]!.orderLineId,
+              grossMerchandiseMinor: explicitCommercialGrossMinor,
+            },
+          ],
+        }),
+      );
+
+      await orders.completeOrder({
+        orderId: order.orderId,
+        idempotencyKey: 'golden-pos-complete',
+        businessDate: DAY.SALE,
+        businessOrder: 1,
+      });
+
+      const beforeOe = await economics.compute(q({ orderId: order.orderId }));
+      expect(beforeOe.denominatorRevenueBasisMinor).toBe('100000');
+      const beforeCogs = beforeOe.numeratorActualCogsMinor;
+      const beforeGp = beforeOe.operationalGrossProfitMinor;
+      const beforeFc = beforeOe.foodCostRatio;
+
+      // Layout v2 (repage/recolor) must not alter completed economics
+      await layoutSvc.setLayoutPages({
+        layoutDefinitionId: layoutDef.layoutDefinitionId,
+        pages: [{ pageCode: 'all', label: 'All', sortOrder: 0, colorToken: 'amber' }],
+      });
+      await layoutSvc.setLayoutSlots({
+        layoutDefinitionId: layoutDef.layoutDefinitionId,
+        slots: [
+          {
+            zone: 'PAGE',
+            pageCode: 'all',
+            catalogItemId: fx.milkItemId,
+            position: 1,
+            colorToken: 'green',
+          },
+        ],
+      });
+      await layoutSvc.publishLayout({
+        layoutDefinitionId: layoutDef.layoutDefinitionId,
+        idempotencyKey: 'golden-pos-layout-pub-v2',
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+      });
+
+      // Same LayoutPublication + new PriceRule → current surface shows new unit price
+      await menuSvc.activatePriceRule({
+        tenantId: fx.tenantId,
+        catalogItemId: fx.milkItemId,
+        scopeKind: 'OUTLET',
+        outletId: fx.outletId,
+        amountMinor: '150000',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        effectiveFrom: '2026-09-01T00:00:00.000Z',
+        idempotencyKey: 'golden-pos-price-v2',
+      });
+
+      const liveSurface = await posSurface.resolvePosSurface({
+        presentationContext,
+        salesContext: {
+          ...salesContext,
+          businessDateTime: '2026-09-16T10:00:00.000Z',
+        },
+      });
+      expect(liveSurface.layoutPublicationId).toBe(layoutPub.layoutPublicationId);
+      const liveMilk = liveSurface.pages
+        .flatMap((p) => p.slots)
+        .find((s) => s.catalogItemId === fx.milkItemId)!;
+      expect(liveMilk.state).toBe('ACTIVE');
+      expect(liveMilk.unitPrice?.amountMinor).toBe('150000');
+
+      const afterOe = await economics.compute(q({ orderId: order.orderId }));
+      expect(afterOe.denominatorRevenueBasisMinor).toBe(beforeOe.denominatorRevenueBasisMinor);
+      expect(afterOe.numeratorActualCogsMinor).toBe(beforeCogs);
+      expect(afterOe.operationalGrossProfitMinor).toBe(beforeGp);
+      expect(afterOe.foodCostRatio).toBe(beforeFc);
+    });
+  });
+
   describe('DEFERRED markers (must remain explicit — do not fake PASS)', () => {
     it('documents unsupported torture steps as EXPECTED STOP', () => {
       const deferred = [
@@ -1221,11 +1459,12 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
         'Contribution Margin / channel commissions / payment fees → ADR-0019 future',
         'Explainable Intelligence → later reads proven economic evidence only',
         'TOTAL_LOSS production variation → covered in D1.2B suite; not on main sale path',
-        'POS Presentation / MenuLayout → DEFERRED until ADR-0031 + P1.1',
+        'React cashier shell / Order Interaction UX → DEFERRED P1.2 (P1.1 backend/read surface PASS)',
         'COMMERCIAL ROUNDING POLICY (unit Money × fractional qty) → DEFERRED Level C; ADR-0030 reserved NOT created',
+        'Floor/Table runtime → DEFERRED (P1.1 tableless POS proven without Floor/Table)',
+        'Payments / Fiscalization → DEFERRED',
       ] as const;
       expect(deferred.length).toBeGreaterThanOrEqual(8);
-      // Guard: this test exists so CI documents deferred surface; never delete to silence CI.
       for (const d of deferred) {
         expect(d).toMatch(/→/);
       }
