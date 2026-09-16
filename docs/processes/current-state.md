@@ -1,45 +1,45 @@
 # MillQ Current State
 
-**Checkpoint:** C1.1 Commercial Rounding Runtime — **CLOSED** (merged)
+**Checkpoint:** ADR-0032 Checkout & Settlement Orchestration — **CURRENT** (docs / Level C)
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)
-**Backup host:** GitHub `https://github.com/millQ-dev/MillQ.git` (mirror only)
-**Origin main:** `12334779f1ab313c905e740d252c972ead79dae6` (Origin == GitHub)
-**ADR-0030:** **ACCEPTED** @ `1e1abdca68c899829ceb47ca90b4337539b9bbc1`
-**C1.1 PR:** https://cursor.com/codebase/millqdev/MillQ/pull/49 — **merged** (pre-merge tip `d252d8a` ← base `1e1abdc`)
+**Backup host:** GitHub `https://github.com/millQ-dev/MillQ.git` (mirror only; canonical GitHub path may resolve as `millQ-dev/KiU_POS`)
+**Origin main baseline:** `99b63f4996638ca4e979e7b8a9aec415590ff307` (Origin == GitHub at branch start)
+**C1.1:** **CLOSED** @ `12334779f1ab313c905e740d252c972ead79dae6` (parent of tip)
 **Updated:** 2026-09-16
 
 ## Runtime / CI / backup
 
 | Item | State |
 | --- | --- |
-| P1.2 First KiU Cashier Frontend Shell | **DONE** |
-| P1.3 Cashier Order Interaction UX | **CLOSED** |
-| ADR-0030 Commercial RoundingPolicy | **ACCEPTED** @ `1e1abdc…` |
-| C1.1 Commercial Rounding Runtime | **CLOSED** @ `1233477…` (PR #49) |
-| OPTION A (explicit gross) | **Legacy-compatible**; cashier path uses automatic BASE_LIST_LINE_GROSS accept |
+| P1.2 / P1.3 cashier vertical | **CLOSED** |
+| ADR-0030 Commercial RoundingPolicy | **ACCEPTED** |
+| C1.1 Commercial Rounding Runtime | **CLOSED** |
+| ADR-0032 Checkout & Settlement Orchestration | **CURRENT** (this PR — architecture only) |
 | Identity / production session auth | **ABSENT** — labeled DEV bootstrap only |
-| Payments / Settlement / Fiscalization | **NOT STARTED** |
+| Settlement / Checkout runtime (S1.1) | **NOT STARTED** — blocked on ADR-0032 Accept + merge |
+| Payments / Fiscalization runtime | **NOT STARTED** |
 | Tax / cash denomination / promo rounding | **DEFERRED** (separate named contexts) |
-| GitHub backup | **MATCH** Origin `main` == GitHub `main` @ `1233477…` |
 
-## C1.1 — delivered
+## C1.1 (closed)
 
-- RoundingPolicy persistence + versioning + `[effectiveFrom, effectiveTo)` + gist overlap exclusion
-- Selection: LegalEntity + jurisdiction + `BASE_LIST_LINE_GROSS` + `SalesContext.businessDateTime`
-- No production default policy; missing → `COMMERCIAL_ROUNDING_POLICY_REQUIRED`
-- Exact decimal kernel (`calculateRoundedLineGross`); HALF_UP; quantum via policy; COUNT/MASS/VOLUME
-- Automatic calculate + **explicit** accept/reprice → Orders `SetOrderCommercialTerms`
-- Authoritative merchandise gross = Σ accepted rounded line gross (no Order re-round)
-- Cashier: Calculate & accept / Reprice & accept; frontend never multiplies unit×qty
-- Migration **017**; VN MVP HALF_UP = product accounting choice (B), not legal mandate
-- Legacy explicit-gross snapshots remain readable (nullable rounding provenance)
+- RoundingPolicy + decimal HALF_UP kernel + explicit accept/reprice
+- Authoritative merchandise gross = Σ rounded lines
+- Migration 017; tax/cash/promo still deferred
 
-## Next (architecture — do not skip to Payments)
+## ADR-0032 (this PR) — summary
 
-**Settlement / Checkout orchestration boundary** (ADR / Level C proposal as needed):
+- Checkout = application orchestration (no CheckoutOrder aggregate)
+- Orders coordinates SettlementGroup / Check / Settlement Payable Snapshot (ADR-0016)
+- Merchandise Gross ≠ Customer Payable (MVP numerical equality allowed)
+- Customer Payable ≠ Revenue Basis (ADR-0028)
+- OpenSettlement requires accepted/current commercial state
+- Edit lock under live Settlement; safe abort to re-edit
+- Exact Check payable conservation; no invented split residual rounding
+- Payment never mutates Order / never owns inventory; Checkout → CompleteOrder
+- Zero-payable without fake Payment; fiscal hook via ADR-0014
+- Next runtime: **S1.1** Settlement / Checkout Runtime Foundation (not Payment providers)
 
-- Order merchandise gross (C1.1) vs customer payable
-- Settlement vs Payment vs Fiscalization
-- Payment lifecycle triggers
+## Next (after ADR-0032 Accept + backup)
 
-Do **not** implement Payments until that boundary is explicit and accepted.
+**S1.1 — Settlement / Checkout Runtime Foundation** (implementation).  
+Do **not** jump to Payment provider adapters first.
