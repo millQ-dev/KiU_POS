@@ -81,7 +81,7 @@ export async function rebuildInventoryBalance(
     business_date:
       typeof m.business_date === 'string'
         ? m.business_date.slice(0, 10)
-        : m.business_date.toISOString().slice(0, 10),
+        : `${m.business_date.getFullYear()}-${String(m.business_date.getMonth() + 1).padStart(2, '0')}-${String(m.business_date.getDate()).padStart(2, '0')}`,
   }));
 
   const { ordered, orderUnresolved } = orderMovementsForEconomicReplay(rows);
