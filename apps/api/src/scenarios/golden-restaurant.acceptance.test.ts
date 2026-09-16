@@ -1670,7 +1670,7 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
         'TOTAL_LOSS production variation → covered in D1.2B suite; not on main sale path',
         'React cashier Order Interaction UX → PASS P1.3 (domain Golden variation + web suite)',
         'MASS/VOLUME quantity entry UX → PASS P1.3 (authoritative dimension/unit metadata)',
-        'COMMERCIAL ROUNDING POLICY (unit Money × fractional qty) → DEFERRED Level C; ADR-0030 reserved NOT created',
+        'COMMERCIAL ROUNDING POLICY (unit Money × fractional qty) → ADR-0030 Accepted (architecture); runtime → C1.1',
         'Floor/Table runtime → DEFERRED (P1.1/P1.2/P1.3 tableless POS proven without Floor/Table)',
         'Payments / Fiscalization → DEFERRED',
       ] as const;
