@@ -1,0 +1,84 @@
+.pos-qty-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  padding: var(--pos-space-4);
+}
+
+.pos-qty-modal__panel {
+  width: min(24rem, 100%);
+  background: var(--pos-surface);
+  border: 1px solid var(--pos-border);
+  border-radius: var(--pos-radius);
+  padding: var(--pos-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pos-space-3);
+}
+
+.pos-qty-modal__title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.pos-qty-modal__meta,
+.pos-qty-modal__note {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--pos-text-muted);
+}
+
+.pos-qty-modal__label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pos-space-2);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.pos-qty-modal__input {
+  min-height: var(--pos-touch);
+  font-family: var(--pos-font-mono);
+  font-size: 1.1rem;
+  padding: 0 var(--pos-space-3);
+  border-radius: var(--pos-radius);
+  border: 1px solid var(--pos-border);
+  background: var(--pos-bg, #12141a);
+  color: var(--pos-text);
+}
+
+.pos-qty-modal__error {
+  margin: 0;
+  color: var(--pos-warn);
+  font-size: 0.8rem;
+}
+
+.pos-qty-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--pos-space-2);
+}
+
+.pos-qty-modal__btn {
+  min-height: var(--pos-touch);
+  padding: 0 var(--pos-space-3);
+  border-radius: var(--pos-radius);
+  border: 1px solid var(--pos-border);
+  background: var(--pos-surface-2);
+  color: var(--pos-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.pos-qty-modal__btn--primary {
+  font-weight: 700;
+}
+
+.pos-qty-modal__btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

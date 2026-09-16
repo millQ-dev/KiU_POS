@@ -1,9 +1,10 @@
 # MillQ Current State
 
-**Checkpoint:** P1.2 First KiU Cashier Frontend Shell — **CURRENT**
+**Checkpoint:** P1.3 Cashier Order Interaction UX — **IMPLEMENTATION COMPLETE (pre-merge)**
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)
 **Backup host:** GitHub `https://github.com/millQ-dev/MillQ.git` (mirror only)
-**Baseline:** Origin/GitHub main @ `f9b728e6731b9269bcdbcf9e5f32448811246814`
+**Baseline:** Origin/GitHub main @ `0a8180941cf220b983135dd31d4e4e79b47c91ee`
+**P1.2:** **DONE** @ `0a81809…` (PR #46)
 **P1.1:** **DONE** @ `f9b728e…` (PR #45)
 **ADR-0031 / ADR-0029:** **ACCEPTED**
 **Updated:** 2026-09-16
@@ -12,22 +13,24 @@
 
 | Item | State |
 | --- | --- |
-| GOLDEN-1 | **DONE** — Live Menu/Pricing **PASS**; Live POS selection **PASS** |
-| M1.1 Menu Configuration & Resolution Runtime | **DONE** |
-| P1.1 POS Presentation Runtime | **DONE** @ `f9b728e…` |
-| P1.2 First KiU Cashier Frontend Shell | **CURRENT** |
-| Identity / production session auth | **ABSENT** — P1.2 uses explicit **dev cashier bootstrap** only (not production authorization) |
-| COMMERCIAL ROUNDING POLICY (unit Money × fractional qty) | **DEFERRED Level C** — **ADR-0030 reserved, NOT created** |
-| Promotions / Loyalty / Floor/Table / Payments / Fiscalization | **STOP** — not started |
+| P1.2 First KiU Cashier Frontend Shell | **DONE** @ `0a81809…` |
+| P1.3 Cashier Order Interaction UX | **THIS PR** — COUNT edit/remove/cancel; commercial status; unit-price refresh; MASS/VOLUME qty entry |
+| Identity / production session auth | **ABSENT** — labeled DEV bootstrap only |
+| COUNT line edit / remove / cancel OPEN | **Supported** (Orders commands; CancelOrder no manager auth today) |
+| MASS/VOLUME quantity entry | **Supported** (dimension/unit from Catalog/OrderLine/POS slot) |
+| Commercial status read + price refresh (unit only) | **Supported** — no auto gross |
+| COMMERCIAL ROUNDING POLICY | **DEFERRED Level C** — **ADR-0030 reserved, NOT created** |
+| Payments / CompleteOrder UX / Fiscalization | **STOP** |
 
-## This PR (P1.2)
+## This PR (P1.3)
 
-- Thin HTTP transport for ResolvedPosSurface, selectPosCountTap, OpenOrder, get Order
-- React/Vite cashier shell at `/` (cashier primary); consumes P1.1 contracts only
-- COUNT one-tap add; MASS/VOLUME quantity entry **DEFERRED** (P1.3)
-- No SetOrderCommercialTerms / CompleteOrder / Payment on tap
-- No Floor/Table UI; no package forks; OPTION A preserved
+- Thin HTTP: PATCH/DELETE line, cancel Order, commercial status, resolve Menu unit prices, select-quantity
+- Basket line selection (UI-only), COUNT +/− / edit, remove, cancel with confirm
+- MASS/VOLUME quantity entry + weighted add (no qty=1 assumption; no commercial gross)
+- Commercial NEEDS_REACCEPTANCE after line mutation; Refresh prices = resolve only
+- OPTION A preserved; no line/Order total invention; no migration
+- Golden Order-interaction variation (COUNT mutate → invalidate → re-resolve → explicit re-accept → CompleteOrder)
 
 ## Next
 
-Independent review → merge → backup → **P1.3 Cashier Order Interaction UX**
+Independent review → merge → backup → **ADR-0030 Commercial RoundingPolicy** (before Payments)

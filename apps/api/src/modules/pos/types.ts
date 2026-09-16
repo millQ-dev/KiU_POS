@@ -165,3 +165,26 @@ export const selectPosCountTapSchema = z
   })
   .strict();
 export type SelectPosCountTapInput = z.infer<typeof selectPosCountTapSchema>;
+
+/** P1.3 explicit quantity add (COUNT / MASS / VOLUME) — no unit×qty gross. */
+export const selectPosQuantityTapSchema = z
+  .object({
+    orderId: uuid,
+    layoutPublicationSlotId: uuid,
+    presentationContext: presentationContextSchema,
+    salesContext: z
+      .object({
+        tenantId: uuid,
+        brandId: uuid,
+        outletId: uuid,
+        terminalGroupId: uuid.nullable().optional(),
+        terminalId: uuid.nullable().optional(),
+        serviceMode: z.string().min(1).nullable().optional(),
+        orderChannel: z.string().min(1),
+        businessDateTime: isoInstant,
+      })
+      .strict(),
+    quantity: z.string().regex(/^-?\d+(\.\d+)?$/),
+  })
+  .strict();
+export type SelectPosQuantityTapInput = z.infer<typeof selectPosQuantityTapSchema>;

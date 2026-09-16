@@ -1,10 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { posApi } from '../api/client.js';
 import { ApiError } from '../api/types.js';
-import type { CashierContext, OrderBasket, ResolvedPosSlot, ResolvedPosSurface } from '../api/types.js';
+import type {
+  CashierContext,
+  CommercialStatus,
+  MenuPriceResolution,
+  OrderBasket,
+  OrderLine,
+  ResolvedPosSlot,
+  ResolvedPosSurface,
+} from '../api/types.js';
 import { OrderBasketPanel } from './OrderBasket.js';
 import { PosPageNavigation } from './PosPageNavigation.js';
 import { ProductGrid } from './ProductGrid.js';
+import { QuantityEntryModal } from './QuantityEntryModal.js';
 import { QuickAccess } from './QuickAccess.js';
 import './CashierShell.css';
 
@@ -42,7 +51,45 @@ export function CashierShell({ context, onChangeContext }: Props) {
   const [order, setOrder] = useState<OrderBasket | null>(null);
   const [orderLoading, setOrderLoading] = useState(false);
   const [selectingSlotId, setSelectingSlotId] = useState<string | null>(null);
+  const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
+  const [mutationBusy, setMutationBusy] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [commercial, setCommercial] = useState<CommercialStatus | null>(null);
+  const [priceResolution, setPriceResolution] = useState<MenuPriceResolution | null>(null);
+  const [refreshingPrices, setRefreshingPrices] = useState(false);
+  const [quantitySlot, setQuantitySlot] = useState<ResolvedPosSlot | null>(null);
+  const inFlightRef = useRef(false);
+
+  const editable = order?.status === 'OPEN';
+
+  const applyOrder = useCallback((next: OrderBasket, preferLineId?: string | null) => {
+    setOrder(next);
+    setPriceResolution(null);
+    setSelectedLineId((prev) => {
+      const prefer = preferLineId === undefined ? prev : preferLineId;
+      if (prefer && next.lines.some((l) => l.orderLineId === prefer)) return prefer;
+      return null;
+    });
+  }, []);
+
+  const reloadCommercial = useCallback(async (orderId: string) => {
+    try {
+      const status = await posApi.getCommercialStatus(orderId);
+      setCommercial(status);
+    } catch {
+      setCommercial(null);
+    }
+  }, []);
+
+  const reloadAuthoritativeOrder = useCallback(
+    async (orderId: string, preferLineId?: string | null) => {
+      const next = await posApi.getOrder(orderId);
+      applyOrder(next, preferLineId);
+      await reloadCommercial(orderId);
+      return next;
+    },
+    [applyOrder, reloadCommercial],
+  );
 
   const loadSurface = useCallback(async () => {
     setSurfaceLoading(true);
@@ -67,6 +114,9 @@ export function CashierShell({ context, onChangeContext }: Props) {
   const openOrder = useCallback(async () => {
     setOrderLoading(true);
     setFeedback(null);
+    setSelectedLineId(null);
+    setCommercial(null);
+    setPriceResolution(null);
     try {
       const created = await posApi.openOrder({
         tenantId: context.tenantId,
@@ -74,14 +124,15 @@ export function CashierShell({ context, onChangeContext }: Props) {
         outletId: context.outletId,
         channel: context.orderChannel || 'DIRECT',
       });
-      setOrder(created);
+      applyOrder(created, null);
+      await reloadCommercial(created.orderId);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to open order';
       setFeedback(message);
     } finally {
       setOrderLoading(false);
     }
-  }, [context]);
+  }, [context, applyOrder, reloadCommercial]);
 
   useEffect(() => {
     void loadSurface();
@@ -100,34 +151,166 @@ export function CashierShell({ context, onChangeContext }: Props) {
     return surface.pages[0] ?? null;
   }, [surface, selectedPageId]);
 
+  const withMutationGuard = async (fn: () => Promise<void>) => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    setMutationBusy(true);
+    setFeedback(null);
+    try {
+      await fn();
+    } finally {
+      inFlightRef.current = false;
+      setMutationBusy(false);
+    }
+  };
+
+  const handleMutationError = async (err: unknown, orderId: string | undefined) => {
+    const code = err instanceof ApiError ? err.code : 'NETWORK';
+    const message = err instanceof Error ? err.message : 'Mutation failed';
+    setFeedback(`${code}: ${message}`);
+    if (!orderId) return;
+    try {
+      await reloadAuthoritativeOrder(orderId, selectedLineId);
+    } catch {
+      /* keep prior UI; feedback already shown */
+    }
+  };
+
   const onSelectSlot = async (slot: ResolvedPosSlot) => {
     if (!order || order.status !== 'OPEN') {
       setFeedback('Open an order first');
       return;
     }
-    if (slot.state !== 'ACTIVE' || slot.quantityEntry !== 'COUNT_ONE') return;
-    setSelectingSlotId(slot.layoutPublicationSlotId);
-    setFeedback(null);
-    try {
-      const result = await posApi.selectCountTap({
-        ...salesPayload(context),
-        orderId: order.orderId,
-        layoutPublicationSlotId: slot.layoutPublicationSlotId,
-      });
-      setOrder(result.order);
-    } catch (err) {
-      const code = err instanceof ApiError ? err.code : 'NETWORK';
-      const message = err instanceof Error ? err.message : 'Selection failed';
-      setFeedback(`${code}: ${message}`);
-      const stale =
-        code === 'POS_SLOT_UNAVAILABLE' ||
-        code === 'POS_SLOT_PRICE_UNAVAILABLE' ||
-        code === 'POS_SLOT_NOT_ACTIVE' ||
-        code === 'POS_QUANTITY_ENTRY_DEFERRED';
-      if (stale) await loadSurface();
-    } finally {
-      setSelectingSlotId(null);
+    if (slot.state !== 'ACTIVE') return;
+    if (slot.quantityEntry === 'DEFERRED_WEIGHTED') {
+      setQuantitySlot(slot);
+      return;
     }
+    await withMutationGuard(async () => {
+      setSelectingSlotId(slot.layoutPublicationSlotId);
+      try {
+        const result = await posApi.selectCountTap({
+          ...salesPayload(context),
+          orderId: order.orderId,
+          layoutPublicationSlotId: slot.layoutPublicationSlotId,
+        });
+        applyOrder(result.order, selectedLineId);
+        await reloadCommercial(result.order.orderId);
+      } catch (err) {
+        const code = err instanceof ApiError ? err.code : 'NETWORK';
+        const message = err instanceof Error ? err.message : 'Selection failed';
+        setFeedback(`${code}: ${message}`);
+        const stale =
+          code === 'POS_SLOT_UNAVAILABLE' ||
+          code === 'POS_SLOT_PRICE_UNAVAILABLE' ||
+          code === 'POS_SLOT_NOT_ACTIVE' ||
+          code === 'POS_QUANTITY_ENTRY_DEFERRED';
+        if (stale) await loadSurface();
+        if (code === 'ORDER_IMMUTABLE') {
+          await reloadAuthoritativeOrder(order.orderId, null);
+        }
+      } finally {
+        setSelectingSlotId(null);
+      }
+    });
+  };
+
+  const onConfirmWeighted = async (quantity: string) => {
+    if (!order || !quantitySlot) return;
+    const slot = quantitySlot;
+    await withMutationGuard(async () => {
+      setSelectingSlotId(slot.layoutPublicationSlotId);
+      try {
+        const result = await posApi.selectQuantityTap({
+          ...salesPayload(context),
+          orderId: order.orderId,
+          layoutPublicationSlotId: slot.layoutPublicationSlotId,
+          quantity,
+        });
+        applyOrder(result.order, selectedLineId);
+        await reloadCommercial(result.order.orderId);
+        setQuantitySlot(null);
+      } catch (err) {
+        const code = err instanceof ApiError ? err.code : 'NETWORK';
+        const message = err instanceof Error ? err.message : 'Selection failed';
+        setFeedback(`${code}: ${message}`);
+        if (
+          code === 'POS_SLOT_UNAVAILABLE' ||
+          code === 'POS_SLOT_PRICE_UNAVAILABLE' ||
+          code === 'POS_SLOT_NOT_ACTIVE'
+        ) {
+          await loadSurface();
+          setQuantitySlot(null);
+        }
+      } finally {
+        setSelectingSlotId(null);
+      }
+    });
+  };
+
+  const onUpdateQuantity = (line: OrderLine, quantity: string) => {
+    if (!order || !editable) return;
+    void withMutationGuard(async () => {
+      try {
+        const next = await posApi.updateOrderLine(order.orderId, line.orderLineId, {
+          quantity,
+          unit: line.unit,
+          dimension: line.dimension,
+        });
+        applyOrder(next, line.orderLineId);
+        await reloadCommercial(next.orderId);
+      } catch (err) {
+        await handleMutationError(err, order.orderId);
+      }
+    });
+  };
+
+  const onRemoveLine = (line: OrderLine) => {
+    if (!order || !editable) return;
+    if (!window.confirm(`Remove “${line.catalogItemName}”?`)) return;
+    void withMutationGuard(async () => {
+      try {
+        const next = await posApi.removeOrderLine(order.orderId, line.orderLineId);
+        applyOrder(next, null);
+        await reloadCommercial(next.orderId);
+      } catch (err) {
+        await handleMutationError(err, order.orderId);
+      }
+    });
+  };
+
+  const onCancelOrder = () => {
+    if (!order || !editable) return;
+    if (!window.confirm('Cancel this open order? This cannot be undone from the cashier.')) return;
+    void withMutationGuard(async () => {
+      try {
+        const next = await posApi.cancelOrder(order.orderId, { reason: 'cashier_cancel' });
+        applyOrder(next, null);
+        setCommercial(null);
+        setPriceResolution(null);
+        setFeedback('Order cancelled');
+      } catch (err) {
+        await handleMutationError(err, order.orderId);
+      }
+    });
+  };
+
+  const onRefreshPrices = () => {
+    if (!order || !editable) return;
+    void withMutationGuard(async () => {
+      setRefreshingPrices(true);
+      try {
+        const resolved = await posApi.resolveMenuPrices(order.orderId, {
+          salesContext: salesPayload(context).salesContext,
+        });
+        setPriceResolution(resolved);
+        await reloadCommercial(order.orderId);
+      } catch (err) {
+        await handleMutationError(err, order.orderId);
+      } finally {
+        setRefreshingPrices(false);
+      }
+    });
   };
 
   return (
@@ -153,6 +336,12 @@ export function CashierShell({ context, onChangeContext }: Props) {
       {feedback && (
         <div className="pos-shell__feedback" role="status">
           {feedback}
+        </div>
+      )}
+
+      {!editable && order && (
+        <div className="pos-shell__feedback" role="status">
+          Order is {order.status} — editing disabled. Start a new order to continue.
         </div>
       )}
 
@@ -190,12 +379,32 @@ export function CashierShell({ context, onChangeContext }: Props) {
           <OrderBasketPanel
             order={order}
             loading={orderLoading}
+            selectedLineId={selectedLineId}
+            mutationBusy={mutationBusy}
+            editable={!!editable}
+            commercial={commercial}
+            priceResolution={priceResolution}
+            refreshingPrices={refreshingPrices}
+            onSelectLine={setSelectedLineId}
+            onUpdateQuantity={onUpdateQuantity}
+            onRemoveLine={onRemoveLine}
+            onRefreshPrices={onRefreshPrices}
+            onCancelOrder={onCancelOrder}
             onNewOrder={() => {
               setOrder(null);
             }}
           />
         </div>
       ) : null}
+
+      {quantitySlot && (
+        <QuantityEntryModal
+          slot={quantitySlot}
+          busy={mutationBusy}
+          onCancel={() => setQuantitySlot(null)}
+          onConfirm={(q) => void onConfirmWeighted(q)}
+        />
+      )}
     </div>
   );
 }

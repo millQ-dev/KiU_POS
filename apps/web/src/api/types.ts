@@ -76,6 +76,40 @@ export type OrderBasket = {
   lines: OrderLine[];
 };
 
+/** Backend commercial acceptance read (D1.4B). Absence after mutation = NEEDS_REACCEPTANCE. */
+export type CommercialStatus = {
+  orderId: string;
+  orderStatus: string;
+  commercialState: 'NOT_ACCEPTED' | 'ACCEPTED';
+  presentationHint: 'NEEDS_REACCEPTANCE' | 'COMMERCIAL_CURRENT';
+  currencyCode: string | null;
+  minorUnitExponent: number | null;
+  acceptedGrossMerchandiseMinor: string | null;
+  lines: Array<{
+    orderLineId: string;
+    resolvedUnitPriceMinor: string | null;
+    grossMerchandiseMinor: string;
+  }>;
+};
+
+/** Unit-price resolution only — does not accept commercial terms. */
+export type MenuPriceResolution = {
+  orderId: string;
+  note: string;
+  commercialGrossPolicy: string;
+  lines: Array<{
+    orderLineId: string;
+    catalogItemId: string;
+    quantity: string;
+    availabilityStatus: string;
+    resolvedUnitPriceMinor: string | null;
+    currencyCode: string | null;
+    minorUnitExponent: number | null;
+    menuPublicationId: string | null;
+    priceRuleId: string | null;
+  }>;
+};
+
 export type CashierContext = {
   tenantId: string;
   tenantName: string;

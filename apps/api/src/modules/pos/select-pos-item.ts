@@ -5,8 +5,10 @@ import { PosSurfaceResolver } from './pos-surface-resolver.js';
 import {
   selectPosCountTapSchema,
   selectPosItemSchema,
+  selectPosQuantityTapSchema,
   type SelectPosCountTapInput,
   type SelectPosItemInput,
+  type SelectPosQuantityTapInput,
 } from './types.js';
 
 /**
@@ -70,6 +72,49 @@ export class PosSelectionService {
       quantity: '1',
       unit: slot.baseUnit,
       dimension: 'COUNT',
+    });
+  }
+
+  /**
+   * Explicit quantity add for COUNT/MASS/VOLUME (P1.3).
+   * Caller supplies quantity; Catalog supplies unit/dimension. No commercial gross.
+   */
+  async selectPosQuantityTap(raw: unknown) {
+    const cmd = selectPosQuantityTapSchema.parse(raw) as SelectPosQuantityTapInput;
+    const surface = await this.surfaceResolver.resolvePosSurface({
+      presentationContext: cmd.presentationContext,
+      salesContext: cmd.salesContext,
+    });
+    const slot = this.surfaceResolver.findActiveSlot(surface, cmd.layoutPublicationSlotId);
+    if (!slot) {
+      throw new DomainValidationError(
+        'POS_SLOT_NOT_ACTIVE',
+        'Selected layout slot is not present as an active/visible slot on current ResolvedPosSurface',
+      );
+    }
+    if (slot.state === 'DISABLED_UNAVAILABLE') {
+      throw new DomainValidationError(
+        'POS_SLOT_UNAVAILABLE',
+        'Selected POS slot is DISABLED_UNAVAILABLE',
+      );
+    }
+    if (slot.state === 'DISABLED_PRICE_UNAVAILABLE') {
+      throw new DomainValidationError(
+        'POS_SLOT_PRICE_UNAVAILABLE',
+        'Selected POS slot is DISABLED_PRICE_UNAVAILABLE',
+      );
+    }
+    if (slot.state === 'CONFIGURATION_ERROR' || slot.state !== 'ACTIVE') {
+      throw new DomainValidationError('POS_SLOT_NOT_ACTIVE', 'Selected POS slot is not ACTIVE');
+    }
+    return this.selectPosItem({
+      orderId: cmd.orderId,
+      layoutPublicationSlotId: cmd.layoutPublicationSlotId,
+      presentationContext: cmd.presentationContext,
+      salesContext: cmd.salesContext,
+      quantity: cmd.quantity,
+      unit: slot.baseUnit,
+      dimension: slot.dimension,
     });
   }
 
