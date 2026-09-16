@@ -5,7 +5,7 @@
 - **Accepted:** 2026-09-16 (PO LAUNCH — binding decisions recorded; architecture-only Level C)
 - **Decision owners:** Product Owner and System Architect
 - **Related:** ADR-0002, ADR-0008, ADR-0017, ADR-0018, ADR-0025, ADR-0028, ADR-0029; Architecture v1.2 / v1.3; domain-module-map POS Presentation; M1.1 Menu Runtime; GOLDEN-1
-- **ADR number note:** Launch suggested ADR-0030. **ADR-0030 remains reserved** for the deferred Commercial RoundingPolicy (unit Money × fractional MASS/VOLUME quantity → official Money). This POS Presentation freeze is therefore **ADR-0031**.
+- **ADR number note:** Launch suggested ADR-0030. **ADR-0030** is the Commercial RoundingPolicy ADR (Accepted architecture; runtime = C1.1). This POS Presentation freeze is **ADR-0031**.
 - **Blocks enabled after Accept (implementation not launched by this ADR):**
   1. LayoutDefinition storage
   2. Immutable LayoutPublication (+ MenuPage / MenuSlot freeze)
@@ -369,9 +369,9 @@ Does **not**:
 - trigger payment / fiscalization
 - invent gross from unit×quantity
 
-### 24. Commercial RoundingPolicy boundary (OPTION A remains binding)
+### 24. Commercial RoundingPolicy boundary (OPTION A remains binding at runtime until C1.1)
 
-M1.1 OPTION A remains binding until a future Commercial RoundingPolicy ADR (**reserved number ADR-0030**, not created here).
+M1.1 OPTION A remains the **runtime** rule until **C1.1** implements Accepted **ADR-0030** (`BASE_LIST_LINE_GROSS`).
 
 POS Presentation / UI **MUST NOT**:
 
@@ -579,7 +579,7 @@ LayoutPublication → ResolvedPosSurface → select ACTIVE item
 
 ## Hard out of scope
 
-Promotions · Loyalty · Commercial RoundingPolicy (ADR-0030 reserved, not created) · full Table/Floor runtime · Payments · Settlement · Fiscalization · Production Routing UI · KDS · modifiers · stock stop-list · Channel Menu · Contribution Margin · Period Lock · Intelligence · offline sync protocol · generic action/widget DSL · package-name domain forks
+Promotions · Loyalty · Commercial RoundingPolicy (**ADR-0030 Accepted architecture; runtime C1.1**) · full Table/Floor runtime · Payments · Settlement · Fiscalization · Production Routing UI · KDS · modifiers · stock stop-list · Channel Menu · Contribution Margin · Period Lock · Intelligence · offline sync protocol · generic action/widget DSL · package-name domain forks
 
 ---
 
