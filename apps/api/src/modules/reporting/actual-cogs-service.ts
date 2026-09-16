@@ -148,13 +148,13 @@ export class ActualCogsService {
   }
 
   /**
-   * Food Cost Ratio is explicitly unavailable in D1.4A (ADR-0026).
-   * Do not invent a revenue denominator.
+   * @deprecated D1.4D — Food Cost Ratio / Operational Gross Profit live on OperatingEconomicsService.
+   * Actual COGS semantics are unchanged; this stub must not claim the ratio is impossible.
    */
   foodCostRatioUnavailable(): never {
     throw new DomainValidationError(
-      'FOOD_COST_RATIO_UNAVAILABLE',
-      'Food Cost Ratio / Revenue Basis are out of scope for D1.4A (ADR-0026)',
+      'FOOD_COST_RATIO_USE_OPERATING_ECONOMICS',
+      'Food Cost Ratio is provided by OperatingEconomicsService (D1.4D); ActualCogsService remains COGS-only',
     );
   }
 
