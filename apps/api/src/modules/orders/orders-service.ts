@@ -322,6 +322,7 @@ export class OrdersService {
       if (order.status !== 'OPEN') {
         throw new OrderImmutableError('Only OPEN orders can be cancelled');
       }
+      await this.assertNoLiveSettlement(client, cmd.orderId);
       await client.query(
         `UPDATE sales_order
          SET status = 'CANCELLED', cancelled_at = NOW(), cancel_reason = $2,

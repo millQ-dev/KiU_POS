@@ -1956,8 +1956,9 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
         orderId: order.orderId,
         idempotencyKey: `golden-open2-${order.orderId}`,
       });
-      expect(s2.state).toBe('SATISFIED');
+      expect(s2.state).toBe('COLLECTING');
       expect(s2.customerPayableMinor).toBe('0');
+      expect(s2.outstandingAmountMinor).toBe('0');
 
       const orch = new CheckoutOrchestrator(
         pool,

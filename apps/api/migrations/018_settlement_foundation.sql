@@ -69,7 +69,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_settlement_group_live_order
   WHERE state IN ('COLLECTING', 'SATISFIED');
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_settlement_group_open_idempotency
-  ON settlement_group (order_id, open_idempotency_key);
+  ON settlement_group (order_id, open_idempotency_key)
+  WHERE state IN ('COLLECTING', 'SATISFIED');
 
 CREATE INDEX IF NOT EXISTS idx_settlement_group_order
   ON settlement_group (order_id);

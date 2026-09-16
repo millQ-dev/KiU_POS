@@ -232,6 +232,7 @@ export class SettlementService {
         `SELECT settlement_group_id, open_semantic_fingerprint, state
          FROM settlement_group
          WHERE order_id = $1 AND open_idempotency_key = $2
+           AND state IN ('COLLECTING', 'SATISFIED')
          FOR UPDATE`,
         [orderId, idempotencyKey],
       );
@@ -325,8 +326,8 @@ export class SettlementService {
       );
 
       const groupId = randomUUID();
-      const zeroPayable = customerPayableMinor === '0';
-      const groupState: SettlementGroupState = zeroPayable ? 'SATISFIED' : 'COLLECTING';
+      // Zero-payable stays COLLECTING until reconcile/Checkout advance (safe Abort remains possible).
+      const groupState: SettlementGroupState = 'COLLECTING';
 
       await client.query(
         `INSERT INTO settlement_group (
@@ -337,7 +338,7 @@ export class SettlementService {
            satisfied_at
          ) VALUES (
            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,$11,$12,$13,$14,
-           CASE WHEN $5 = 'SATISFIED' THEN NOW() ELSE NULL END
+           NULL
          )`,
         [
           groupId,
@@ -358,7 +359,7 @@ export class SettlementService {
       );
 
       const checkId = randomUUID();
-      const checkState: SettlementCheckState = zeroPayable ? 'SATISFIED' : 'COLLECTING';
+      const checkState: SettlementCheckState = 'COLLECTING';
       await client.query(
         `INSERT INTO settlement_check (
            settlement_check_id, settlement_group_id, tenant_id, state,
@@ -733,20 +734,22 @@ export class SettlementService {
       const lineGross = new Map(
         lines.rows.map((r) => [r.order_line_id, r.gross_merchandise_minor]),
       );
-      for (const [lineId, parts] of byLine) {
-        const gross = lineGross.get(lineId);
-        if (!gross) {
-          throw new DomainValidationError(
-            'SETTLEMENT_SPLIT_NOT_CONSERVING',
-            `Unknown order line in split: ${lineId}`,
-          );
-        }
+      for (const [lineId, gross] of lineGross) {
+        const parts = byLine.get(lineId) ?? [];
         try {
           assertExactLineAllocationConservation(gross, parts);
         } catch (err) {
           throw new DomainValidationError(
             'SETTLEMENT_SPLIT_NOT_CONSERVING',
             err instanceof Error ? err.message : 'Line split not conserving',
+          );
+        }
+      }
+      for (const lineId of byLine.keys()) {
+        if (!lineGross.has(lineId)) {
+          throw new DomainValidationError(
+            'SETTLEMENT_SPLIT_NOT_CONSERVING',
+            `Unknown order line in split: ${lineId}`,
           );
         }
       }

@@ -307,8 +307,97 @@ describe('S1.1 Settlement / Checkout foundation', () => {
       orderId: z.orderId,
       idempotencyKey: `zero-${z.orderId}`,
     });
-    expect(zs.state).toBe('SATISFIED');
+    expect(zs.state).toBe('COLLECTING');
     expect(zs.checks[0]!.customerPayableMinor).toBe('0');
+    expect(zs.outstandingAmountMinor).toBe('0');
+    const zReconciled = await settlements.reconcileSettlementCoverage(zs.settlementGroupId);
+    expect(zReconciled.state).toBe('SATISFIED');
+  });
+
+  it('review — zero-payable Abort restores editing', async () => {
+    const o = await openAcceptedOrder('0');
+    const s = await settlements.openSettlement({
+      orderId: o.orderId,
+      idempotencyKey: `zero-abort-${o.orderId}`,
+    });
+    expect(s.state).toBe('COLLECTING');
+    await settlements.abortSettlement({ settlementGroupId: s.settlementGroupId });
+    await orders.addOrderLine({
+      orderId: o.orderId,
+      catalogItemId: fx.eggItemId,
+      quantity: '1',
+      unit: 'ea',
+      dimension: 'COUNT',
+    });
+  });
+
+  it('review — abort then reopen with same idempotency key', async () => {
+    const o = await openAcceptedOrder('100000');
+    const key = `reopen-${o.orderId}`;
+    const s1 = await settlements.openSettlement({ orderId: o.orderId, idempotencyKey: key });
+    await settlements.abortSettlement({ settlementGroupId: s1.settlementGroupId });
+    const s2 = await settlements.openSettlement({ orderId: o.orderId, idempotencyKey: key });
+    expect(s2.settlementGroupId).not.toBe(s1.settlementGroupId);
+    expect(s2.state).toBe('COLLECTING');
+  });
+
+  it('review — CancelOrder blocked under live Settlement', async () => {
+    const o = await openAcceptedOrder('100000');
+    await settlements.openSettlement({
+      orderId: o.orderId,
+      idempotencyKey: `cancel-${o.orderId}`,
+    });
+    await expect(
+      orders.cancelOrder({ orderId: o.orderId, reason: 'cashier' }),
+    ).rejects.toMatchObject({ code: 'SETTLEMENT_EDIT_LOCKED' });
+  });
+
+  it('review — split omitting a line is rejected', async () => {
+    const o = await orders.openOrder({
+      tenantId: fx.tenantId,
+      legalEntityId: fx.legalEntityId,
+      outletId: fx.outletId,
+    });
+    await orders.addOrderLine({
+      orderId: o.orderId,
+      catalogItemId: fx.eggItemId,
+      quantity: '1',
+      unit: 'ea',
+      dimension: 'COUNT',
+    });
+    await orders.addOrderLine({
+      orderId: o.orderId,
+      catalogItemId: fx.eggItemId,
+      quantity: '1',
+      unit: 'ea',
+      dimension: 'COUNT',
+    });
+    const refreshed = await orders.getOrder(o.orderId);
+    await acceptFinalMerchandiseTerms(orders, refreshed.orderId, {
+      defaultGrossMinor: '50000',
+      idempotencyKey: `omit-${o.orderId}`,
+    });
+    const s = await settlements.openSettlement({
+      orderId: o.orderId,
+      idempotencyKey: `omit-open-${o.orderId}`,
+    });
+    const lineA = refreshed.lines[0]!.orderLineId;
+    await expect(
+      settlements.splitChecksExact({
+        settlementGroupId: s.settlementGroupId,
+        expectedVersion: s.version,
+        checks: [
+          {
+            customerPayableMinor: '50000',
+            lineAllocations: [{ orderLineId: lineA, allocatedMerchandiseGrossMinor: '50000' }],
+          },
+          {
+            customerPayableMinor: '50000',
+            lineAllocations: [{ orderLineId: lineA, allocatedMerchandiseGrossMinor: '0' }],
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'SETTLEMENT_SPLIT_NOT_CONSERVING' });
   });
 
   it('43-50 — Checkout→CompleteOrder with fiscal gate; Payment never calls CompleteOrder', async () => {
@@ -317,7 +406,7 @@ describe('S1.1 Settlement / Checkout foundation', () => {
       orderId: o.orderId,
       idempotencyKey: `co-${o.orderId}`,
     });
-    expect(s.state).toBe('SATISFIED');
+    expect(s.state).toBe('COLLECTING');
 
     const blocked = new CheckoutOrchestrator(pool, orders, settlements);
     await expect(
