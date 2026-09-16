@@ -55,7 +55,7 @@
 | Contribution Margin / channel fees | ADR-0019 future ladder |
 | Explainable Intelligence | Intelligence reads proven evidence only |
 | TOTAL_LOSS on main sale path | Keep on D1.2B suite (not main economic day) |
-| Live Menu/Pricing mutation | Menu / Pricing runtime |
+| Live Menu/Pricing mutation | **DEFERRED** — depends on ADR-0029 + MenuResolver runtime |
 
 ## Bugs discovered by Golden
 

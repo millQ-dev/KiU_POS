@@ -1,31 +1,28 @@
 # MillQ Current State
 
-**Checkpoint:** GOLDEN-1 Golden Restaurant Scenario / Torture Test **in review** — branch from Origin `main` @ `361ef9b` (2026-09-16)
+**Checkpoint:** ADR-0029 Menu Publication / Availability / Base Pricing **in review** — branch from Origin `main` @ `3114b3c` (2026-09-16)
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)
 **Backup host:** GitHub `https://github.com/millQ-dev/MillQ.git` (mirror only)
-**D1.4D PR #40:** merged @ `361ef9b8c2255f8d4984c882b0d6f93125689340`
+**GOLDEN-1 PR #41:** merged @ `3114b3cde2c279afd2cbd589676d52cfe52b258f`
 **Updated:** 2026-09-16
 
 ## Runtime / CI / backup
 
 | Item | State |
 | --- | --- |
-| D1.4A Actual COGS | **DONE** |
-| D1.4B Order Commercial Snapshot | **DONE** |
-| D1.4C Revenue Basis Read Model | **DONE** |
-| D1.4D Food Cost Ratio & Operational Gross Profit | **DONE** @ `361ef9b` |
-| GOLDEN-1 Golden Restaurant Scenario | **This PR** — permanent torture gate |
-| Contribution Margin / Period Lock / Menu / POS UX | **STOP** — not started |
+| D1.4A–D1.4D economic vertical | **DONE** |
+| GOLDEN-1 Golden Restaurant Scenario | **DONE** @ `3114b3c` — foundation proven YES |
+| ADR-0029 Menu Publication, Availability & Base Price Resolution | **This PR** — architecture only |
+| MenuResolver / Pricing runtime | **STOP** — next after ADR Accept |
+| Promotions / Loyalty / POS layout / Channel Menu | **STOP** — not started |
 
-## This PR (GOLDEN-1)
+## This PR (ADR-0029)
 
-- Permanent entry: `apps/api/src/scenarios/golden-restaurant.acceptance.test.ts`
-- Manifest: `docs/processes/golden-restaurant-scenario.md`
-- Cross-module day: procurement → production → order → commercial → COGS/Revenue/OGP → reversals
-- Explicit DEFERRED markers for unsupported torture steps
-- **Golden-discovered fix:** business DATE `asIsoDate` UTC shift in positive-offset TZ
-- **No migration / no new product runtime**
+- `docs/decisions/ADR-0029-menu-publication-pricing-resolution.md`
+- Freezes MenuDefinition vs Publication, inheritance, availability, base price, SalesContext, timezone, Orders integration timing
+- **No runtime / no migration / no schema**
 
 ## Next
 
-Independent review → merge → backup → **STOP**
+Independent architecture review → merge → backup → **STOP**  
+(Runtime Menu Configuration + resolvers = separate launch)
