@@ -298,7 +298,9 @@ describe('Block D1.4C Revenue Basis read model (PostgreSQL)', () => {
       expect(effect!.allocatedOrderMerchantDiscountMinor).toBe(l.allocatedOrderMerchantDiscountMinor);
       expect(effect!.signedRevenueBasisMinor).toBe(l.netMerchandiseSalesMinor);
     }
-    expect(lines[0]!.lineMerchantFundedDiscountMinor).toBe('5');
+    expect(lines.find((e) => e.orderLineId === sorted[0]!.orderLineId)!.lineMerchantFundedDiscountMinor).toBe(
+      '5',
+    );
 
     // Re-accept terms on a different OPEN order — frozen completed reporting unchanged
     const other = await openMilkOrder('1');
