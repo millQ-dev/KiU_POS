@@ -25,6 +25,13 @@ export type ResolvedUnitMoney = {
 export type ResolvedPosSlot = {
   readonly layoutPublicationSlotId: string;
   readonly catalogItemId: string;
+  /** Catalog read — presentation label composition only (not Menu/Pricing SoT). */
+  readonly catalogItemName: string;
+  readonly displayLabel: string;
+  readonly baseUnit: string;
+  readonly dimension: 'MASS' | 'VOLUME' | 'COUNT';
+  /** COUNT → one-tap qty 1; MASS/VOLUME quantity entry deferred (P1.3). */
+  readonly quantityEntry: 'COUNT_ONE' | 'DEFERRED_WEIGHTED';
   readonly zone: 'PAGE' | 'QUICK_ACCESS';
   readonly position: number;
   readonly labelOverride: string | null;
@@ -81,10 +88,17 @@ type PubSlotRow = {
   color_token: string | null;
 };
 
+type CatalogRead = {
+  name: string;
+  base_unit: string;
+  dimension: 'MASS' | 'VOLUME' | 'COUNT';
+};
+
 function intersectSlot(
   slot: PubSlotRow,
   menuByCatalog: Map<string, ResolvedMenuItem>,
   layout: ResolvedLayout,
+  catalog: CatalogRead,
 ): ResolvedPosSlot | null {
   const menuItem = menuByCatalog.get(slot.catalog_item_id);
   const layoutProvenance = {
@@ -92,9 +106,17 @@ function intersectSlot(
     layoutPublicationSlotId: slot.layout_publication_slot_id,
     publicationVersion: layout.publicationVersion,
   };
+  const displayLabel = slot.label_override?.trim() || catalog.name;
+  const quantityEntry =
+    catalog.dimension === 'COUNT' ? ('COUNT_ONE' as const) : ('DEFERRED_WEIGHTED' as const);
   const base = {
     layoutPublicationSlotId: slot.layout_publication_slot_id,
     catalogItemId: slot.catalog_item_id,
+    catalogItemName: catalog.name,
+    displayLabel,
+    baseUnit: catalog.base_unit,
+    dimension: catalog.dimension,
+    quantityEntry,
     zone: slot.zone,
     position: slot.position,
     labelOverride: slot.label_override,
@@ -214,9 +236,62 @@ export class PosSurfaceResolver {
     );
 
     const menuByCatalog = new Map(menu.items.map((i) => [i.catalogItemId, i]));
-    const resolvedSlots = slots.rows
-      .map((s) => intersectSlot(s, menuByCatalog, layout))
-      .filter((s): s is ResolvedPosSlot => s !== null);
+    const catalogIds = [...new Set(slots.rows.map((s) => s.catalog_item_id))];
+    const catalogRows =
+      catalogIds.length === 0
+        ? { rows: [] as { catalog_item_id: string; name: string; base_unit: string; dimension: CatalogRead['dimension'] }[] }
+        : await this.pool.query<{
+            catalog_item_id: string;
+            name: string;
+            base_unit: string;
+            dimension: CatalogRead['dimension'];
+          }>(
+            `SELECT catalog_item_id, name, base_unit, dimension
+             FROM catalog_item
+             WHERE tenant_id = $1 AND catalog_item_id = ANY($2::uuid[])`,
+            [layout.presentationContext.tenantId, catalogIds],
+          );
+    const catalogById = new Map(
+      catalogRows.rows.map((r) => [
+        r.catalog_item_id,
+        { name: r.name, base_unit: r.base_unit, dimension: r.dimension } satisfies CatalogRead,
+      ]),
+    );
+
+    const resolvedSlots: ResolvedPosSlot[] = [];
+    for (const s of slots.rows) {
+      const catalog = catalogById.get(s.catalog_item_id);
+      if (!catalog) {
+        // Cross-tenant / missing catalog — configuration error visible if in menu; else hidden
+        const menuItem = menuByCatalog.get(s.catalog_item_id);
+        if (!menuItem) continue;
+        resolvedSlots.push({
+          layoutPublicationSlotId: s.layout_publication_slot_id,
+          catalogItemId: s.catalog_item_id,
+          catalogItemName: 'Unknown item',
+          displayLabel: s.label_override?.trim() || 'Unknown item',
+          baseUnit: 'ea',
+          dimension: 'COUNT',
+          quantityEntry: 'COUNT_ONE',
+          zone: s.zone,
+          position: s.position,
+          labelOverride: s.label_override,
+          colorToken: s.color_token,
+          state: 'CONFIGURATION_ERROR',
+          unitPrice: null,
+          availabilityProvenance: menuItem.availabilityProvenance,
+          menuProvenance: menuItem.menuProvenance,
+          layoutProvenance: {
+            layoutPublicationId: layout.layoutPublicationId,
+            layoutPublicationSlotId: s.layout_publication_slot_id,
+            publicationVersion: layout.publicationVersion,
+          },
+        });
+        continue;
+      }
+      const resolved = intersectSlot(s, menuByCatalog, layout, catalog);
+      if (resolved) resolvedSlots.push(resolved);
+    }
 
     const pageSlots = new Map<string, ResolvedPosSlot[]>();
     const quickAccess: ResolvedPosSlot[] = [];

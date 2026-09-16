@@ -4,6 +4,7 @@ import { loadEnv } from './config.js';
 import { createPool } from './db/pool.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerGoodsReceiptRoutes } from './routes/goods-receipts.js';
+import { registerDevCashierBootstrapRoutes, registerPosRoutes } from './routes/pos.js';
 
 async function main() {
   const env = loadEnv();
@@ -19,11 +20,13 @@ async function main() {
 
   await registerHealthRoutes(app, pool);
   await registerGoodsReceiptRoutes(app, pool);
+  await registerPosRoutes(app, pool);
+  await registerDevCashierBootstrapRoutes(app, pool);
 
   app.get('/', async () => ({
     name: 'MillQ API',
     layer: 'operational-core',
-    version: '0.1.0-block-c',
+    version: '0.1.0-p1.2',
   }));
 
   const shutdown = async () => {

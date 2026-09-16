@@ -40,3 +40,20 @@ export function addMoney(a: Money, b: Money): Money {
   const sum = (BigInt(a.amountMinor) + BigInt(b.amountMinor)).toString();
   return createMoney(sum, a.currencyCode, a.minorUnitExponent);
 }
+
+/**
+ * Display-only Money formatting (string/BigInt — never floating-point business math).
+ * Does NOT compute unit×quantity gross (ADR-0030 reserved / OPTION A).
+ */
+export function formatMoneyDisplay(m: Money): string {
+  const negative = m.amountMinor.startsWith('-');
+  const digits = negative ? m.amountMinor.slice(1) : m.amountMinor;
+  const exp = m.minorUnitExponent;
+  if (exp === 0) {
+    return `${negative ? '-' : ''}${digits} ${m.currencyCode}`;
+  }
+  const padded = digits.padStart(exp + 1, '0');
+  const whole = padded.slice(0, -exp) || '0';
+  const frac = padded.slice(-exp);
+  return `${negative ? '-' : ''}${whole}.${frac} ${m.currencyCode}`;
+}

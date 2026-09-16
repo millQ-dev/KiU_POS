@@ -1,0 +1,70 @@
+.pos-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--pos-space-2);
+  min-height: var(--pos-tile-min);
+  min-width: 0;
+  padding: var(--pos-space-3);
+  border-radius: var(--pos-radius);
+  border: 1px solid var(--pos-border);
+  background: var(--pos-surface-2);
+  color: var(--pos-text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.pos-tile:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.pos-tile--active:not(:disabled):hover {
+  border-color: var(--pos-accent);
+  background: #343a46;
+}
+
+.pos-tile--active:not(:disabled):active {
+  background: var(--pos-accent-press);
+}
+
+.pos-tile--disabled_unavailable {
+  border-color: var(--pos-disabled);
+}
+
+.pos-tile--disabled_price_unavailable {
+  border-color: var(--pos-warn);
+}
+
+.pos-tile--configuration_error {
+  border-color: var(--pos-danger);
+  background: #3a2a2c;
+}
+
+.pos-tile--weighted {
+  border-style: dashed;
+}
+
+.pos-tile__label {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.pos-tile__price {
+  font-family: var(--pos-font-mono);
+  font-size: 0.95rem;
+}
+
+.pos-tile__price--muted {
+  color: var(--pos-text-muted);
+}
+
+.pos-tile__meta {
+  font-size: 0.75rem;
+  color: var(--pos-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}

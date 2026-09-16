@@ -1,0 +1,53 @@
+:root {
+  --pos-font: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  --pos-font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --pos-bg: #1a1d23;
+  --pos-surface: #242830;
+  --pos-surface-2: #2e333d;
+  --pos-border: #3d4450;
+  --pos-text: #f2f4f7;
+  --pos-text-muted: #9aa3b2;
+  --pos-accent: #3d8bfd;
+  --pos-accent-press: #2f6fd1;
+  --pos-ok: #3dd68c;
+  --pos-warn: #f0b429;
+  --pos-danger: #f07178;
+  --pos-disabled: #5a6270;
+  --pos-radius: 10px;
+  --pos-space-1: 4px;
+  --pos-space-2: 8px;
+  --pos-space-3: 12px;
+  --pos-space-4: 16px;
+  --pos-space-5: 24px;
+  --pos-tile-min: 96px;
+  --pos-touch: 48px;
+  --pos-header-h: 56px;
+  --pos-nav-w: 160px;
+  --pos-basket-w: 320px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--pos-font);
+  background: var(--pos-bg);
+  color: var(--pos-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+button:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--pos-accent);
+  outline-offset: 2px;
+}

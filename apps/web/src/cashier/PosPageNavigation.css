@@ -1,0 +1,41 @@
+.pos-nav {
+  width: var(--pos-nav-w);
+  flex-shrink: 0;
+  background: var(--pos-surface);
+  border-right: 1px solid var(--pos-border);
+  padding: var(--pos-space-3);
+  overflow-y: auto;
+}
+
+.pos-nav__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pos-space-2);
+}
+
+.pos-nav__btn {
+  width: 100%;
+  min-height: var(--pos-touch);
+  padding: var(--pos-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--pos-radius);
+  background: transparent;
+  color: var(--pos-text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pos-nav__btn--selected {
+  background: var(--pos-surface-2);
+  border-color: var(--pos-accent);
+}
+
+.pos-nav__empty {
+  color: var(--pos-text-muted);
+  font-size: 0.875rem;
+}

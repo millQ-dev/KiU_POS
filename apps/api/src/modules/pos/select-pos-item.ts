@@ -2,7 +2,12 @@ import type { Pool } from 'pg';
 import type { OrdersService } from '../orders/orders-service.js';
 import { DomainValidationError, NotFoundError } from './errors.js';
 import { PosSurfaceResolver } from './pos-surface-resolver.js';
-import { selectPosItemSchema, type SelectPosItemInput } from './types.js';
+import {
+  selectPosCountTapSchema,
+  selectPosItemSchema,
+  type SelectPosCountTapInput,
+  type SelectPosItemInput,
+} from './types.js';
 
 /**
  * Narrow cashier selection path (ADR-0031 / P1.1).
@@ -17,6 +22,55 @@ export class PosSelectionService {
     private readonly orders: OrdersService,
   ) {
     this.surfaceResolver = new PosSurfaceResolver(pool);
+  }
+
+  /**
+   * P1.2 COUNT one-tap path. Does not invent MASS/VOLUME quantity=1.
+   * Revalidates surface; Catalog dimension must be COUNT.
+   */
+  async selectPosCountTap(raw: unknown) {
+    const cmd = selectPosCountTapSchema.parse(raw) as SelectPosCountTapInput;
+    const surface = await this.surfaceResolver.resolvePosSurface({
+      presentationContext: cmd.presentationContext,
+      salesContext: cmd.salesContext,
+    });
+    const slot = this.surfaceResolver.findActiveSlot(surface, cmd.layoutPublicationSlotId);
+    if (!slot) {
+      throw new DomainValidationError(
+        'POS_SLOT_NOT_ACTIVE',
+        'Selected layout slot is not present as an active/visible slot on current ResolvedPosSurface',
+      );
+    }
+    if (slot.state === 'DISABLED_UNAVAILABLE') {
+      throw new DomainValidationError(
+        'POS_SLOT_UNAVAILABLE',
+        'Selected POS slot is DISABLED_UNAVAILABLE',
+      );
+    }
+    if (slot.state === 'DISABLED_PRICE_UNAVAILABLE') {
+      throw new DomainValidationError(
+        'POS_SLOT_PRICE_UNAVAILABLE',
+        'Selected POS slot is DISABLED_PRICE_UNAVAILABLE',
+      );
+    }
+    if (slot.state === 'CONFIGURATION_ERROR' || slot.state !== 'ACTIVE') {
+      throw new DomainValidationError('POS_SLOT_NOT_ACTIVE', 'Selected POS slot is not ACTIVE');
+    }
+    if (slot.dimension !== 'COUNT' || slot.quantityEntry !== 'COUNT_ONE') {
+      throw new DomainValidationError(
+        'POS_QUANTITY_ENTRY_DEFERRED',
+        'MASS/VOLUME quantity entry is deferred — do not invent quantity=1 for weighted items',
+      );
+    }
+    return this.selectPosItem({
+      orderId: cmd.orderId,
+      layoutPublicationSlotId: cmd.layoutPublicationSlotId,
+      presentationContext: cmd.presentationContext,
+      salesContext: cmd.salesContext,
+      quantity: '1',
+      unit: slot.baseUnit,
+      dimension: 'COUNT',
+    });
   }
 
   async selectPosItem(raw: unknown) {
@@ -99,7 +153,7 @@ export class PosSelectionService {
       throw new DomainValidationError('POS_SLOT_NOT_ACTIVE', 'Selected POS slot is not ACTIVE');
     }
 
-    // Delegate — POS never writes Order tables directly
+    // Delegate — POS never writes Order tables directly; use revalidated slot catalog id
     const basket = await this.orders.addOrderLine({
       orderId: cmd.orderId,
       catalogItemId: slot.catalogItemId,

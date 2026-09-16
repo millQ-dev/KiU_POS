@@ -1,0 +1,23 @@
+.pos-qa {
+  padding: var(--pos-space-3) var(--pos-space-4) 0;
+}
+
+.pos-qa__title {
+  margin: 0 0 var(--pos-space-2);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--pos-text-muted);
+}
+
+.pos-qa__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--pos-space-2);
+}
+
+.pos-qa__empty {
+  margin: 0;
+  color: var(--pos-text-muted);
+  font-size: 0.875rem;
+}

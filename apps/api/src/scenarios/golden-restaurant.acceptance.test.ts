@@ -1459,9 +1459,10 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
         'Contribution Margin / channel commissions / payment fees → ADR-0019 future',
         'Explainable Intelligence → later reads proven economic evidence only',
         'TOTAL_LOSS production variation → covered in D1.2B suite; not on main sale path',
-        'React cashier shell / Order Interaction UX → DEFERRED P1.2 (P1.1 backend/read surface PASS)',
+        'React cashier Order Interaction UX → DEFERRED P1.3 (P1.2 shell PASS)',
+        'MASS/VOLUME quantity entry UX → DEFERRED P1.3',
         'COMMERCIAL ROUNDING POLICY (unit Money × fractional qty) → DEFERRED Level C; ADR-0030 reserved NOT created',
-        'Floor/Table runtime → DEFERRED (P1.1 tableless POS proven without Floor/Table)',
+        'Floor/Table runtime → DEFERRED (P1.1/P1.2 tableless POS proven without Floor/Table)',
         'Payments / Fiscalization → DEFERRED',
       ] as const;
       expect(deferred.length).toBeGreaterThanOrEqual(8);

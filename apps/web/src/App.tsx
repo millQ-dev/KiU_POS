@@ -1,37 +1,41 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import type { CashierContext } from './api/types.js';
+import { CashierShell } from './cashier/CashierShell.js';
+import { DevContextBootstrap } from './cashier/DevContextBootstrap.js';
 
-type Health = {
-  status: string;
-  service: string;
-  checks: { database: string };
-};
+const STORAGE_KEY = 'millq.dev.cashierContext.v1';
+
+function readStored(): CashierContext | null {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as CashierContext;
+  } catch {
+    return null;
+  }
+}
 
 export function App() {
-  const [health, setHealth] = useState<Health | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [context, setContext] = useState<CashierContext | null>(() => readStored());
 
-  useEffect(() => {
-    fetch('/health')
-      .then((r) => r.json())
-      .then(setHealth)
-      .catch((e: Error) => setError(e.message));
-  }, []);
+  if (!context) {
+    return (
+      <DevContextBootstrap
+        onSelect={(ctx) => {
+          sessionStorage.setItem(STORAGE_KEY, JSON.stringify(ctx));
+          setContext(ctx);
+        }}
+      />
+    );
+  }
 
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 640 }}>
-      <h1>MillQ</h1>
-      <p>Operational Core — foundation shell</p>
-      <section>
-        <h2>API health</h2>
-        {error && <p role="alert">Cannot reach API: {error}</p>}
-        {health && (
-          <ul>
-            <li>Status: {health.status}</li>
-            <li>Database: {health.checks.database}</li>
-          </ul>
-        )}
-        {!health && !error && <p>Checking…</p>}
-      </section>
-    </main>
+    <CashierShell
+      context={context}
+      onChangeContext={() => {
+        sessionStorage.removeItem(STORAGE_KEY);
+        setContext(null);
+      }}
+    />
   );
 }
