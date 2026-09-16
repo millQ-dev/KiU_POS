@@ -67,6 +67,8 @@ export type PaymentProjection = {
   providerTransactionReference: string | null;
   reconciliationState: string;
   version: number;
+  intendedSettlementGroupId: string | null;
+  intendedSettlementCheckId: string | null;
 };
 
 export type PaymentProviderOutcomeProjection = {
@@ -120,6 +122,8 @@ type PaymentDb = {
   provider_transaction_reference: string | null;
   reconciliation_state: string;
   version: number;
+  intended_settlement_group_id: string | null;
+  intended_settlement_check_id: string | null;
 };
 
 function mapTender(r: TenderDb): TenderDefinitionRow {
@@ -153,6 +157,8 @@ function mapPayment(r: PaymentDb): PaymentProjection {
     providerTransactionReference: r.provider_transaction_reference,
     reconciliationState: r.reconciliation_state,
     version: r.version,
+    intendedSettlementGroupId: r.intended_settlement_group_id,
+    intendedSettlementCheckId: r.intended_settlement_check_id,
   };
 }
 
@@ -253,6 +259,8 @@ export class PaymentsService {
     requestedAmountMinor: string;
     currencyCode: string;
     minorUnitExponent: number;
+    /** Bind Payment intent to a live Settlement Check (required for abort/external-effect integrity). */
+    settlementCheckId?: string;
   }): Promise<PaymentProjection> {
     if (!input.createIdempotencyKey.trim()) {
       throw new DomainValidationError('VALIDATION', 'createIdempotencyKey is required');
@@ -277,6 +285,47 @@ export class PaymentsService {
         throw new DomainValidationError('TENDER_DISABLED', 'Disabled TenderDefinition cannot create Payment');
       }
 
+      let intendedGroupId: string | null = null;
+      let intendedCheckId: string | null = null;
+      if (input.settlementCheckId) {
+        const checkRes = await client.query<{
+          settlement_check_id: string;
+          settlement_group_id: string;
+          tenant_id: string;
+          legal_entity_id: string;
+          group_state: string;
+          currency_code: string;
+          minor_unit_exponent: number;
+        }>(
+          `SELECT sc.settlement_check_id, sc.settlement_group_id, sc.tenant_id, sg.legal_entity_id,
+                  sg.state AS group_state, sc.currency_code, sc.minor_unit_exponent
+           FROM settlement_check sc
+           INNER JOIN settlement_group sg ON sg.settlement_group_id = sc.settlement_group_id
+           WHERE sc.settlement_check_id = $1
+           FOR UPDATE OF sg`,
+          [input.settlementCheckId],
+        );
+        const check = checkRes.rows[0];
+        if (!check) throw new DomainValidationError('NOT_FOUND', 'SettlementCheck not found');
+        if (check.group_state !== 'COLLECTING') {
+          throw new DomainValidationError(
+            'SETTLEMENT_NOT_COLLECTING',
+            `Cannot bind Payment to Settlement in state ${check.group_state}`,
+          );
+        }
+        if (check.tenant_id !== tender.tenant_id || check.legal_entity_id !== tender.legal_entity_id) {
+          throw new DomainValidationError('CROSS_ENTITY', 'Payment Check must match Tender LegalEntity');
+        }
+        if (
+          check.currency_code !== input.currencyCode ||
+          check.minor_unit_exponent !== input.minorUnitExponent
+        ) {
+          throw new DomainValidationError('CURRENCY_MISMATCH', 'Payment currency must match Check');
+        }
+        intendedGroupId = check.settlement_group_id;
+        intendedCheckId = check.settlement_check_id;
+      }
+
       const existing = await client.query<PaymentDb>(
         `SELECT * FROM payment WHERE legal_entity_id = $1 AND create_idempotency_key = $2`,
         [tender.legal_entity_id, input.createIdempotencyKey],
@@ -287,7 +336,10 @@ export class PaymentsService {
           prev.tender_definition_id !== input.tenderDefinitionId ||
           prev.requested_amount_minor !== input.requestedAmountMinor ||
           prev.currency_code !== input.currencyCode ||
-          prev.minor_unit_exponent !== input.minorUnitExponent
+          prev.minor_unit_exponent !== input.minorUnitExponent ||
+          (input.settlementCheckId &&
+            prev.intended_settlement_check_id != null &&
+            prev.intended_settlement_check_id !== input.settlementCheckId)
         ) {
           throw new DomainValidationError(
             'IDEMPOTENCY_CONFLICT',
@@ -303,28 +355,45 @@ export class PaymentsService {
         input.merchantPaymentReference?.trim() ||
         `pay_${createHash('sha256').update(`${paymentId}:${input.createIdempotencyKey}`).digest('hex').slice(0, 24)}`;
 
-      const inserted = await client.query<PaymentDb>(
-        `INSERT INTO payment (
-           payment_id, tenant_id, legal_entity_id, tender_definition_id,
-           currency_code, minor_unit_exponent, requested_amount_minor,
-           lifecycle_state, create_idempotency_key, merchant_payment_reference,
-           reconciliation_state
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'INITIATED',$8,$9,'AWAITING')
-         RETURNING *`,
-        [
-          paymentId,
-          tender.tenant_id,
-          tender.legal_entity_id,
-          tender.tender_definition_id,
-          input.currencyCode,
-          input.minorUnitExponent,
-          input.requestedAmountMinor,
-          input.createIdempotencyKey,
-          merchantRef,
-        ],
-      );
-      await client.query('COMMIT');
-      return mapPayment(inserted.rows[0]!);
+      try {
+        const inserted = await client.query<PaymentDb>(
+          `INSERT INTO payment (
+             payment_id, tenant_id, legal_entity_id, tender_definition_id,
+             currency_code, minor_unit_exponent, requested_amount_minor,
+             lifecycle_state, create_idempotency_key, merchant_payment_reference,
+             reconciliation_state, intended_settlement_group_id, intended_settlement_check_id
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,'INITIATED',$8,$9,'AWAITING',$10,$11)
+           RETURNING *`,
+          [
+            paymentId,
+            tender.tenant_id,
+            tender.legal_entity_id,
+            tender.tender_definition_id,
+            input.currencyCode,
+            input.minorUnitExponent,
+            input.requestedAmountMinor,
+            input.createIdempotencyKey,
+            merchantRef,
+            intendedGroupId,
+            intendedCheckId,
+          ],
+        );
+        await client.query('COMMIT');
+        return mapPayment(inserted.rows[0]!);
+      } catch (e: unknown) {
+        const err = e as { code?: string };
+        if (err.code === '23505') {
+          const again = await client.query<PaymentDb>(
+            `SELECT * FROM payment WHERE legal_entity_id = $1 AND create_idempotency_key = $2`,
+            [tender.legal_entity_id, input.createIdempotencyKey],
+          );
+          if (again.rows[0]) {
+            await client.query('COMMIT');
+            return mapPayment(again.rows[0]);
+          }
+        }
+        throw e;
+      }
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
@@ -637,28 +706,50 @@ export class PaymentsService {
       currency_code: string;
       minor_unit_exponent: number;
       customer_payable_minor: string;
+      group_state: string;
     }>(
       `SELECT sc.settlement_check_id, sc.settlement_group_id, sc.tenant_id, sg.legal_entity_id,
-              sc.currency_code, sc.minor_unit_exponent, sc.customer_payable_minor
+              sc.currency_code, sc.minor_unit_exponent, sc.customer_payable_minor,
+              sg.state AS group_state
        FROM settlement_check sc
        INNER JOIN settlement_group sg ON sg.settlement_group_id = sc.settlement_group_id
        WHERE sc.settlement_check_id = $1
-       FOR UPDATE OF sc`,
+       FOR UPDATE OF sc, sg`,
       [input.settlementCheckId],
     );
     const check = checkRes.rows[0];
     if (!check) throw new DomainValidationError('NOT_FOUND', 'SettlementCheck not found');
+    if (check.group_state !== 'COLLECTING') {
+      throw new DomainValidationError(
+        'SETTLEMENT_NOT_COLLECTING',
+        `Cannot allocate to Settlement in state ${check.group_state}`,
+      );
+    }
     if (check.tenant_id !== pay.tenant_id || check.legal_entity_id !== pay.legal_entity_id) {
       throw new DomainValidationError('CROSS_ENTITY', 'PaymentAllocation cross-tenant/LegalEntity forbidden');
     }
     if (check.currency_code !== pay.currency_code || check.minor_unit_exponent !== pay.minor_unit_exponent) {
       throw new DomainValidationError('CURRENCY_MISMATCH', 'Allocation currency must match Check and Payment');
     }
-    if (input.amountMinor !== pay.requested_amount_minor && cmpMinor(input.amountMinor, pay.requested_amount_minor) > 0) {
-      // partial ok if <= payment; over payment forbidden
-    }
     if (cmpMinor(input.amountMinor, pay.requested_amount_minor) > 0) {
       throw new DomainValidationError('ALLOCATION_EXCEEDS_PAYMENT', 'Allocation exceeds Payment amount');
+    }
+
+    // Bind intent if missing (late allocate path)
+    if (!pay.intended_settlement_group_id) {
+      await client.query(
+        `UPDATE payment SET
+           intended_settlement_group_id = $2,
+           intended_settlement_check_id = COALESCE(intended_settlement_check_id, $3),
+           updated_at = NOW()
+         WHERE payment_id = $1`,
+        [pay.payment_id, check.settlement_group_id, check.settlement_check_id],
+      );
+    } else if (pay.intended_settlement_group_id !== check.settlement_group_id) {
+      throw new DomainValidationError(
+        'SETTLEMENT_INTENT_MISMATCH',
+        'Payment already bound to a different SettlementGroup',
+      );
     }
 
     const sumPayAlloc = await client.query<{ s: string | null }>(
@@ -795,17 +886,22 @@ export class PaymentsService {
     };
   }
 
-  /** External-effect probe: qualifying SUCCESS payment linked to the SettlementGroup. */
+  /** External-effect probe: qualifying SUCCESS for this Settlement (allocation OR intended bind). */
   createExternalEffectProbe(): SettlementExternalEffectProbe {
     const pool = this.pool;
     return {
       async hasQualifyingPaymentExternalEffect(settlementGroupId: string): Promise<boolean> {
         const res = await pool.query(
-          `SELECT 1
-           FROM payment_allocation pa
-           INNER JOIN payment p ON p.payment_id = pa.payment_id
-           WHERE pa.settlement_group_id = $1
-             AND p.lifecycle_state = 'SUCCEEDED'
+          `SELECT 1 FROM payment p
+           WHERE p.lifecycle_state = 'SUCCEEDED'
+             AND (
+               p.intended_settlement_group_id = $1
+               OR EXISTS (
+                 SELECT 1 FROM payment_allocation pa
+                 WHERE pa.payment_id = p.payment_id
+                   AND pa.settlement_group_id = $1
+               )
+             )
            LIMIT 1`,
           [settlementGroupId],
         );

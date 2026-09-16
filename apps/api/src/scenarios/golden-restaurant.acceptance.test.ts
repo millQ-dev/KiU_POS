@@ -2068,6 +2068,7 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
         requestedAmountMinor: '100000',
         currencyCode: 'VND',
         minorUnitExponent: 0,
+        settlementCheckId: checkId,
       });
       await payments.recordVerifiedProviderOutcome({
         paymentId: pay.paymentId,
@@ -2190,6 +2191,7 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
         requestedAmountMinor: '50000',
         currencyCode: 'VND',
         minorUnitExponent: 0,
+        settlementCheckId: s.checks[0]!.settlementCheckId,
       });
       await payments.recordVerifiedProviderOutcome({
         paymentId: pay.paymentId,

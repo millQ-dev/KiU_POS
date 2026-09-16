@@ -101,6 +101,7 @@ export async function registerPaymentRoutes(
         requestedAmountMinor?: string;
         currencyCode?: string;
         minorUnitExponent?: number;
+        settlementCheckId?: string;
       };
       if (
         !body.tenderDefinitionId ||
@@ -124,6 +125,7 @@ export async function registerPaymentRoutes(
         requestedAmountMinor: body.requestedAmountMinor,
         currencyCode: body.currencyCode,
         minorUnitExponent: body.minorUnitExponent,
+        ...(body.settlementCheckId !== undefined ? { settlementCheckId: body.settlementCheckId } : {}),
       });
     } catch (err) {
       const mapped = mapPaymentError(err);
@@ -195,14 +197,13 @@ export async function registerDevPaymentSimulatorRoutes(
   app: FastifyInstance,
   payments: PaymentsService,
 ): Promise<void> {
-  const allowed =
-    process.env.NODE_ENV !== 'production' || process.env.ALLOW_DEV_PAYMENT_SIMULATOR === '1';
+  const allowed = process.env.NODE_ENV !== 'production';
 
   app.post('/api/v1/dev/payment-simulator/outcome', async (req, reply) => {
     if (!allowed) {
       return reply.code(404).send({
         error: 'NOT_FOUND',
-        message: 'DEV PAYMENT SIMULATOR disabled in production',
+        message: 'DEV PAYMENT SIMULATOR is unavailable in production',
       });
     }
     try {

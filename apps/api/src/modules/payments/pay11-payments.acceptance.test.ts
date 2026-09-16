@@ -177,6 +177,7 @@ describe('PAY1.1 Payments Core Runtime (PostgreSQL)', () => {
       requestedAmountMinor: '100000',
       currencyCode: 'VND',
       minorUnitExponent: 0,
+      settlementCheckId: checkId,
     });
     const pRetry = await payments.createPayment({
       tenderDefinitionId: tender.tenderDefinitionId,
@@ -184,6 +185,7 @@ describe('PAY1.1 Payments Core Runtime (PostgreSQL)', () => {
       requestedAmountMinor: '100000',
       currencyCode: 'VND',
       minorUnitExponent: 0,
+      settlementCheckId: checkId,
     });
     expect(pRetry.paymentId).toBe(p1.paymentId);
 
@@ -263,6 +265,68 @@ describe('PAY1.1 Payments Core Runtime (PostgreSQL)', () => {
     expect((await payments.getPayment(p1.paymentId))!.lifecycleState).toBe('SUCCEEDED');
   });
 
+  it('verified SUCCESS with intended Settlement (no alloc yet) blocks Abort; ABORTED rejects allocate', async () => {
+    const o = await openAcceptedOrder('30000');
+    const s = await openSettlementFor(o.orderId);
+    const checkId = s.checks[0]!.settlementCheckId;
+    const tender = await digitalTender(`intent_${randomUUID().slice(0, 8)}`);
+    const pay = await payments.createPayment({
+      tenderDefinitionId: tender.tenderDefinitionId,
+      createIdempotencyKey: randomUUID(),
+      requestedAmountMinor: '30000',
+      currencyCode: 'VND',
+      minorUnitExponent: 0,
+      settlementCheckId: checkId,
+    });
+    expect(pay.intendedSettlementGroupId).toBe(s.settlementGroupId);
+
+    await payments.recordVerifiedProviderOutcome({
+      paymentId: pay.paymentId,
+      providerEventIdentity: `intent-ok-${randomUUID()}`,
+      rawProviderStatus: 'SUCCESS',
+      normalizedOutcome: 'SUCCEEDED',
+      verificationStatus: 'VERIFIED',
+      reconciliationOrigin: 'CALLBACK',
+      evidenceAmountMinor: '30000',
+      evidenceCurrencyCode: 'VND',
+    });
+    expect((await payments.getPayment(pay.paymentId))!.lifecycleState).toBe('SUCCEEDED');
+    await expect(
+      settlements.abortSettlement({ settlementGroupId: s.settlementGroupId }),
+    ).rejects.toMatchObject({ code: 'SETTLEMENT_ABORT_FORBIDDEN' });
+
+    const o2 = await openAcceptedOrder('10000');
+    const s2 = await openSettlementFor(o2.orderId);
+    const aborted = await settlements.abortSettlement({ settlementGroupId: s2.settlementGroupId });
+    expect(aborted.state).toBe('ABORTED');
+    const tender2 = await digitalTender(`abort_alloc_${randomUUID().slice(0, 8)}`);
+    const pay2 = await payments.createPayment({
+      tenderDefinitionId: tender2.tenderDefinitionId,
+      createIdempotencyKey: randomUUID(),
+      requestedAmountMinor: '10000',
+      currencyCode: 'VND',
+      minorUnitExponent: 0,
+    });
+    await payments.recordVerifiedProviderOutcome({
+      paymentId: pay2.paymentId,
+      providerEventIdentity: `abort-ok-${randomUUID()}`,
+      rawProviderStatus: 'SUCCESS',
+      normalizedOutcome: 'SUCCEEDED',
+      verificationStatus: 'VERIFIED',
+      reconciliationOrigin: 'CALLBACK',
+      evidenceAmountMinor: '10000',
+      evidenceCurrencyCode: 'VND',
+    });
+    await expect(
+      payments.allocatePaymentToCheck({
+        paymentId: pay2.paymentId,
+        settlementCheckId: s2.checks[0]!.settlementCheckId,
+        amountMinor: '10000',
+        allocationIdempotencyKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: 'SETTLEMENT_NOT_COLLECTING' });
+  });
+
   it('unverified success / amount / currency mismatch never qualify', async () => {
     const o = await openAcceptedOrder('50000');
     const s = await openSettlementFor(o.orderId);
@@ -275,6 +339,7 @@ describe('PAY1.1 Payments Core Runtime (PostgreSQL)', () => {
       requestedAmountMinor: '50000',
       currencyCode: 'VND',
       minorUnitExponent: 0,
+      settlementCheckId: checkId,
     });
     await payments.recordVerifiedProviderOutcome({
       paymentId: p.paymentId,
@@ -294,6 +359,7 @@ describe('PAY1.1 Payments Core Runtime (PostgreSQL)', () => {
       requestedAmountMinor: '50000',
       currencyCode: 'VND',
       minorUnitExponent: 0,
+      settlementCheckId: checkId,
     });
     await payments.recordVerifiedProviderOutcome({
       paymentId: p2.paymentId,
@@ -321,6 +387,7 @@ describe('PAY1.1 Payments Core Runtime (PostgreSQL)', () => {
       requestedAmountMinor: '50000',
       currencyCode: 'VND',
       minorUnitExponent: 0,
+      settlementCheckId: checkId,
     });
     await payments.recordVerifiedProviderOutcome({
       paymentId: p3.paymentId,
@@ -352,6 +419,7 @@ describe('PAY1.1 Payments Core Runtime (PostgreSQL)', () => {
       requestedAmountMinor: '40000',
       currencyCode: 'VND',
       minorUnitExponent: 0,
+      settlementCheckId: checkId,
     });
     await payments.recordVerifiedProviderOutcome({
       paymentId: payA.paymentId,
@@ -375,6 +443,7 @@ describe('PAY1.1 Payments Core Runtime (PostgreSQL)', () => {
       requestedAmountMinor: '60000',
       currencyCode: 'VND',
       minorUnitExponent: 0,
+      settlementCheckId: checkId,
     });
     await payments.recordVerifiedProviderOutcome({
       paymentId: payB.paymentId,
@@ -402,28 +471,53 @@ describe('PAY1.1 Payments Core Runtime (PostgreSQL)', () => {
     expect(proj.state).toBe('SATISFIED');
     expect(proj.outstandingAmountMinor).toBe('0');
 
-    const payC = await payments.createPayment({
+    // Overcoverage while COLLECTING: reopen path via new order
+    const o2 = await openAcceptedOrder('100000');
+    const s2 = await openSettlementFor(o2.orderId);
+    const check2 = s2.checks[0]!.settlementCheckId;
+    const payPartial = await payments.createPayment({
       tenderDefinitionId: tA.tenderDefinitionId,
       createIdempotencyKey: randomUUID(),
-      requestedAmountMinor: '1',
+      requestedAmountMinor: '60000',
       currencyCode: 'VND',
       minorUnitExponent: 0,
+      settlementCheckId: check2,
     });
     await payments.recordVerifiedProviderOutcome({
-      paymentId: payC.paymentId,
-      providerEventIdentity: `c-ok-${randomUUID()}`,
+      paymentId: payPartial.paymentId,
+      providerEventIdentity: `ov-a-${randomUUID()}`,
       rawProviderStatus: 'SUCCESS',
       normalizedOutcome: 'SUCCEEDED',
       verificationStatus: 'VERIFIED',
       reconciliationOrigin: 'CALLBACK',
-      evidenceAmountMinor: '1',
+      evidenceAmountMinor: '60000',
+      evidenceCurrencyCode: 'VND',
+      allocateToCheckId: check2,
+      allocationIdempotencyKey: `ov-a-${payPartial.paymentId}`,
+    });
+    const payOver = await payments.createPayment({
+      tenderDefinitionId: tA.tenderDefinitionId,
+      createIdempotencyKey: randomUUID(),
+      requestedAmountMinor: '50000',
+      currencyCode: 'VND',
+      minorUnitExponent: 0,
+      settlementCheckId: check2,
+    });
+    await payments.recordVerifiedProviderOutcome({
+      paymentId: payOver.paymentId,
+      providerEventIdentity: `ov-b-${randomUUID()}`,
+      rawProviderStatus: 'SUCCESS',
+      normalizedOutcome: 'SUCCEEDED',
+      verificationStatus: 'VERIFIED',
+      reconciliationOrigin: 'CALLBACK',
+      evidenceAmountMinor: '50000',
       evidenceCurrencyCode: 'VND',
     });
     await expect(
       payments.allocatePaymentToCheck({
-        paymentId: payC.paymentId,
-        settlementCheckId: checkId,
-        amountMinor: '1',
+        paymentId: payOver.paymentId,
+        settlementCheckId: check2,
+        amountMinor: '50000',
         allocationIdempotencyKey: randomUUID(),
       }),
     ).rejects.toMatchObject({ code: 'CHECK_OVERCOVERAGE' });
@@ -456,6 +550,7 @@ describe('PAY1.1 Payments Core Runtime (PostgreSQL)', () => {
       requestedAmountMinor: '100000',
       currencyCode: 'VND',
       minorUnitExponent: 0,
+      settlementCheckId: checkA,
     });
     await payments.recordVerifiedProviderOutcome({
       paymentId: pay.paymentId,
@@ -488,7 +583,7 @@ describe('PAY1.1 Payments Core Runtime (PostgreSQL)', () => {
         amountMinor: '1',
         allocationIdempotencyKey: randomUUID(),
       }),
-    ).rejects.toMatchObject({ code: 'ALLOCATION_EXCEEDS_PAYMENT' });
+    ).rejects.toMatchObject({ code: 'SETTLEMENT_NOT_COLLECTING' });
   });
 
   it('checkout CompleteOrder only via orchestrator + fiscal fixture; Payment never Completes', async () => {
@@ -503,6 +598,7 @@ describe('PAY1.1 Payments Core Runtime (PostgreSQL)', () => {
       requestedAmountMinor: '25000',
       currencyCode: 'VND',
       minorUnitExponent: 0,
+      settlementCheckId: checkId,
     });
     await payments.recordVerifiedProviderOutcome({
       paymentId: pay.paymentId,
