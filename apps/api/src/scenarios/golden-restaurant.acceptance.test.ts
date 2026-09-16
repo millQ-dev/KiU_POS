@@ -1221,8 +1221,8 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
         'Contribution Margin / channel commissions / payment fees → ADR-0019 future',
         'Explainable Intelligence → later reads proven economic evidence only',
         'TOTAL_LOSS production variation → covered in D1.2B suite; not on main sale path',
-        'POS Presentation / MenuLayout → next vertical after M1.1',
-        'COMMERCIAL ROUNDING POLICY (unit Money × fractional qty) → DEFERRED Level C; ADR-0030 NOT created',
+        'POS Presentation / MenuLayout → DEFERRED until ADR-0031 + P1.1',
+        'COMMERCIAL ROUNDING POLICY (unit Money × fractional qty) → DEFERRED Level C; ADR-0030 reserved NOT created',
       ] as const;
       expect(deferred.length).toBeGreaterThanOrEqual(8);
       // Guard: this test exists so CI documents deferred surface; never delete to silence CI.

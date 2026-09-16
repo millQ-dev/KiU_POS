@@ -56,8 +56,8 @@
 | Contribution Margin / channel fees | ADR-0019 future ladder |
 | Explainable Intelligence | Intelligence reads proven evidence only |
 | TOTAL_LOSS on main sale path | Keep on D1.2B suite (not main economic day) |
-| POS Presentation / MenuLayout | Next vertical after M1.1 |
-| Commercial RoundingPolicy (unit Money × fractional qty) | DEFERRED Level C — ADR-0030 NOT created |
+| POS Presentation / MenuLayout | **DEFERRED** — depends on **ADR-0031** + P1.1 runtime |
+| Commercial RoundingPolicy (unit Money × fractional qty) | DEFERRED Level C — **ADR-0030 reserved, NOT created** |
 
 ## Bugs discovered by Golden
 
