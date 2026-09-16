@@ -101,7 +101,12 @@ function asIsoDate(value: unknown): string {
     const m = value.match(/^(\d{4}-\d{2}-\d{2})/);
     if (m?.[1]) return m[1];
   }
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (value instanceof Date) {
+    const y = value.getFullYear();
+    const m = value.getMonth() + 1;
+    const d = value.getDate();
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
   throw new DomainValidationError('INVALID_DATE', `Invalid business date: ${String(value)}`);
 }
 

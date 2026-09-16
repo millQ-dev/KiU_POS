@@ -38,10 +38,12 @@ function asIsoDate(value: unknown): string {
     if (m?.[1]) return m[1];
   }
   if (value instanceof Date) {
-    const y = value.getUTCFullYear();
-    const m = String(value.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(value.getUTCDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    // node-pg returns DATE as local-midnight Date; use local calendar parts
+    // (UTC getters shift the business date in positive-offset timezones).
+    const y = value.getFullYear();
+    const m = value.getMonth() + 1;
+    const d = value.getDate();
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
   }
   throw new DomainValidationError('INVALID_DATE', `Invalid business date: ${String(value)}`);
 }

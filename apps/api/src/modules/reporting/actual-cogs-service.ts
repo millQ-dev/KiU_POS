@@ -75,7 +75,10 @@ function asIsoDate(value: string | Date): string {
     if (m?.[1]) return m[1];
     return value.slice(0, 10);
   }
-  return value.toISOString().slice(0, 10);
+  const y = value.getFullYear();
+  const m = value.getMonth() + 1;
+  const d = value.getDate();
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
 function negateMinor(amount: string): string {

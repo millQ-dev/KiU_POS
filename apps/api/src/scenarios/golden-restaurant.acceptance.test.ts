@@ -1,0 +1,1064 @@
+/**
+ * PERMANENT GOLDEN RESTAURANT TORTURE TEST (GOLDEN-1).
+ * DO NOT DELETE OR REDUCE COVERAGE TO MAKE CI GREEN.
+ * Unsupported future semantics must remain explicit DEFERRED markers.
+ *
+ * Cross-module continuity gate — not a rename of existing unit suites.
+ * Manifest: docs/processes/golden-restaurant-scenario.md
+ */
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import pg from 'pg';
+import { OperationalFactType } from '@millq/contracts';
+import { allocateOrderMerchantDiscount, parseCanonicalDecimal, toCanonicalDecimal } from '@millq/domain';
+import { runMigrations } from '../db/migrate.js';
+import { acceptFinalMerchandiseTerms } from '../test/commercial-terms.js';
+import { seedBlockCFixture, type BlockCFixture } from '../test/seed.js';
+import { GoodsIssueService } from '../modules/inventory/goods-issue-service.js';
+import { OrdersService } from '../modules/orders/orders-service.js';
+import type { SaleInventoryWriteOffPort } from '../modules/orders/sale-write-off-port.js';
+import { GoodsReceiptService } from '../modules/procurement/goods-receipt-service.js';
+import { ProductionBatchService } from '../modules/production/production-batch-service.js';
+import { ProductionPostingService } from '../modules/production/production-posting-service.js';
+import { RecipesService } from '../modules/recipes/recipes-service.js';
+import { ActualCogsService } from '../modules/reporting/actual-cogs-service.js';
+import { OperatingEconomicsService } from '../modules/reporting/operating-economics-service.js';
+import { RevenueBasisService } from '../modules/reporting/revenue-basis-service.js';
+
+const DATABASE_URL = process.env.DATABASE_URL ?? 'postgresql://millq:millq@localhost:5432/millq_dev';
+
+/** Fixed business dates — never wall-clock. */
+const DAY = {
+  PROCURE_1: '2026-03-01',
+  PROCURE_2: '2026-03-02',
+  PRODUCE: '2026-03-05',
+  SALE: '2026-03-10',
+  REVERSE_LATER: '2026-03-15',
+  REVERSE_BACK: '2026-03-04',
+} as const;
+
+let pool: pg.Pool;
+let fx: BlockCFixture;
+let orders: OrdersService;
+let recipes: RecipesService;
+let receipts: GoodsReceiptService;
+let batches: ProductionBatchService;
+let posting: ProductionPostingService;
+let revenue: RevenueBasisService;
+let cogs: ActualCogsService;
+let economics: OperatingEconomicsService;
+let receiptSeq = 0;
+
+async function truncateBusiness() {
+  await pool.query(`
+    TRUNCATE
+      operational_fact_feed, audit_record,
+      order_line_commercial_snapshot, order_commercial_snapshot,
+      sales_order_commercial_line_terms, sales_order_commercial_terms,
+      sales_order_completion_reversal, goods_issue_reversal,
+      goods_issue_line, goods_issue,
+      consumption_plan_physical_leaf, consumption_plan_resolved_version,
+      consumption_plan_line, consumption_plan_snapshot,
+      sales_order_line, sales_order, catalog_item_recipe_profile,
+      inventory_balance, inventory_movement,
+      goods_receipt_line, goods_receipt,
+      production_batch_reversal, production_batch_input, production_batch,
+      recipe_component, recipe_version, recipe_specification,
+      preparation_component, preparation_version, preparation_specification,
+      supplier_item, supplier_pack, catalog_item, supplier,
+      warehouse, outlet, brand, legal_entity, tenant
+    RESTART IDENTITY CASCADE
+  `);
+}
+
+async function nameGoldenRestaurant() {
+  await pool.query(`UPDATE tenant SET name = 'Golden Hospitality' WHERE tenant_id = $1`, [fx.tenantId]);
+  await pool.query(`UPDATE legal_entity SET name = 'Golden Restaurant Vietnam' WHERE legal_entity_id = $1`, [
+    fx.legalEntityId,
+  ]);
+  await pool.query(`UPDATE outlet SET name = 'Golden Restaurant — Torture Branch' WHERE outlet_id = $1`, [
+    fx.outletId,
+  ]);
+}
+
+function q(extra: Record<string, unknown> = {}) {
+  return { tenantId: fx.tenantId, legalEntityId: fx.legalEntityId, ...extra };
+}
+
+async function receiveMilk(liters: number, unitPriceMinor: string, businessDate: string, businessOrder: number) {
+  receiptSeq += 1;
+  const draft = await receipts.createDraft({
+    tenantId: fx.tenantId,
+    legalEntityId: fx.legalEntityId,
+    warehouseId: fx.warehouseId,
+    supplierId: fx.supplierId,
+    supplierDocumentNumber: `GOLDEN-MILK-${receiptSeq}`,
+    currencyCode: 'VND',
+    minorUnitExponent: 0,
+    businessDate,
+    businessOrder,
+    actorId: fx.actorId,
+    lines: [
+      {
+        lineNumber: 1,
+        catalogItemId: fx.milkItemId,
+        supplierItemId: fx.milkSupplierItemId,
+        inputKind: 'FIXED_PACKAGE',
+        packageCount: liters,
+        acceptedBaseQuantity: String(liters),
+        baseUnit: 'L',
+        dimension: 'VOLUME',
+        unitPriceMinor,
+        lineAcquisitionCostMinor: String(Number(unitPriceMinor) * liters),
+      },
+    ],
+  });
+  await receipts.post(draft!.goodsReceiptId, {
+    idempotencyKey: `golden-recv-${draft!.goodsReceiptId}`,
+    actorId: fx.actorId,
+  });
+}
+
+async function receiveOilCase(unitPricePerLiter: string, businessDate: string, businessOrder: number) {
+  receiptSeq += 1;
+  const draft = await receipts.createDraft({
+    tenantId: fx.tenantId,
+    legalEntityId: fx.legalEntityId,
+    warehouseId: fx.warehouseId,
+    supplierId: fx.supplierId,
+    supplierDocumentNumber: `GOLDEN-OIL-${receiptSeq}`,
+    currencyCode: 'VND',
+    minorUnitExponent: 0,
+    businessDate,
+    businessOrder,
+    actorId: fx.actorId,
+    lines: [
+      {
+        lineNumber: 1,
+        catalogItemId: fx.oilItemId,
+        supplierItemId: fx.oilSupplierItemId,
+        inputKind: 'FIXED_PACKAGE',
+        packageCount: 1,
+        acceptedBaseQuantity: '9',
+        baseUnit: 'L',
+        dimension: 'VOLUME',
+        unitPriceMinor: unitPricePerLiter,
+        lineAcquisitionCostMinor: String(Number(unitPricePerLiter) * 9),
+      },
+    ],
+  });
+  await receipts.post(draft!.goodsReceiptId, {
+    idempotencyKey: `golden-oil-${draft!.goodsReceiptId}`,
+    actorId: fx.actorId,
+  });
+}
+
+async function receiveMeatKg(qtyKg: string, unitPriceMinor: string, businessDate: string, businessOrder: number) {
+  receiptSeq += 1;
+  const cost = String(Number(unitPriceMinor) * Number(qtyKg));
+  const draft = await receipts.createDraft({
+    tenantId: fx.tenantId,
+    legalEntityId: fx.legalEntityId,
+    warehouseId: fx.warehouseId,
+    supplierId: fx.supplierId,
+    supplierDocumentNumber: `GOLDEN-MEAT-${receiptSeq}`,
+    currencyCode: 'VND',
+    minorUnitExponent: 0,
+    businessDate,
+    businessOrder,
+    actorId: fx.actorId,
+    lines: [
+      {
+        lineNumber: 1,
+        catalogItemId: fx.meatItemId,
+        supplierItemId: fx.meatSupplierItemId,
+        inputKind: 'VARIABLE_WEIGHT',
+        packageCount: 1,
+        acceptedBaseQuantity: qtyKg,
+        baseUnit: 'kg',
+        dimension: 'MASS',
+        unitPriceMinor,
+        lineAcquisitionCostMinor: cost,
+      },
+    ],
+  });
+  await receipts.post(draft!.goodsReceiptId, {
+    idempotencyKey: `golden-meat-${draft!.goodsReceiptId}`,
+    actorId: fx.actorId,
+  });
+}
+
+async function balance(catalogItemId: string) {
+  const r = await pool.query<{ quantity: string; carrying_value_minor: string }>(
+    `SELECT quantity, carrying_value_minor FROM inventory_balance
+     WHERE legal_entity_id = $1 AND warehouse_id = $2 AND catalog_item_id = $3`,
+    [fx.legalEntityId, fx.warehouseId, catalogItemId],
+  );
+  return r.rows[0] ?? null;
+}
+
+describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', () => {
+  beforeAll(async () => {
+    await runMigrations(DATABASE_URL);
+    pool = new pg.Pool({ connectionString: DATABASE_URL });
+    const gi = new GoodsIssueService(pool);
+    orders = new OrdersService(pool, { saleWriteOffPort: gi });
+    recipes = new RecipesService(pool);
+    receipts = new GoodsReceiptService(pool);
+    batches = new ProductionBatchService(pool);
+    posting = new ProductionPostingService(pool);
+    revenue = new RevenueBasisService(pool);
+    cogs = new ActualCogsService(pool);
+    economics = new OperatingEconomicsService(revenue, cogs);
+  });
+
+  afterAll(async () => {
+    await pool?.end();
+  });
+
+  beforeEach(async () => {
+    await truncateBusiness();
+    fx = await seedBlockCFixture(pool);
+    await nameGoldenRestaurant();
+    receiptSeq = 0;
+  });
+
+  describe('MAIN DAY — procurement → production → order → economics → later reversal', () => {
+    it('PROCUREMENT — dual milk receipts change moving-average; oil + meat stocked', async () => {
+      await receiveMilk(10, '10000', DAY.PROCURE_1, 1);
+      let bal = await balance(fx.milkItemId);
+      expect(bal!.quantity).toBe('10');
+      expect(bal!.carrying_value_minor).toBe('100000');
+
+      await receiveMilk(10, '20000', DAY.PROCURE_2, 1);
+      bal = await balance(fx.milkItemId);
+      expect(bal!.quantity).toBe('20');
+      expect(bal!.carrying_value_minor).toBe('300000'); // MA unit = 15000
+
+      await receiveOilCase('5000', DAY.PROCURE_1, 2);
+      await receiveMeatKg('20', '5000', DAY.PROCURE_1, 3);
+      expect((await balance(fx.oilItemId))!.quantity).toBe('9');
+      expect((await balance(fx.meatItemId))!.quantity).toBe('20');
+
+      const movDates = await pool.query<{ business_date: string }>(
+        `SELECT to_char(business_date, 'YYYY-MM-DD') AS business_date FROM inventory_movement
+         WHERE catalog_item_id = $1 ORDER BY business_date, business_order`,
+        [fx.milkItemId],
+      );
+      expect(movDates.rows[0]!.business_date).toBe(DAY.PROCURE_1);
+      expect(movDates.rows[1]!.business_date).toBe(DAY.PROCURE_2);
+    });
+
+    it('PRODUCTION — STOCK_TRACKED dough with yield ≠ plan; VIRTUAL recipe published', async () => {
+      await receiveMeatKg('20', '5000', DAY.PROCURE_1, 1);
+      const doughId = randomUUID();
+      await pool.query(
+        `INSERT INTO catalog_item (catalog_item_id, tenant_id, name, base_unit, dimension)
+         VALUES ($1,$2,'Golden Dough','kg','MASS')`,
+        [doughId, fx.tenantId],
+      );
+      const prepDraft = await recipes.createPreparationDraft({
+        tenantId: fx.tenantId,
+        name: 'Golden Dough Prep',
+        materializationMode: 'STOCK_TRACKED',
+        outputCatalogItemId: doughId,
+        normativeInputQuantity: '10',
+        normativeInputUnit: 'kg',
+        normativeInputDimension: 'MASS',
+        normativeOutputQuantity: '8',
+        normativeOutputUnit: 'kg',
+        normativeOutputDimension: 'MASS',
+        components: [
+          {
+            lineNumber: 1,
+            componentKind: 'CATALOG_ITEM',
+            catalogItemId: fx.meatItemId,
+            quantity: '10',
+            unit: 'kg',
+            dimension: 'MASS',
+          },
+        ],
+      });
+      const prep = await recipes.publishPreparationVersion(prepDraft.preparationVersionId);
+
+      // Ugly yield: planned 8, actual 7; actual input still 10
+      const draft = await batches.createDraft({
+        tenantId: fx.tenantId,
+        warehouseId: fx.warehouseId,
+        preparationVersionId: prep.preparationVersionId,
+        actualInputQuantity: '10',
+        actualInputUnit: 'kg',
+        actualInputDimension: 'MASS',
+        actualOutputQuantity: '7',
+        actualOutputUnit: 'kg',
+        actualOutputDimension: 'MASS',
+        deviationClass: 'NORMAL',
+        actorId: fx.actorId,
+        inputActuals: [
+          { lineNumber: 1, actualQuantity: '10', actualUnit: 'kg', actualDimension: 'MASS' },
+        ],
+      });
+      await batches.finalize({
+        productionBatchId: draft.productionBatchId,
+        idempotencyKey: `golden-fin-${draft.productionBatchId}`,
+        actorId: fx.actorId,
+      });
+      await posting.post({
+        productionBatchId: draft.productionBatchId,
+        idempotencyKey: `golden-post-${draft.productionBatchId}`,
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        businessDate: DAY.PRODUCE,
+        businessOrder: 1,
+        actorId: fx.actorId,
+      });
+
+      const doughBal = await balance(doughId);
+      expect(doughBal!.quantity).toBe('7');
+      // 10 kg meat @ 5000 = 50000 transferred to 7 kg dough
+      expect(doughBal!.carrying_value_minor).toBe('50000');
+      expect((await balance(fx.meatItemId))!.quantity).toBe('10');
+
+      const outs = await pool.query(
+        `SELECT COUNT(*)::int AS c FROM inventory_movement
+         WHERE source_document_type = 'ProductionBatch' AND direction = 'OUT'`,
+      );
+      const ins = await pool.query(
+        `SELECT COUNT(*)::int AS c FROM inventory_movement
+         WHERE source_document_type = 'ProductionBatch' AND direction = 'IN'`,
+      );
+      expect(outs.rows[0]!.c).toBe(1);
+      expect(ins.rows[0]!.c).toBe(1);
+    });
+
+    it('ORDER+COMMERCIAL+COMPLETE+ECONOMICS+REVERSAL — full restaurant day fingerprint', async () => {
+      // Rebuild procurement + production inline for isolation (vitest order not guaranteed across files)
+      await receiveMilk(10, '10000', DAY.PROCURE_1, 1);
+      await receiveMilk(10, '20000', DAY.PROCURE_2, 1);
+      await receiveOilCase('5000', DAY.PROCURE_1, 2);
+      await receiveMeatKg('20', '5000', DAY.PROCURE_1, 3);
+
+      const doughId = randomUUID();
+      await pool.query(
+        `INSERT INTO catalog_item (catalog_item_id, tenant_id, name, base_unit, dimension)
+         VALUES ($1,$2,'Golden Dough','kg','MASS')`,
+        [doughId, fx.tenantId],
+      );
+      const prepDraft = await recipes.createPreparationDraft({
+        tenantId: fx.tenantId,
+        name: 'Golden Dough Prep',
+        materializationMode: 'STOCK_TRACKED',
+        outputCatalogItemId: doughId,
+        normativeInputQuantity: '10',
+        normativeInputUnit: 'kg',
+        normativeInputDimension: 'MASS',
+        normativeOutputQuantity: '8',
+        normativeOutputUnit: 'kg',
+        normativeOutputDimension: 'MASS',
+        components: [
+          {
+            lineNumber: 1,
+            componentKind: 'CATALOG_ITEM',
+            catalogItemId: fx.meatItemId,
+            quantity: '10',
+            unit: 'kg',
+            dimension: 'MASS',
+          },
+        ],
+      });
+      const prep = await recipes.publishPreparationVersion(prepDraft.preparationVersionId);
+      const batchDraft = await batches.createDraft({
+        tenantId: fx.tenantId,
+        warehouseId: fx.warehouseId,
+        preparationVersionId: prep.preparationVersionId,
+        actualInputQuantity: '10',
+        actualInputUnit: 'kg',
+        actualInputDimension: 'MASS',
+        actualOutputQuantity: '7',
+        actualOutputUnit: 'kg',
+        actualOutputDimension: 'MASS',
+        deviationClass: 'NORMAL',
+        actorId: fx.actorId,
+        inputActuals: [
+          { lineNumber: 1, actualQuantity: '10', actualUnit: 'kg', actualDimension: 'MASS' },
+        ],
+      });
+      await batches.finalize({
+        productionBatchId: batchDraft.productionBatchId,
+        idempotencyKey: `g-fin-${batchDraft.productionBatchId}`,
+        actorId: fx.actorId,
+      });
+      await posting.post({
+        productionBatchId: batchDraft.productionBatchId,
+        idempotencyKey: `g-post-${batchDraft.productionBatchId}`,
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        businessDate: DAY.PRODUCE,
+        businessOrder: 1,
+        actorId: fx.actorId,
+      });
+
+      const drinkId = randomUUID();
+      await pool.query(
+        `INSERT INTO catalog_item (catalog_item_id, tenant_id, name, base_unit, dimension)
+         VALUES ($1,$2,'Golden Milk Drink','ea','COUNT')`,
+        [drinkId, fx.tenantId],
+      );
+      const recipe = await recipes.createRecipeDraft({
+        tenantId: fx.tenantId,
+        name: 'Golden Drink',
+        batchSizeQuantity: '1',
+        batchSizeUnit: 'ea',
+        batchSizeDimension: 'COUNT',
+        components: [
+          {
+            lineNumber: 1,
+            componentKind: 'CATALOG_ITEM',
+            catalogItemId: fx.milkItemId,
+            quantity: '0.5',
+            unit: 'L',
+            dimension: 'VOLUME',
+          },
+          {
+            lineNumber: 2,
+            componentKind: 'CATALOG_ITEM',
+            catalogItemId: fx.oilItemId,
+            quantity: '0.1',
+            unit: 'L',
+            dimension: 'VOLUME',
+          },
+        ],
+      });
+      await recipes.publishRecipeVersion(recipe.recipeVersionId);
+      await orders.bindCatalogItemRecipeProfile({
+        tenantId: fx.tenantId,
+        catalogItemId: drinkId,
+        recipeSpecificationId: recipe.recipeSpecificationId,
+      });
+
+      // --- OPEN ORDER with three sold strategies ---
+      const order = await orders.openOrder({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        outletId: fx.outletId,
+        channel: 'DIRECT',
+        actorId: fx.actorId,
+      });
+      await orders.addOrderLine({
+        orderId: order.orderId,
+        catalogItemId: fx.milkItemId,
+        quantity: '1',
+        unit: 'L',
+        dimension: 'VOLUME',
+      });
+      await orders.addOrderLine({
+        orderId: order.orderId,
+        catalogItemId: drinkId,
+        quantity: '1',
+        unit: 'ea',
+        dimension: 'COUNT',
+      });
+      await orders.addOrderLine({
+        orderId: order.orderId,
+        catalogItemId: doughId,
+        quantity: '1',
+        unit: 'kg',
+        dimension: 'MASS',
+      });
+
+      // Quantity mutation while OPEN
+      let full = await orders.getOrder(order.orderId);
+      const milkLine = full.lines.find((l) => l.catalogItemId === fx.milkItemId)!;
+      await acceptFinalMerchandiseTerms(orders, order.orderId, {
+        defaultGrossMinor: '1000',
+        idempotencyKey: 'golden-stale-terms',
+      });
+      await orders.updateOrderLine({
+        orderId: order.orderId,
+        orderLineId: milkLine.orderLineId,
+        quantity: '2',
+      });
+      await expect(
+        orders.completeOrder({
+          orderId: order.orderId,
+          idempotencyKey: 'golden-stale-complete',
+          businessDate: DAY.SALE,
+          businessOrder: 1,
+        }),
+      ).rejects.toMatchObject({ code: 'COMMERCIAL_TERMS_REQUIRED' });
+
+      // Re-accept after mutation — commercial torture
+      full = await orders.getOrder(order.orderId);
+      const byCatalog = (id: string) => full.lines.find((l) => l.catalogItemId === id)!;
+      const lineMilk = byCatalog(fx.milkItemId);
+      const lineDrink = byCatalog(drinkId);
+      const lineDough = byCatalog(doughId);
+
+      // Order discount 7 across eligible bases after line discounts
+      // milk: 80000-5000=75000; drink: 120000; dough compliment basis 0 after 40000 disc
+      const accepted = await orders.setOrderCommercialTerms({
+        orderId: order.orderId,
+        idempotencyKey: 'golden-commercial-final',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        certainty: 'FINAL',
+        orderMerchantFundedDiscountMinor: '7',
+        taxMinor: '8000',
+        tipMinor: '5000',
+        nonMerchandiseChargesMinor: '10000',
+        customerPayableMinor: '250000',
+        lineTerms: [
+          {
+            orderLineId: lineMilk.orderLineId,
+            grossMerchandiseMinor: '80000',
+            lineMerchantFundedDiscountMinor: '5000',
+            eligibleForOrderDiscount: true,
+          },
+          {
+            orderLineId: lineDrink.orderLineId,
+            grossMerchandiseMinor: '120000',
+            thirdPartyMerchandiseFundingMinor: '15000',
+            fundingProvenance: 'platform-promo',
+            eligibleForOrderDiscount: true,
+          },
+          {
+            orderLineId: lineDough.orderLineId,
+            grossMerchandiseMinor: '40000',
+            lineMerchantFundedDiscountMinor: '40000',
+            eligibleForOrderDiscount: false,
+          },
+        ],
+      });
+      expect(accepted.status).toBe('accepted');
+
+      const expectedAlloc = allocateOrderMerchantDiscount('7', [
+        { orderLineId: lineMilk.orderLineId, lineNumber: lineMilk.lineNumber, basisMinor: '75000' },
+        { orderLineId: lineDrink.orderLineId, lineNumber: lineDrink.lineNumber, basisMinor: '120000' },
+      ]);
+      const allocMilk = expectedAlloc.get(lineMilk.orderLineId)!;
+      const allocDrink = expectedAlloc.get(lineDrink.orderLineId)!;
+      expect(Number(allocMilk) + Number(allocDrink)).toBe(7);
+
+      // Semantic idempotent re-accept
+      const again = await orders.setOrderCommercialTerms({
+        orderId: order.orderId,
+        idempotencyKey: 'golden-commercial-final',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        certainty: 'FINAL',
+        orderMerchantFundedDiscountMinor: '7',
+        taxMinor: '8000',
+        tipMinor: '5000',
+        nonMerchandiseChargesMinor: '10000',
+        customerPayableMinor: '250000',
+        lineTerms: [
+          {
+            orderLineId: lineMilk.orderLineId,
+            grossMerchandiseMinor: '80000',
+            lineMerchantFundedDiscountMinor: '5000',
+            eligibleForOrderDiscount: true,
+          },
+          {
+            orderLineId: lineDrink.orderLineId,
+            grossMerchandiseMinor: '120000',
+            thirdPartyMerchandiseFundingMinor: '15000',
+            fundingProvenance: 'platform-promo',
+            eligibleForOrderDiscount: true,
+          },
+          {
+            orderLineId: lineDough.orderLineId,
+            grossMerchandiseMinor: '40000',
+            lineMerchantFundedDiscountMinor: '40000',
+            eligibleForOrderDiscount: false,
+          },
+        ],
+      });
+      expect(again.status).toBe('duplicate');
+
+      // Expected Revenue Basis:
+      // milk: 80000-5000-allocMilk = 75000-allocMilk
+      // drink: 120000-allocDrink+15000 = 135000-allocDrink
+      // dough: 0
+      const milkNet = String(75000 - Number(allocMilk));
+      const drinkNet = String(135000 - Number(allocDrink));
+      const orderRevenue = String(Number(milkNet) + Number(drinkNet)); // dough 0
+
+      const completed = await orders.completeOrder({
+        orderId: order.orderId,
+        idempotencyKey: 'golden-complete',
+        businessDate: DAY.SALE,
+        businessOrder: 1,
+        businessTime: '19:30:00',
+        actorId: fx.actorId,
+      });
+      expect(completed.status).toBe('completed');
+      expect(completed.goodsIssueId).toBeTruthy();
+
+      // CompleteOrder retry idempotency
+      const retry = await orders.completeOrder({
+        orderId: order.orderId,
+        idempotencyKey: 'golden-complete',
+        businessDate: DAY.SALE,
+        businessOrder: 1,
+        businessTime: '19:30:00',
+        actorId: fx.actorId,
+      });
+      expect(retry.status).toBe('duplicate');
+
+      const snapCount = await pool.query(
+        `SELECT COUNT(*)::int AS c FROM order_commercial_snapshot WHERE order_id = $1`,
+        [order.orderId],
+      );
+      expect(snapCount.rows[0]!.c).toBe(1);
+      const giCount = await pool.query(
+        `SELECT COUNT(*)::int AS c FROM goods_issue WHERE source_order_id = $1`,
+        [order.orderId],
+      );
+      expect(giCount.rows[0]!.c).toBe(1);
+      const movCount = await pool.query(
+        `SELECT COUNT(*)::int AS c FROM inventory_movement
+         WHERE source_document_type = 'GoodsIssue' AND source_document_id = $1`,
+        [completed.goodsIssueId],
+      );
+      // milk OUT + drink milk leaf + drink oil leaf + dough OUT = 4 (or 3 if shared — assert >=3 and no excess)
+      expect(movCount.rows[0]!.c).toBeGreaterThanOrEqual(3);
+      expect(movCount.rows[0]!.c).toBeLessThanOrEqual(4);
+
+      const after = await orders.getOrder(order.orderId);
+      expect(after.status).toBe('COMPLETED');
+      expect(after.consumptionPlanId).toBeTruthy();
+
+      const snap = await orders.getCommercialSnapshot(order.orderId);
+      expect(snap!.certainty).toBe('FINAL');
+      expect(snap!.netMerchandiseSalesMinor).toBe(orderRevenue);
+      expect(snap!.taxMinor).toBe('8000');
+      expect(snap!.tipMinor).toBe('5000');
+      expect(snap!.customerPayableMinor).toBe('250000');
+      expect(snap!.customerPayableMinor).not.toBe(snap!.netMerchandiseSalesMinor);
+
+      const doughLineSnap = snap!.lines.find((l) => l.soldCatalogItemId === doughId)!;
+      expect(doughLineSnap.netMerchandiseSalesMinor).toBe('0');
+      expect(doughLineSnap.certainty).toBe('FINAL');
+
+      // Frozen allocation — reporting must match snapshot, not recalculate
+      const milkSnap = snap!.lines.find((l) => l.soldCatalogItemId === fx.milkItemId)!;
+      const drinkSnap = snap!.lines.find((l) => l.soldCatalogItemId === drinkId)!;
+      expect(milkSnap.allocatedOrderMerchantDiscountMinor).toBe(allocMilk);
+      expect(drinkSnap.allocatedOrderMerchantDiscountMinor).toBe(allocDrink);
+
+      // PHYSICAL write-off strategies
+      const gil = await pool.query<{
+        catalog_item_id: string;
+        order_line_id: string;
+        quantity_base: string;
+      }>(
+        `SELECT catalog_item_id, order_line_id, quantity_base FROM goods_issue_line
+         WHERE goods_issue_id = $1 ORDER BY line_number`,
+        [completed.goodsIssueId],
+      );
+      const milkLeaves = gil.rows.filter((r) => r.order_line_id === lineMilk.orderLineId);
+      expect(milkLeaves).toHaveLength(1);
+      expect(milkLeaves[0]!.catalog_item_id).toBe(fx.milkItemId);
+      expect(milkLeaves[0]!.quantity_base).toBe('2');
+
+      const drinkLeaves = gil.rows.filter((r) => r.order_line_id === lineDrink.orderLineId);
+      expect(drinkLeaves.map((r) => r.catalog_item_id).sort()).toEqual(
+        [fx.milkItemId, fx.oilItemId].sort(),
+      );
+
+      const doughLeaves = gil.rows.filter((r) => r.order_line_id === lineDough.orderLineId);
+      expect(doughLeaves).toHaveLength(1);
+      expect(doughLeaves[0]!.catalog_item_id).toBe(doughId);
+      // STOCK_TRACKED root: finished dough only — no meat leaf
+      expect(doughLeaves.some((r) => r.catalog_item_id === fx.meatItemId)).toBe(false);
+
+      // ACTUAL COGS from historical MA (milk blended 15000)
+      const cogsLines = await cogs.listLineEffects(q({ orderId: order.orderId }));
+      expect(cogsLines.length).toBeGreaterThanOrEqual(3);
+      expect(cogsLines.every((e) => e.costCertainty === 'FINAL')).toBe(true);
+      const cogsAgg = await cogs.aggregateByLine(q({ orderId: order.orderId }));
+      expect(cogsAgg.actualCogsMinor).not.toBeNull();
+      expect(Number(cogsAgg.actualCogsMinor)).toBeGreaterThan(0);
+
+      const doughCogs = cogsLines
+        .filter((e) => e.orderLineId === lineDough.orderLineId)
+        .reduce((s, e) => s + Number(e.signedActualCogsMinor ?? 0), 0);
+      expect(doughCogs).toBeGreaterThan(0); // compliment still has COGS
+
+      // REVENUE
+      const revLines = await revenue.listLineEffects(q({ orderId: order.orderId }));
+      expect(revLines).toHaveLength(3);
+      expect(revLines.find((e) => e.orderLineId === lineDough.orderLineId)!.signedRevenueBasisMinor).toBe(
+        '0',
+      );
+      const revAgg = await revenue.aggregateByLine(q({ orderId: order.orderId }));
+      expect(revAgg.revenueBasisMinor).toBe(orderRevenue);
+
+      // OPERATING ECONOMICS — order scope
+      const oe = await economics.compute(q({ orderId: order.orderId }));
+      expect(oe.denominatorRevenueBasisMinor).toBe(orderRevenue);
+      expect(oe.numeratorActualCogsMinor).toBe(cogsAgg.actualCogsMinor);
+      expect(oe.foodCostRatioStatus).toBe('AVAILABLE');
+      expect(oe.operationalGrossProfitStatus).toBe('AVAILABLE');
+      expect(oe.denominatorRevenueBasisMinor).toBe(orderRevenue);
+      expect(oe.numeratorActualCogsMinor).toBe(cogsAgg.actualCogsMinor);
+      expect(oe.operationalGrossProfitMinor).toBe(
+        toCanonicalDecimal(
+          parseCanonicalDecimal(oe.denominatorRevenueBasisMinor!).minus(
+            parseCanonicalDecimal(oe.numeratorActualCogsMinor!),
+          ),
+        ),
+      );
+      expect(oe.foodCostRatio).toBeTruthy();
+
+      // Compliment line economics
+      const complimentOe = await economics.compute(q({ orderLineId: lineDough.orderLineId }));
+      expect(complimentOe.revenue.revenueBasisMinor).toBe('0');
+      expect(complimentOe.foodCostRatioUnavailableReasons).toContain('ZERO_REVENUE_BASIS');
+      expect(complimentOe.operationalGrossProfitMinor).toBe(`-${doughCogs}`);
+
+      // No Revenue multiplication by recipe leaves
+      expect(revLines.filter((e) => e.orderLineId === lineDrink.orderLineId)).toHaveLength(1);
+      expect(drinkLeaves.length).toBeGreaterThan(1);
+
+      // HISTORICAL STABILITY — mutate recipe + catalog after sale
+      const beforeHist = {
+        cogs: cogsAgg.actualCogsMinor,
+        rev: revAgg.revenueBasisMinor,
+        fc: oe.foodCostRatio,
+        gp: oe.operationalGrossProfitMinor,
+      };
+      await pool.query(`UPDATE catalog_item SET name = 'Mutated Milk' WHERE catalog_item_id = $1`, [
+        fx.milkItemId,
+      ]);
+      const v2 = await recipes.createNextRecipeVersion(recipe.recipeSpecificationId);
+      await recipes.updateRecipeDraft({
+        recipeVersionId: v2.recipeVersionId,
+        components: [
+          {
+            lineNumber: 1,
+            componentKind: 'CATALOG_ITEM',
+            catalogItemId: fx.milkItemId,
+            quantity: '9',
+            unit: 'L',
+            dimension: 'VOLUME',
+          },
+        ],
+      });
+      await recipes.publishRecipeVersion(v2.recipeVersionId);
+      const afterHist = await economics.compute(q({ orderId: order.orderId }));
+      expect(afterHist.numeratorActualCogsMinor).toBe(beforeHist.cogs);
+      expect(afterHist.denominatorRevenueBasisMinor).toBe(beforeHist.rev);
+      expect(afterHist.foodCostRatio).toBe(beforeHist.fc);
+      expect(afterHist.operationalGrossProfitMinor).toBe(beforeHist.gp);
+
+      // FULL LATER REVERSAL
+      const reversed = await orders.reverseCompletedOrder({
+        orderId: order.orderId,
+        idempotencyKey: 'golden-rev-later',
+        businessDate: DAY.REVERSE_LATER,
+        businessOrder: 1,
+        reason: 'guest complaint',
+        actorId: fx.actorId,
+      });
+      expect(reversed.reversalId).toBeTruthy();
+      const snapAfterRev = await orders.getCommercialSnapshot(order.orderId);
+      expect(snapAfterRev).toEqual(snap);
+
+      const salePeriod = await economics.compute(q({ businessDate: DAY.SALE }));
+      expect(Number(salePeriod.denominatorRevenueBasisMinor)).toBeGreaterThan(0);
+      expect(Number(salePeriod.numeratorActualCogsMinor)).toBeGreaterThan(0);
+
+      const revPeriod = await economics.compute(q({ businessDate: DAY.REVERSE_LATER }));
+      expect(revPeriod.denominatorRevenueBasisMinor).toBe(`-${orderRevenue}`);
+      expect(revPeriod.numeratorActualCogsMinor).toBe(`-${cogsAgg.actualCogsMinor}`);
+      expect(revPeriod.operationalGrossProfitMinor).toBe(
+        toCanonicalDecimal(parseCanonicalDecimal(salePeriod.operationalGrossProfitMinor!).neg()),
+      );
+      expect(revPeriod.foodCostRatio).toBe(salePeriod.foodCostRatio);
+
+      const combined = await economics.compute(
+        q({ businessDateFrom: DAY.SALE, businessDateTo: DAY.REVERSE_LATER }),
+      );
+      expect(combined.denominatorRevenueBasisMinor).toBe('0');
+      expect(combined.numeratorActualCogsMinor).toBe('0');
+      expect(combined.operationalGrossProfitMinor).toBe('0');
+      expect(combined.foodCostRatioUnavailableReasons).toContain('ZERO_REVENUE_BASIS');
+
+      // Tenant isolation
+      expect((await economics.compute({ tenantId: randomUUID() })).revenue.componentCount).toBe(0);
+
+      // Provenance drill-down
+      const revSale = (await revenue.listLineEffects(q({ orderId: order.orderId, effectType: 'SALE' })))[0]!;
+      expect(revSale.orderCommercialSnapshotId).toBe(snap!.orderCommercialSnapshotId);
+      const revRev = (
+        await revenue.listLineEffects(q({ orderId: order.orderId, effectType: 'REVERSAL' }))
+      )[0]!;
+      expect(revRev.salesOrderCompletionReversalId).toBe(reversed.reversalId);
+      expect(revRev.orderCommercialSnapshotId).toBe(snap!.orderCommercialSnapshotId);
+      const cogsSale = (await cogs.listLineEffects(q({ orderId: order.orderId })))[0]!;
+      expect(cogsSale.goodsIssueId).toBe(completed.goodsIssueId);
+      expect(cogsSale.inventoryMovementId).toBeTruthy();
+    });
+  });
+
+  describe('VARIATION — CompleteOrder atomic rollback', () => {
+    it('COMPLETION — failing write-off leaves OPEN, no snapshot/GI/movement', async () => {
+      await receiveMilk(5, '10000', DAY.PROCURE_1, 1);
+      const failingPort: SaleInventoryWriteOffPort = {
+        async postGoodsIssueFromConsumptionPlan() {
+          throw new Error('golden simulated inventory failure');
+        },
+        async reverseGoodsIssueFromOrder() {
+          throw new Error('not used');
+        },
+      };
+      const failingOrders = new OrdersService(pool, { saleWriteOffPort: failingPort });
+      const order = await failingOrders.openOrder({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        outletId: fx.outletId,
+      });
+      await failingOrders.addOrderLine({
+        orderId: order.orderId,
+        catalogItemId: fx.milkItemId,
+        quantity: '1',
+        unit: 'L',
+        dimension: 'VOLUME',
+      });
+      await acceptFinalMerchandiseTerms(failingOrders, order.orderId, {
+        defaultGrossMinor: '50000',
+        idempotencyKey: 'golden-fail-terms',
+      });
+      await expect(
+        failingOrders.completeOrder({
+          orderId: order.orderId,
+          idempotencyKey: 'golden-fail-complete',
+          businessDate: DAY.SALE,
+          businessOrder: 1,
+        }),
+      ).rejects.toThrow(/golden simulated inventory failure/);
+
+      const after = await orders.getOrder(order.orderId);
+      expect(after.status).toBe('OPEN');
+      expect(after.consumptionPlanId).toBeNull();
+      expect(
+        (await pool.query(`SELECT COUNT(*)::int AS c FROM order_commercial_snapshot WHERE order_id = $1`, [
+          order.orderId,
+        ])).rows[0]!.c,
+      ).toBe(0);
+      expect((await pool.query(`SELECT COUNT(*)::int AS c FROM goods_issue`)).rows[0]!.c).toBe(0);
+      expect(
+        (
+          await pool.query(`SELECT COUNT(*)::int AS c FROM operational_fact_feed WHERE fact_type = $1`, [
+            OperationalFactType.OrderCompleted,
+          ])
+        ).rows[0]!.c,
+      ).toBe(0);
+    });
+  });
+
+  describe('VARIATION — same-position & backdated reversal', () => {
+    it('REVERSAL — same-position nets zero; Food Cost denominator-zero', async () => {
+      await receiveMilk(5, '10000', DAY.PROCURE_1, 1);
+      const order = await orders.openOrder({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        outletId: fx.outletId,
+      });
+      await orders.addOrderLine({
+        orderId: order.orderId,
+        catalogItemId: fx.milkItemId,
+        quantity: '1',
+        unit: 'L',
+        dimension: 'VOLUME',
+      });
+      await acceptFinalMerchandiseTerms(orders, order.orderId, { defaultGrossMinor: '100000' });
+      await orders.completeOrder({
+        orderId: order.orderId,
+        idempotencyKey: 'golden-same-c',
+        businessDate: DAY.SALE,
+        businessOrder: 1,
+      });
+      await orders.reverseCompletedOrder({
+        orderId: order.orderId,
+        idempotencyKey: 'golden-same-r',
+        businessDate: DAY.SALE,
+        businessOrder: 1,
+        reason: 'same position',
+        actorId: fx.actorId,
+      });
+      expect(await revenue.listLineEffects(q({ orderId: order.orderId }))).toHaveLength(2);
+      expect(await cogs.listLineEffects(q({ orderId: order.orderId }))).toHaveLength(2);
+      const oe = await economics.compute(q({ orderId: order.orderId }));
+      expect(oe.denominatorRevenueBasisMinor).toBe('0');
+      expect(oe.numeratorActualCogsMinor).toBe('0');
+      expect(oe.operationalGrossProfitMinor).toBe('0');
+      expect(oe.foodCostRatioUnavailableReasons).toContain('ZERO_REVENUE_BASIS');
+    });
+
+    it('REVERSAL — backdated chronology beats reversed_at', async () => {
+      await receiveMilk(5, '10000', DAY.PROCURE_1, 1);
+      const order = await orders.openOrder({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        outletId: fx.outletId,
+      });
+      await orders.addOrderLine({
+        orderId: order.orderId,
+        catalogItemId: fx.milkItemId,
+        quantity: '1',
+        unit: 'L',
+        dimension: 'VOLUME',
+      });
+      await acceptFinalMerchandiseTerms(orders, order.orderId, { defaultGrossMinor: '100000' });
+      await orders.completeOrder({
+        orderId: order.orderId,
+        idempotencyKey: 'golden-back-c',
+        businessDate: DAY.SALE,
+        businessOrder: 1,
+      });
+      const rev = await orders.reverseCompletedOrder({
+        orderId: order.orderId,
+        idempotencyKey: 'golden-back-r',
+        businessDate: DAY.REVERSE_BACK,
+        businessOrder: 1,
+        reason: 'backdated',
+        actorId: fx.actorId,
+      });
+      const row = await pool.query<{ reversed_at: Date; business_date: string }>(
+        `SELECT reversed_at, business_date::text AS business_date
+         FROM sales_order_completion_reversal WHERE sales_order_completion_reversal_id = $1`,
+        [rev.reversalId],
+      );
+      expect(row.rows[0]!.business_date.startsWith(DAY.REVERSE_BACK)).toBe(true);
+      expect(new Date(row.rows[0]!.reversed_at).toISOString().slice(0, 10)).not.toBe(DAY.REVERSE_BACK);
+      const back = await economics.compute(q({ businessDate: DAY.REVERSE_BACK }));
+      expect(back.denominatorRevenueBasisMinor).toBe('-100000');
+      expect(back.numeratorActualCogsMinor).toBe('-10000');
+    });
+  });
+
+  describe('VARIATION — UNKNOWN / ORDER_UNRESOLVED / coverage gap', () => {
+    it('COGS — UNKNOWN never zero; metrics unavailable; Revenue visible', async () => {
+      const order = await orders.openOrder({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        outletId: fx.outletId,
+      });
+      await orders.addOrderLine({
+        orderId: order.orderId,
+        catalogItemId: fx.milkItemId,
+        quantity: '1',
+        unit: 'L',
+        dimension: 'VOLUME',
+      });
+      await acceptFinalMerchandiseTerms(orders, order.orderId, { defaultGrossMinor: '50000' });
+      await orders.completeOrder({
+        orderId: order.orderId,
+        idempotencyKey: 'golden-unk',
+        businessDate: DAY.SALE,
+        businessOrder: 1,
+      });
+      const effects = await cogs.listLineEffects(q({ orderId: order.orderId }));
+      expect(effects[0]!.costCertainty).toBe('UNKNOWN');
+      const oe = await economics.compute(q({ orderId: order.orderId }));
+      expect(oe.foodCostRatioUnavailableReasons).toContain('COGS_UNKNOWN');
+      expect(oe.operationalGrossProfitUnavailableReasons).toContain('COGS_UNKNOWN');
+      expect(oe.revenue.revenueBasisMinor).toBe('50000');
+      expect(oe.cogs.actualCogsMinor).toBeNull();
+      expect(oe.cogs.knownSubtotalMinor).toBe('0');
+    });
+
+    it('COGS — ORDER_UNRESOLVED at shared business position', async () => {
+      await receiveMilk(10, '10000', DAY.PROCURE_1, 1);
+      for (const key of ['a', 'b'] as const) {
+        const order = await orders.openOrder({
+          tenantId: fx.tenantId,
+          legalEntityId: fx.legalEntityId,
+          outletId: fx.outletId,
+        });
+        await orders.addOrderLine({
+          orderId: order.orderId,
+          catalogItemId: fx.milkItemId,
+          quantity: '1',
+          unit: 'L',
+          dimension: 'VOLUME',
+        });
+        await acceptFinalMerchandiseTerms(orders, order.orderId, {
+          defaultGrossMinor: '50000',
+          idempotencyKey: `golden-ur-${key}`,
+        });
+        await orders.completeOrder({
+          orderId: order.orderId,
+          idempotencyKey: `golden-ur-c-${key}`,
+          businessDate: DAY.SALE,
+          businessOrder: 1,
+        });
+      }
+      const oe = await economics.compute(q({ businessDate: DAY.SALE }));
+      expect(oe.foodCostRatioUnavailableReasons).toContain('COGS_ORDER_UNRESOLVED');
+      expect(oe.operationalGrossProfitUnavailableReasons).toContain('COGS_ORDER_UNRESOLVED');
+    });
+
+    it('ECONOMICS — REVENUE_COVERAGE_GAP never fabricates Revenue 0', async () => {
+      await receiveMilk(5, '10000', DAY.PROCURE_1, 1);
+      const order = await orders.openOrder({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        outletId: fx.outletId,
+      });
+      await orders.addOrderLine({
+        orderId: order.orderId,
+        catalogItemId: fx.milkItemId,
+        quantity: '1',
+        unit: 'L',
+        dimension: 'VOLUME',
+      });
+      await acceptFinalMerchandiseTerms(orders, order.orderId, { defaultGrossMinor: '100000' });
+      await orders.completeOrder({
+        orderId: order.orderId,
+        idempotencyKey: 'golden-gap-c',
+        businessDate: DAY.SALE,
+        businessOrder: 1,
+      });
+      await pool.query(`UPDATE sales_order SET order_commercial_snapshot_id = NULL WHERE order_id = $1`, [
+        order.orderId,
+      ]);
+      await pool.query(
+        `DELETE FROM order_line_commercial_snapshot WHERE order_commercial_snapshot_id IN (
+           SELECT order_commercial_snapshot_id FROM order_commercial_snapshot WHERE order_id = $1)`,
+        [order.orderId],
+      );
+      await pool.query(`DELETE FROM order_commercial_snapshot WHERE order_id = $1`, [order.orderId]);
+
+      const oe = await economics.compute(q({ orderId: order.orderId }));
+      expect(oe.hasRevenueCoverageGap).toBe(true);
+      expect(oe.foodCostRatioUnavailableReasons).toContain('REVENUE_COVERAGE_GAP');
+      expect(oe.operationalGrossProfitMinor).toBeNull();
+      expect(oe.operationalGrossProfitMinor).not.toBe('-10000');
+      expect(oe.cogs.actualCogsMinor).toBe('10000');
+    });
+  });
+
+  describe('DEFERRED markers (must remain explicit — do not fake PASS)', () => {
+    it('documents unsupported torture steps as EXPECTED STOP', () => {
+      const deferred = [
+        'MODIFIER commercial + physical semantics → future Modifier / Effective Recipe vertical',
+        'DANGEROUS OPERATION / MANAGER OVERRIDE → future Authorization / Roles vertical',
+        'SPLIT PAYMENT / SETTLEMENT → Settlement boundary future implementation',
+        'PARTIAL RETURN → Partial Return / Partial Commercial Correction model',
+        'PERIOD LOCK → PeriodLock vertical',
+        'Contribution Margin / channel commissions / payment fees → ADR-0019 future',
+        'Explainable Intelligence → later reads proven economic evidence only',
+        'TOTAL_LOSS production variation → covered in D1.2B suite; not on main sale path',
+        'Menu/Pricing live mutation → Menu/Pricing runtime not implemented',
+      ] as const;
+      expect(deferred.length).toBeGreaterThanOrEqual(8);
+      // Guard: this test exists so CI documents deferred surface; never delete to silence CI.
+      for (const d of deferred) {
+        expect(d).toMatch(/→/);
+      }
+    });
+  });
+});

@@ -1,28 +1,30 @@
 # MillQ Current State
 
-**Checkpoint:** Block D1.4D Food Cost Ratio & Operational Gross Profit **in review** — branch from Origin `main` @ `22280db` (2026-09-16)
+**Checkpoint:** GOLDEN-1 Golden Restaurant Scenario / Torture Test **in review** — branch from Origin `main` @ `361ef9b` (2026-09-16)
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)
 **Backup host:** GitHub `https://github.com/millQ-dev/MillQ.git` (mirror only)
-**D1.4C PR #39:** merged @ `22280db5ed5f0b2afc55e0f64f23528dd3a6c8ef`
+**D1.4D PR #40:** merged @ `361ef9b8c2255f8d4984c882b0d6f93125689340`
 **Updated:** 2026-09-16
 
 ## Runtime / CI / backup
 
 | Item | State |
 | --- | --- |
-| D1.4A Actual COGS | **Merged** (semantics unchanged) |
-| D1.4B Order Commercial Snapshot | **Merged** @ `878264f` |
-| D1.4C Revenue Basis Read Model | **Merged** @ `22280db` |
-| ADR-0026 / ADR-0027 / ADR-0028 | **Accepted** |
-| Block D1.4D Food Cost Ratio & Operational Gross Profit | **This PR** |
-| Contribution Margin / channel economics / Period Lock | **STOP** — not started |
+| D1.4A Actual COGS | **DONE** |
+| D1.4B Order Commercial Snapshot | **DONE** |
+| D1.4C Revenue Basis Read Model | **DONE** |
+| D1.4D Food Cost Ratio & Operational Gross Profit | **DONE** @ `361ef9b` |
+| GOLDEN-1 Golden Restaurant Scenario | **This PR** — permanent torture gate |
+| Contribution Margin / Period Lock / Menu / POS UX | **STOP** — not started |
 
-## This PR (D1.4D)
+## This PR (GOLDEN-1)
 
-- `OperatingEconomicsService` — derived Food Cost Ratio + Operational Gross Profit
-- Combines `RevenueBasisService` + `ActualCogsService` (no migration / no ledger)
-- Commercial coverage-gap detection (`REVENUE_COVERAGE_GAP`)
-- Per-metric availability (zero Revenue ≠ disable Operational GP)
+- Permanent entry: `apps/api/src/scenarios/golden-restaurant.acceptance.test.ts`
+- Manifest: `docs/processes/golden-restaurant-scenario.md`
+- Cross-module day: procurement → production → order → commercial → COGS/Revenue/OGP → reversals
+- Explicit DEFERRED markers for unsupported torture steps
+- **Golden-discovered fix:** business DATE `asIsoDate` UTC shift in positive-offset TZ
+- **No migration / no new product runtime**
 
 ## Next
 
