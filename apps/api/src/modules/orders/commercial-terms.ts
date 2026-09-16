@@ -2,11 +2,14 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import {
   allocateOrderMerchantDiscount,
+  calculateRoundedLineGross,
   commercialSnapshotSemanticHash,
   commercialTermsSemanticFingerprint,
   computeLineNetMerchandiseSalesMinor,
+  createMoney,
   InvalidMoneyError,
   type CommercialCertainty,
+  type CommercialRoundingMode,
 } from '@millq/domain';
 import { DomainValidationError } from './errors.js';
 import type { SetOrderCommercialTermsInput } from './types.js';
@@ -72,6 +75,129 @@ function mapMoney(err: unknown): never {
   throw err;
 }
 
+/**
+ * ADR-0030 / C1.1: every NEW accepted line must carry complete RoundingPolicy provenance
+ * that matches the pure calculation kernel. OPTION A bare explicit gross is rejected.
+ */
+function assertValidatedRoundingProvenance(input: {
+  currencyCode: string;
+  minorUnitExponent: number;
+  quantity: string;
+  resolvedUnitPriceMinor: string | null;
+  grossMerchandiseMinor: string;
+  exactUnroundedMinorBasis?: string;
+  roundingDelta?: string;
+  roundingPolicyId?: string;
+  roundingPolicyVersion?: number;
+  roundingMode?: string;
+  quantumMinor?: string;
+  calculationContext?: string;
+}): {
+  exactUnroundedMinorBasis: string;
+  roundingDelta: string;
+  roundingPolicyId: string;
+  roundingPolicyVersion: number;
+  roundingMode: CommercialRoundingMode;
+  quantumMinor: string;
+  calculationContext: 'BASE_LIST_LINE_GROSS';
+} {
+  const hasAny =
+    input.exactUnroundedMinorBasis != null ||
+    input.roundingDelta != null ||
+    input.roundingPolicyId != null ||
+    input.roundingPolicyVersion != null ||
+    input.roundingMode != null ||
+    input.quantumMinor != null ||
+    input.calculationContext != null;
+
+  if (!hasAny) {
+    throw new DomainValidationError(
+      'COMMERCIAL_ROUNDING_POLICY_REQUIRED',
+      'ADR-0030: official merchandise gross requires RoundingPolicy provenance; OPTION A explicit-gross without policy is superseded',
+    );
+  }
+
+  if (
+    input.exactUnroundedMinorBasis == null ||
+    input.roundingDelta == null ||
+    input.roundingPolicyId == null ||
+    input.roundingPolicyVersion == null ||
+    input.roundingMode == null ||
+    input.quantumMinor == null ||
+    input.calculationContext == null ||
+    input.resolvedUnitPriceMinor == null
+  ) {
+    throw new DomainValidationError(
+      'COMMERCIAL_ROUNDING_POLICY_INVALID',
+      'Rounding provenance must be complete (basis, delta, policy id/version/mode/quantum/context, unit Money)',
+    );
+  }
+
+  if (input.calculationContext !== 'BASE_LIST_LINE_GROSS') {
+    throw new DomainValidationError(
+      'COMMERCIAL_ROUNDING_POLICY_INVALID',
+      'calculationContext must be BASE_LIST_LINE_GROSS',
+    );
+  }
+
+  if (!['HALF_UP', 'HALF_EVEN', 'DOWN', 'UP'].includes(input.roundingMode)) {
+    throw new DomainValidationError(
+      'COMMERCIAL_ROUNDING_POLICY_INVALID',
+      `Unsupported roundingMode: ${input.roundingMode}`,
+    );
+  }
+
+  let expected;
+  try {
+    expected = calculateRoundedLineGross({
+      unitMoney: createMoney(
+        input.resolvedUnitPriceMinor,
+        input.currencyCode,
+        input.minorUnitExponent,
+      ),
+      quantity: input.quantity,
+      roundingPolicy: {
+        roundingPolicyId: input.roundingPolicyId,
+        policyVersion: input.roundingPolicyVersion,
+        calculationContext: 'BASE_LIST_LINE_GROSS',
+        roundingMode: input.roundingMode as CommercialRoundingMode,
+        quantumMinor: input.quantumMinor,
+      },
+    });
+  } catch (e) {
+    mapMoney(e);
+  }
+
+  if (expected.roundedGrossMoney.amountMinor !== input.grossMerchandiseMinor) {
+    throw new DomainValidationError(
+      'COMMERCIAL_ROUNDING_POLICY_INVALID',
+      'grossMerchandiseMinor does not match RoundingPolicy kernel result',
+    );
+  }
+  if (expected.exactUnroundedMinorBasis !== input.exactUnroundedMinorBasis) {
+    throw new DomainValidationError(
+      'COMMERCIAL_ROUNDING_POLICY_INVALID',
+      'exactUnroundedMinorBasis does not match RoundingPolicy kernel result',
+    );
+  }
+  if (expected.roundingDelta !== input.roundingDelta) {
+    throw new DomainValidationError(
+      'COMMERCIAL_ROUNDING_POLICY_INVALID',
+      'roundingDelta does not match RoundingPolicy kernel result',
+    );
+  }
+
+  return {
+    exactUnroundedMinorBasis: expected.exactUnroundedMinorBasis,
+    roundingDelta: expected.roundingDelta,
+    roundingPolicyId: input.roundingPolicyId,
+    roundingPolicyVersion: input.roundingPolicyVersion,
+    roundingMode: input.roundingMode as CommercialRoundingMode,
+    quantumMinor: input.quantumMinor,
+    calculationContext: 'BASE_LIST_LINE_GROSS',
+  };
+}
+
 /** Validate command against authoritative OrderLines and build computed commercial state. */
 export function buildCommercialStateFromCommand(
   cmd: SetOrderCommercialTermsInput,
@@ -133,13 +259,13 @@ export function buildCommercialStateFromCommand(
     fundingProvenance: string | null;
     provenance: unknown;
     basisMinor: string;
-    exactUnroundedMinorBasis: string | null;
-    roundingDelta: string | null;
-    roundingPolicyId: string | null;
-    roundingPolicyVersion: number | null;
-    roundingMode: string | null;
-    quantumMinor: string | null;
-    calculationContext: string | null;
+    exactUnroundedMinorBasis: string;
+    roundingDelta: string;
+    roundingPolicyId: string;
+    roundingPolicyVersion: number;
+    roundingMode: string;
+    quantumMinor: string;
+    calculationContext: string;
   };
 
   const prepared: Prep[] = [];
@@ -153,6 +279,26 @@ export function buildCommercialStateFromCommand(
           `lineMerchantFundedDiscountMinor exceeds grossMerchandiseMinor for line ${ol.line_number}`,
         );
       }
+      const rounding = assertValidatedRoundingProvenance({
+        currencyCode,
+        minorUnitExponent: cmd.minorUnitExponent,
+        quantity: ol.quantity,
+        resolvedUnitPriceMinor: lt.resolvedUnitPriceMinor ?? null,
+        grossMerchandiseMinor: lt.grossMerchandiseMinor,
+        ...(lt.exactUnroundedMinorBasis != null
+          ? { exactUnroundedMinorBasis: lt.exactUnroundedMinorBasis }
+          : {}),
+        ...(lt.roundingDelta != null ? { roundingDelta: lt.roundingDelta } : {}),
+        ...(lt.roundingPolicyId != null ? { roundingPolicyId: lt.roundingPolicyId } : {}),
+        ...(lt.roundingPolicyVersion != null
+          ? { roundingPolicyVersion: lt.roundingPolicyVersion }
+          : {}),
+        ...(lt.roundingMode != null ? { roundingMode: lt.roundingMode } : {}),
+        ...(lt.quantumMinor != null ? { quantumMinor: lt.quantumMinor } : {}),
+        ...(lt.calculationContext != null
+          ? { calculationContext: lt.calculationContext }
+          : {}),
+      });
       const basis =
         lt.eligibleForOrderDiscount !== false ? (gross - lineDisc).toString() : '0';
       prepared.push({
@@ -170,13 +316,13 @@ export function buildCommercialStateFromCommand(
         fundingProvenance: lt.fundingProvenance ?? null,
         provenance: lt.provenance ?? null,
         basisMinor: basis,
-        exactUnroundedMinorBasis: lt.exactUnroundedMinorBasis ?? null,
-        roundingDelta: lt.roundingDelta ?? null,
-        roundingPolicyId: lt.roundingPolicyId ?? null,
-        roundingPolicyVersion: lt.roundingPolicyVersion ?? null,
-        roundingMode: lt.roundingMode ?? null,
-        quantumMinor: lt.quantumMinor ?? null,
-        calculationContext: lt.calculationContext ?? null,
+        exactUnroundedMinorBasis: rounding.exactUnroundedMinorBasis,
+        roundingDelta: rounding.roundingDelta,
+        roundingPolicyId: rounding.roundingPolicyId,
+        roundingPolicyVersion: rounding.roundingPolicyVersion,
+        roundingMode: rounding.roundingMode,
+        quantumMinor: rounding.quantumMinor,
+        calculationContext: rounding.calculationContext,
       });
     }
 
@@ -636,6 +782,13 @@ export async function freezeCommercialSnapshot(
       taxMinor: l.taxMinor,
       certainty: l.certainty,
       fundingProvenance: l.fundingProvenance,
+      exactUnroundedMinorBasis: l.exactUnroundedMinorBasis,
+      roundingDelta: l.roundingDelta,
+      roundingPolicyId: l.roundingPolicyId,
+      roundingPolicyVersion: l.roundingPolicyVersion,
+      roundingMode: l.roundingMode,
+      quantumMinor: l.quantumMinor,
+      calculationContext: l.calculationContext,
     })),
   });
 

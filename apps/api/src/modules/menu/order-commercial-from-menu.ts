@@ -1,24 +1,23 @@
 /**
- * OPTION A — Explicit gross only (PO decision for M1.1).
- *
- * MenuResolver supplies UNIT price + provenance.
- * Caller MUST supply grossMerchandiseMinor explicitly.
- * This helper MUST NOT compute unitPrice × quantity.
+ * Build SetOrderCommercialTerms input from Menu unit-price resolution + ADR-0030 RoundingPolicy kernel.
+ * MenuResolver MUST NOT compute unit×quantity — it supplies UNIT price only.
+ * This Orders/Commercial Calculation helper derives official line gross via RoundingPolicy.
+ * Does not call OrdersService and does not write commercial tables.
  */
+import {
+  calculateRoundedLineGross,
+  createMoney,
+  type CommercialRoundingPolicySnapshot,
+} from '@millq/domain';
 import { DomainValidationError } from './errors.js';
 import type { ResolvedOrderLineFromMenu } from './menu-resolver.js';
-
-export type ExplicitLineCommercialAmount = {
-  readonly orderLineId: string;
-  readonly grossMerchandiseMinor: string;
-};
 
 export type BuildMenuResolvedCommercialTermsInput = {
   readonly orderId: string;
   readonly idempotencyKey: string;
   readonly certainty?: 'FINAL' | 'UNKNOWN';
   readonly resolvedLines: ReadonlyArray<ResolvedOrderLineFromMenu>;
-  readonly explicitLineCommercialAmounts: ReadonlyArray<ExplicitLineCommercialAmount>;
+  readonly roundingPolicy: CommercialRoundingPolicySnapshot;
   /** Optional order-level fields — defaults keep base commercial proposal. */
   readonly orderMerchantFundedDiscountMinor?: string;
   readonly taxMinor?: string | null;
@@ -29,64 +28,87 @@ export type BuildMenuResolvedCommercialTermsInput = {
 };
 
 /**
- * Build SetOrderCommercialTerms input from menu unit-price resolution + explicit gross.
- * Does not call OrdersService and does not write commercial tables.
+ * @deprecated OPTION A explicit-gross amounts — use roundingPolicy path.
+ * Kept type alias only for migration of call sites; prefer BuildMenuResolvedCommercialTermsInput.
  */
+export type ExplicitLineCommercialAmount = {
+  readonly orderLineId: string;
+  readonly grossMerchandiseMinor: string;
+};
+
 export function buildMenuResolvedCommercialTermsInput(input: BuildMenuResolvedCommercialTermsInput) {
   if (input.resolvedLines.length === 0) {
     throw new DomainValidationError('EMPTY_ORDER', 'No resolved menu lines');
   }
-  if (input.explicitLineCommercialAmounts.length !== input.resolvedLines.length) {
+  if (input.roundingPolicy.calculationContext !== 'BASE_LIST_LINE_GROSS') {
     throw new DomainValidationError(
-      'INCOMPLETE_LINE_TERMS',
-      'explicitLineCommercialAmounts must cover every resolved line exactly once',
+      'COMMERCIAL_ROUNDING_POLICY_INVALID',
+      'roundingPolicy.calculationContext must be BASE_LIST_LINE_GROSS',
     );
-  }
-
-  const grossByLine = new Map<string, string>();
-  for (const a of input.explicitLineCommercialAmounts) {
-    if (!/^[0-9]+$/.test(a.grossMerchandiseMinor)) {
-      throw new DomainValidationError('INVALID_MONEY', 'grossMerchandiseMinor must be integer minor digits');
-    }
-    if (grossByLine.has(a.orderLineId)) {
-      throw new DomainValidationError('DUPLICATE_LINE_TERM', `Duplicate explicit gross for ${a.orderLineId}`);
-    }
-    grossByLine.set(a.orderLineId, a.grossMerchandiseMinor);
   }
 
   const c0 = input.resolvedLines[0]!;
   for (const line of input.resolvedLines) {
     if (line.currencyCode !== c0.currencyCode || line.minorUnitExponent !== c0.minorUnitExponent) {
       throw new DomainValidationError(
-        'ORDER_COMMERCIAL_CURRENCY_MISMATCH',
+        'COMMERCIAL_CURRENCY_MISMATCH',
         'Resolved lines must share one currency / minor exponent',
       );
     }
-    if (!grossByLine.has(line.orderLineId)) {
+    if (line.availabilityStatus !== 'AVAILABLE' || line.resolvedUnitPriceMinor == null) {
       throw new DomainValidationError(
-        'INCOMPLETE_LINE_TERMS',
-        `Missing explicit gross for order line ${line.orderLineId}`,
+        'COMMERCIAL_PRICE_UNAVAILABLE',
+        `Cannot calculate gross: line ${line.orderLineId} price/availability unavailable`,
       );
     }
   }
 
+  const lineTerms = input.resolvedLines.map((l) => {
+    const rounded = calculateRoundedLineGross({
+      unitMoney: createMoney(l.resolvedUnitPriceMinor!, l.currencyCode, l.minorUnitExponent),
+      quantity: l.quantity,
+      roundingPolicy: input.roundingPolicy,
+    });
+    return {
+      orderLineId: l.orderLineId,
+      resolvedUnitPriceMinor: l.resolvedUnitPriceMinor,
+      grossMerchandiseMinor: rounded.roundedGrossMoney.amountMinor,
+      lineMerchantFundedDiscountMinor: '0',
+      eligibleForOrderDiscount: true,
+      thirdPartyMerchandiseFundingMinor: '0',
+      taxMinor: null as string | null,
+      certainty: input.certainty ?? ('FINAL' as const),
+      exactUnroundedMinorBasis: rounded.exactUnroundedMinorBasis,
+      roundingDelta: rounded.roundingDelta,
+      roundingPolicyId: input.roundingPolicy.roundingPolicyId,
+      roundingPolicyVersion: input.roundingPolicy.policyVersion,
+      roundingMode: input.roundingPolicy.roundingMode,
+      quantumMinor: input.roundingPolicy.quantumMinor,
+      calculationContext: input.roundingPolicy.calculationContext,
+      provenance: {
+        source: 'C1_1_BASE_LIST_LINE_GROSS',
+        commercialGrossPolicy: 'BASE_LIST_LINE_GROSS_ROUNDED',
+        catalogItemId: l.catalogItemId,
+        quantity: l.quantity,
+        resolvedUnitPriceMinor: l.resolvedUnitPriceMinor,
+        menuPublicationId: l.menuPublicationId,
+        menuAssignmentId: l.menuAssignmentId,
+        priceRuleId: l.priceRuleId,
+        availabilityProvenance: l.availabilityProvenance,
+        salesContext: l.salesContextProvenance,
+        exactUnroundedMinorBasis: rounded.exactUnroundedMinorBasis,
+        roundingDelta: rounded.roundingDelta,
+      },
+    };
+  });
+
   const orderProvenance = {
-    source: 'MENU_RESOLVER_M1_1',
-    commercialGrossPolicy: 'EXPLICIT_GROSS_ONLY',
-    note: 'grossMerchandiseMinor supplied by caller; Menu does not compute unit×quantity',
+    source: 'C1_1_BASE_LIST_LINE_GROSS',
+    commercialGrossPolicy: 'BASE_LIST_LINE_GROSS_ROUNDED',
+    roundingPolicy: input.roundingPolicy,
     menuPublicationId: c0.menuPublicationId,
     menuAssignmentId: c0.menuAssignmentId,
     salesContext: c0.salesContextProvenance,
-    lines: input.resolvedLines.map((l) => ({
-      orderLineId: l.orderLineId,
-      catalogItemId: l.catalogItemId,
-      quantity: l.quantity,
-      resolvedUnitPriceMinor: l.resolvedUnitPriceMinor,
-      priceRuleId: l.priceRuleId,
-      availabilityProvenance: l.availabilityProvenance,
-      menuPublicationId: l.menuPublicationId,
-      menuAssignmentId: l.menuAssignmentId,
-    })),
   };
 
   return {
@@ -99,31 +121,10 @@ export function buildMenuResolvedCommercialTermsInput(input: BuildMenuResolvedCo
     taxMinor: input.taxMinor ?? null,
     tipMinor: input.tipMinor ?? null,
     nonMerchandiseChargesMinor: input.nonMerchandiseChargesMinor ?? null,
-    commercialResolution: 'menu-base-price-unit; gross explicit caller input',
+    commercialResolution: 'BASE_LIST_LINE_GROSS via ADR-0030 RoundingPolicy',
     provenance: orderProvenance,
     actorId: input.actorId,
     deviceId: input.deviceId,
-    lineTerms: input.resolvedLines.map((l) => ({
-      orderLineId: l.orderLineId,
-      resolvedUnitPriceMinor: l.resolvedUnitPriceMinor,
-      grossMerchandiseMinor: grossByLine.get(l.orderLineId)!,
-      lineMerchantFundedDiscountMinor: '0',
-      eligibleForOrderDiscount: true,
-      thirdPartyMerchandiseFundingMinor: '0',
-      taxMinor: null,
-      certainty: input.certainty ?? 'FINAL',
-      provenance: {
-        source: 'MENU_RESOLVER_M1_1',
-        commercialGrossPolicy: 'EXPLICIT_GROSS_ONLY',
-        catalogItemId: l.catalogItemId,
-        quantity: l.quantity,
-        resolvedUnitPriceMinor: l.resolvedUnitPriceMinor,
-        menuPublicationId: l.menuPublicationId,
-        menuAssignmentId: l.menuAssignmentId,
-        priceRuleId: l.priceRuleId,
-        availabilityProvenance: l.availabilityProvenance,
-        salesContext: l.salesContextProvenance,
-      },
-    })),
+    lineTerms,
   };
 }

@@ -12,7 +12,7 @@ import pg from 'pg';
 import { OperationalFactType } from '@millq/contracts';
 import { allocateOrderMerchantDiscount, parseCanonicalDecimal, toCanonicalDecimal } from '@millq/domain';
 import { runMigrations } from '../db/migrate.js';
-import { acceptFinalMerchandiseTerms } from '../test/commercial-terms.js';
+import { acceptFinalMerchandiseTerms, setOrderCommercialTermsWithRounding } from '../test/commercial-terms.js';
 import { seedBlockCFixture, type BlockCFixture } from '../test/seed.js';
 import { GoodsIssueService } from '../modules/inventory/goods-issue-service.js';
 import { OrdersService } from '../modules/orders/orders-service.js';
@@ -512,7 +512,7 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
 
       // Order discount 7 across eligible bases after line discounts
       // milk: 80000-5000=75000; drink: 120000; dough compliment basis 0 after 40000 disc
-      const accepted = await orders.setOrderCommercialTerms({
+      const accepted = await setOrderCommercialTermsWithRounding(orders, {
         orderId: order.orderId,
         idempotencyKey: 'golden-commercial-final',
         currencyCode: 'VND',
@@ -556,7 +556,7 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
       expect(Number(allocMilk) + Number(allocDrink)).toBe(7);
 
       // Semantic idempotent re-accept
-      const again = await orders.setOrderCommercialTerms({
+      const again = await setOrderCommercialTermsWithRounding(orders, {
         orderId: order.orderId,
         idempotencyKey: 'golden-commercial-final',
         currencyCode: 'VND',
@@ -1057,8 +1057,8 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
     });
   });
 
-  describe('VARIATION — Live Menu/Pricing (M1.1 OPTION A explicit gross)', () => {
-    it('MENU — publish/assign/price → unit resolve → explicitCommercialGrossMinor → freeze; later price does not rewrite', async () => {
+  describe('VARIATION — Live Menu/Pricing (M1.1 + C1.1 RoundingPolicy)', () => {
+    it('MENU — publish/assign/price → unit resolve → kernel gross → freeze; later price does not rewrite', async () => {
       await receiveMilk(5, '10000', DAY.PROCURE_1, 1);
 
       const menuSvc = new MenuService(pool);
@@ -1139,19 +1139,19 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
       });
       expect(resolvedLines.lines[0]!.resolvedUnitPriceMinor).toBe('100000');
 
-      // OPTION A — caller fixture supplies gross; M1.1 does not derive it from unit×qty
-      const explicitCommercialGrossMinor = '100000';
+      // C1.1 — kernel derives gross from unit × qty under RoundingPolicy
       await orders.setOrderCommercialTerms(
         buildMenuResolvedCommercialTermsInput({
           orderId: order.orderId,
           idempotencyKey: 'golden-menu-commercial',
           resolvedLines: resolvedLines.lines,
-          explicitLineCommercialAmounts: [
-            {
-              orderLineId: resolvedLines.lines[0]!.orderLineId,
-              grossMerchandiseMinor: explicitCommercialGrossMinor,
-            },
-          ],
+          roundingPolicy: {
+            roundingPolicyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            policyVersion: 1,
+            calculationContext: 'BASE_LIST_LINE_GROSS',
+            roundingMode: 'HALF_UP',
+            quantumMinor: '1',
+          },
         }),
       );
 
@@ -1176,9 +1176,9 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
          FROM sales_order_commercial_line_terms WHERE order_id = $1`,
         [order.orderId],
       );
-      expect(openTerms.rows[0]!.gross_merchandise_minor).toBe(explicitCommercialGrossMinor);
+      expect(openTerms.rows[0]!.gross_merchandise_minor).toBe('100000');
       expect(openTerms.rows[0]!.resolved_unit_price_minor).toBe('100000');
-      expect(JSON.stringify(openTerms.rows[0]!.provenance_json)).toContain('MENU_RESOLVER_M1_1');
+      expect(JSON.stringify(openTerms.rows[0]!.provenance_json)).toContain('C1_1_BASE_LIST_LINE_GROSS');
 
       await orders.completeOrder({
         orderId: order.orderId,
@@ -1214,7 +1214,7 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
         `SELECT provenance_json FROM order_commercial_snapshot WHERE order_id = $1`,
         [order.orderId],
       );
-      expect(JSON.stringify(snapProv.rows[0]!.provenance_json)).toContain('MENU_RESOLVER_M1_1');
+      expect(JSON.stringify(snapProv.rows[0]!.provenance_json)).toContain('C1_1_BASE_LIST_LINE_GROSS');
       expect(JSON.stringify(snapProv.rows[0]!.provenance_json)).toContain(pub.menuPublicationId);
     });
   });
@@ -1364,18 +1364,19 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
         orderId: order.orderId,
         salesContext,
       });
-      const explicitCommercialGrossMinor = '100000';
+      const kernelGross = '100000';
       await orders.setOrderCommercialTerms(
         buildMenuResolvedCommercialTermsInput({
           orderId: order.orderId,
           idempotencyKey: 'golden-pos-commercial',
           resolvedLines: resolvedLines.lines,
-          explicitLineCommercialAmounts: [
-            {
-              orderLineId: resolvedLines.lines[0]!.orderLineId,
-              grossMerchandiseMinor: explicitCommercialGrossMinor,
-            },
-          ],
+          roundingPolicy: {
+            roundingPolicyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            policyVersion: 1,
+            calculationContext: 'BASE_LIST_LINE_GROSS',
+            roundingMode: 'HALF_UP',
+            quantumMinor: '1',
+          },
         }),
       );
 
@@ -1602,9 +1603,13 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
           orderId: order.orderId,
           idempotencyKey: 'golden-p13-commercial-v1',
           resolvedLines: resolved1.lines,
-          explicitLineCommercialAmounts: [
-            { orderLineId: lineId, grossMerchandiseMinor: grossV1 },
-          ],
+          roundingPolicy: {
+            roundingPolicyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            policyVersion: 1,
+            calculationContext: 'BASE_LIST_LINE_GROSS',
+            roundingMode: 'HALF_UP',
+            quantumMinor: '1',
+          },
         }),
       );
       let commercial = await orders.getOpenCommercialStatus(order.orderId);
@@ -1639,9 +1644,13 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
           orderId: order.orderId,
           idempotencyKey: 'golden-p13-commercial-v2',
           resolvedLines: resolved2.lines,
-          explicitLineCommercialAmounts: [
-            { orderLineId: lineId, grossMerchandiseMinor: explicitGrossV2 },
-          ],
+          roundingPolicy: {
+            roundingPolicyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            policyVersion: 1,
+            calculationContext: 'BASE_LIST_LINE_GROSS',
+            roundingMode: 'HALF_UP',
+            quantumMinor: '1',
+          },
         }),
       );
 

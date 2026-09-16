@@ -148,6 +148,14 @@ export type CommercialLineCanonical = {
   readonly taxMinor: string | null;
   readonly certainty: CommercialCertainty;
   readonly fundingProvenance: string | null;
+  /** ADR-0030 / C1.1 — null only for legacy pre-C1.1 frozen rows. */
+  readonly exactUnroundedMinorBasis: string | null;
+  readonly roundingDelta: string | null;
+  readonly roundingPolicyId: string | null;
+  readonly roundingPolicyVersion: number | null;
+  readonly roundingMode: string | null;
+  readonly quantumMinor: string | null;
+  readonly calculationContext: string | null;
 };
 
 export type CommercialSnapshotCanonical = {
@@ -208,6 +216,13 @@ export function commercialSnapshotSemanticHash(input: CommercialSnapshotCanonica
       taxMinor: l.taxMinor,
       certainty: l.certainty,
       fundingProvenance: l.fundingProvenance,
+      exactUnroundedMinorBasis: l.exactUnroundedMinorBasis ?? null,
+      roundingDelta: l.roundingDelta ?? null,
+      roundingPolicyId: l.roundingPolicyId ?? null,
+      roundingPolicyVersion: l.roundingPolicyVersion ?? null,
+      roundingMode: l.roundingMode ?? null,
+      quantumMinor: l.quantumMinor ?? null,
+      calculationContext: l.calculationContext ?? null,
     })),
   };
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');

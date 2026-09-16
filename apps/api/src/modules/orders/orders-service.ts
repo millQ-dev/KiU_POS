@@ -435,6 +435,253 @@ export class OrdersService {
   }
 
   /**
+   * C1.1 — under Order row lock: re-read lines, resolve Menu+policy at business instant,
+   * calculate BASE_LIST_LINE_GROSS, optionally persist via SetOrderCommercialTerms path.
+   * Prevents TOCTOU between preview calculation and accept.
+   */
+  async calculateBaseCommercialTermsLocked(input: {
+    orderId: string;
+    salesContext: unknown;
+    menu: {
+      /** Injected unit-price resolution port (Orders does not own Menu configuration). */
+      resolveUnitPrices: (args: {
+        orderId: string;
+        salesContext: unknown;
+      }) => Promise<{
+      orderId: string;
+      lines: Array<{
+        orderLineId: string;
+        catalogItemId: string;
+        resolvedUnitPriceMinor: string | null;
+        currencyCode: string;
+        minorUnitExponent: number;
+        availabilityStatus: string;
+        menuPublicationId: string | null;
+        priceRuleId: string | null;
+      }>;
+    }>;
+    };
+    policies: {
+      resolveForOrder: (
+        client: Client | Pool,
+        orderId: string,
+        businessDateTime: string,
+      ) => Promise<{
+        roundingPolicyId: string;
+        policyVersion: number;
+        roundingMode: 'HALF_UP' | 'HALF_EVEN' | 'DOWN' | 'UP';
+        quantumMinor: string;
+        jurisdictionCode: string;
+      }>;
+    };
+    persist: boolean;
+    idempotencyKey?: string;
+    actorId?: string;
+    deviceId?: string;
+  }) {
+    const salesContext = input.salesContext as { businessDateTime?: string };
+    if (!salesContext?.businessDateTime) {
+      throw new DomainValidationError(
+        'COMMERCIAL_ROUNDING_POLICY_INVALID',
+        'salesContext.businessDateTime required for policy selection',
+      );
+    }
+
+    const { assembleBaseCommercialLineTerms } = await import(
+      '../commercial-rounding/base-commercial-acceptance.js'
+    );
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const order = await this.lockOrder(client, input.orderId);
+      if (order.status !== 'OPEN') {
+        throw new DomainValidationError(
+          'COMMERCIAL_TERMS_NOT_ACCEPTABLE',
+          'Only OPEN Orders can calculate base commercial terms',
+        );
+      }
+
+      const lockedLines = await this.loadLines(client, input.orderId);
+      const policy = await input.policies.resolveForOrder(
+        client,
+        input.orderId,
+        salesContext.businessDateTime,
+      );
+      const resolved = await input.menu.resolveUnitPrices({
+        orderId: input.orderId,
+        salesContext: input.salesContext,
+      });
+
+      // Re-check locked quantities still match resolved line set (mutation under lock would wait).
+      if (lockedLines.length !== resolved.lines.length) {
+        throw new DomainValidationError(
+          'COMMERCIAL_TERMS_STALE',
+          'Order lines changed during commercial calculation',
+        );
+      }
+      for (const rl of resolved.lines) {
+        const live = lockedLines.find((l) => l.order_line_id === rl.orderLineId);
+        if (!live) {
+          throw new DomainValidationError(
+            'COMMERCIAL_TERMS_STALE',
+            'Resolved line missing from locked Order',
+          );
+        }
+      }
+
+      const calculated = {
+        orderId: input.orderId,
+        ...assembleBaseCommercialLineTerms({
+          orderLines: lockedLines.map((l) => ({
+            orderLineId: l.order_line_id,
+            catalogItemId: l.catalog_item_id,
+            quantity: l.quantity,
+            unit: l.unit,
+            dimension: l.dimension,
+          })),
+          resolvedLines: resolved.lines,
+          policy,
+          businessDateTime: salesContext.businessDateTime,
+        }),
+      };
+
+      if (!input.persist) {
+        await client.query('COMMIT');
+        return { calculated, accepted: null as null };
+      }
+
+      if (!input.idempotencyKey) {
+        throw new DomainValidationError('VALIDATION', 'idempotencyKey required to accept');
+      }
+
+      const lineTerms = calculated.lines.map((l) => ({
+        orderLineId: l.orderLineId,
+        resolvedUnitPriceMinor: l.resolvedUnitPriceMinor,
+        grossMerchandiseMinor: l.grossMerchandiseMinor,
+        lineMerchantFundedDiscountMinor: '0',
+        eligibleForOrderDiscount: true,
+        thirdPartyMerchandiseFundingMinor: '0',
+        taxMinor: null as string | null,
+        certainty: 'FINAL' as const,
+        provenance: {
+          source: 'C1_1_BASE_LIST_LINE_GROSS',
+          commercialGrossPolicy: 'BASE_LIST_LINE_GROSS_ROUNDED',
+          catalogItemId: l.catalogItemId,
+          quantity: l.quantity,
+          unit: l.unit,
+          dimension: l.dimension,
+          resolvedUnitPriceMinor: l.resolvedUnitPriceMinor,
+          exactUnroundedMinorBasis: l.exactUnroundedMinorBasis,
+          roundingDelta: l.roundingDelta,
+          roundingPolicyId: l.roundingPolicyId,
+          roundingPolicyVersion: l.roundingPolicyVersion,
+          roundingMode: l.roundingMode,
+          quantumMinor: l.quantumMinor,
+          calculationContext: l.calculationContext,
+          menuPublicationId: l.menuPublicationId,
+          priceRuleId: l.priceRuleId,
+        },
+        exactUnroundedMinorBasis: l.exactUnroundedMinorBasis,
+        roundingDelta: l.roundingDelta,
+        roundingPolicyId: l.roundingPolicyId,
+        roundingPolicyVersion: l.roundingPolicyVersion,
+        roundingMode: l.roundingMode,
+        quantumMinor: l.quantumMinor,
+        calculationContext: l.calculationContext,
+      }));
+
+      const cmd = setOrderCommercialTermsSchema.parse({
+        orderId: input.orderId,
+        idempotencyKey: input.idempotencyKey,
+        currencyCode: calculated.currencyCode,
+        minorUnitExponent: calculated.minorUnitExponent,
+        certainty: 'FINAL',
+        orderMerchantFundedDiscountMinor: '0',
+        taxMinor: null,
+        tipMinor: null,
+        nonMerchandiseChargesMinor: null,
+        commercialResolution: 'BASE_LIST_LINE_GROSS via ADR-0030 RoundingPolicy',
+        provenance: {
+          source: 'C1_1_BASE_LIST_LINE_GROSS',
+          commercialGrossPolicy: 'BASE_LIST_LINE_GROSS_ROUNDED',
+          roundingPolicy: calculated.roundingPolicy,
+          businessDateTime: calculated.businessDateTime,
+          merchandiseGrossMinor: calculated.merchandiseGrossMinor,
+        },
+        ...(input.actorId ? { actorId: input.actorId } : {}),
+        ...(input.deviceId ? { deviceId: input.deviceId } : {}),
+        lineTerms,
+      });
+
+      // Still under same lock — build + persist without releasing.
+      const linesForBuild = lockedLines.map((l) => ({
+        order_line_id: l.order_line_id,
+        order_id: l.order_id,
+        line_number: l.line_number,
+        catalog_item_id: l.catalog_item_id,
+        quantity: l.quantity,
+      }));
+      const state = buildCommercialStateFromCommand(cmd, linesForBuild);
+
+      const prior = await client.query<{
+        idempotency_key: string;
+        semantic_fingerprint: string;
+      }>(`SELECT idempotency_key, semantic_fingerprint FROM sales_order_commercial_terms WHERE order_id = $1`, [
+        input.orderId,
+      ]);
+      const p = prior.rows[0];
+      if (p) {
+        if (p.idempotency_key === cmd.idempotencyKey && p.semantic_fingerprint === state.semanticFingerprint) {
+          await client.query('COMMIT');
+          return {
+            calculated,
+            accepted: {
+              status: 'duplicate' as const,
+              orderId: input.orderId,
+              certainty: state.certainty,
+              netMerchandiseSalesMinor: state.netMerchandiseSalesMinor,
+              semanticFingerprint: state.semanticFingerprint,
+            },
+          };
+        }
+        if (p.idempotency_key === cmd.idempotencyKey) {
+          throw new IdempotencyConflictError(
+            cmd.idempotencyKey,
+            'SetOrderCommercialTerms idempotency key already used with different commercial semantics',
+          );
+        }
+      }
+
+      await persistOpenCommercialTerms(client, {
+        orderId: input.orderId,
+        tenantId: order.tenant_id,
+        idempotencyKey: cmd.idempotencyKey,
+        actorId: cmd.actorId ?? null,
+        deviceId: cmd.deviceId ?? null,
+        state,
+      });
+      await client.query('COMMIT');
+      return {
+        calculated,
+        accepted: {
+          status: 'accepted' as const,
+          orderId: input.orderId,
+          certainty: state.certainty,
+          netMerchandiseSalesMinor: state.netMerchandiseSalesMinor,
+          semanticFingerprint: state.semanticFingerprint,
+          grossMerchandiseMinor: state.grossMerchandiseMinor,
+        },
+      };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Bind CatalogItem RecipeProfile → RecipeSpecification (ADR-0009 direction).
    * Item-level default only in D1.3A (product_variant_id remains NULL / reserved).
    */
@@ -1244,7 +1491,7 @@ export class OrdersService {
       acceptedGross += BigInt(l.gross_merchandise_minor);
     }
     const first = lines.rows[0];
-    const hasRounding = first?.rounding_policy_id != null;
+    const allHaveRounding = lines.rows.every((l) => l.rounding_policy_id != null);
     const provenance =
       h.provenance_json && typeof h.provenance_json === 'object'
         ? (h.provenance_json as Record<string, unknown>)
@@ -1259,10 +1506,10 @@ export class OrdersService {
       /** Authoritative merchandise gross = Σ accepted rounded line gross (no Order re-round). */
       acceptedGrossMerchandiseMinor: acceptedGross.toString(),
       merchandiseGrossMinor: acceptedGross.toString(),
-      commercialGrossPolicy: hasRounding
+      commercialGrossPolicy: allHaveRounding
         ? ('BASE_LIST_LINE_GROSS_ROUNDED' as const)
-        : ('EXPLICIT_GROSS_ONLY' as const),
-      roundingProvenance: hasRounding
+        : ('LEGACY_EXPLICIT_GROSS_READ_ONLY' as const),
+      roundingProvenance: allHaveRounding
         ? {
             roundingPolicyId: first!.rounding_policy_id,
             roundingPolicyVersion: first!.rounding_policy_version,

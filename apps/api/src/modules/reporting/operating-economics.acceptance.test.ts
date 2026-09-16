@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { runMigrations } from '../../db/migrate.js';
-import { acceptFinalMerchandiseTerms } from '../../test/commercial-terms.js';
+import { acceptFinalMerchandiseTerms, setOrderCommercialTermsWithRounding } from '../../test/commercial-terms.js';
 import { seedBlockCFixture, type BlockCFixture } from '../../test/seed.js';
 import { GoodsIssueService } from '../inventory/goods-issue-service.js';
 import { DomainValidationError } from '../orders/errors.js';
@@ -198,7 +198,7 @@ describe('Block D1.4D Food Cost Ratio & Operational Gross Profit (PostgreSQL)', 
 
   it('1-6 — FINAL Food Cost + OGP; ratio fraction; precision; GP subtraction', async () => {
     await receiveMilkStock(10, '10000');
-    const order = await openMilkOrder('3.5');
+    const order = await openMilkOrder('4');
     await completePriced(order.orderId, {
       idempotencyKey: 'oe-1',
       businessDate: '2026-03-10',
@@ -208,14 +208,14 @@ describe('Block D1.4D Food Cost Ratio & Operational Gross Profit (PostgreSQL)', 
 
     const r = await economics.compute(baseQuery({ orderId: order.orderId }));
     expect(r.revenue.revenueBasisMinor).toBe('100000');
-    expect(r.cogs.actualCogsMinor).toBe('35000');
+    expect(r.cogs.actualCogsMinor).toBe('40000');
     expect(r.foodCostRatioStatus).toBe('AVAILABLE');
-    expect(r.foodCostRatio).toBe('0.35');
+    expect(r.foodCostRatio).toBe('0.4');
     expect(r.foodCostRatioCertainty).toBe('FINAL');
     expect(r.operationalGrossProfitStatus).toBe('AVAILABLE');
-    expect(r.operationalGrossProfitMinor).toBe('65000');
+    expect(r.operationalGrossProfitMinor).toBe('60000');
     expect(r.operationalGrossProfitCertainty).toBe('FINAL');
-    expect(r.numeratorActualCogsMinor).toBe('35000');
+    expect(r.numeratorActualCogsMinor).toBe('40000');
     expect(r.denominatorRevenueBasisMinor).toBe('100000');
     // not inverse, not percent integer
     expect(r.foodCostRatio).not.toBe('2.85714286');
@@ -383,7 +383,7 @@ describe('Block D1.4D Food Cost Ratio & Operational Gross Profit (PostgreSQL)', 
     });
     const full = await orders.getOrder(order.orderId);
     const sorted = [...full.lines].sort((a, b) => a.lineNumber - b.lineNumber);
-    await orders.setOrderCommercialTerms({
+    await setOrderCommercialTermsWithRounding(orders, {
       orderId: order.orderId,
       idempotencyKey: 'oe-disc',
       currencyCode: 'VND',
@@ -414,7 +414,7 @@ describe('Block D1.4D Food Cost Ratio & Operational Gross Profit (PostgreSQL)', 
   it('14-17 — compliment: Food Cost UNAVAILABLE ZERO_REVENUE_BASIS; GP negative', async () => {
     await receiveMilkStock(10, '10000');
     const order = await openMilkOrder('1');
-    await orders.setOrderCommercialTerms({
+    await setOrderCommercialTermsWithRounding(orders, {
       orderId: order.orderId,
       idempotencyKey: 'oe-comp',
       currencyCode: 'VND',
@@ -449,7 +449,7 @@ describe('Block D1.4D Food Cost Ratio & Operational Gross Profit (PostgreSQL)', 
   it('18-22 — third-party funding; tax/tip/non-merch/customerPayable excluded from denominator', async () => {
     await receiveMilkStock(5, '10000');
     const order = await openMilkOrder('1');
-    await orders.setOrderCommercialTerms({
+    await setOrderCommercialTermsWithRounding(orders, {
       orderId: order.orderId,
       idempotencyKey: 'oe-3p',
       currencyCode: 'VND',
@@ -481,7 +481,7 @@ describe('Block D1.4D Food Cost Ratio & Operational Gross Profit (PostgreSQL)', 
   it('23-30 — UNKNOWN/UNRESOLVED unavailable; ESTIMATED numeric; known subtotals visible', async () => {
     await receiveMilkStock(5, '10000');
     const unkRev = await openMilkOrder('1');
-    await orders.setOrderCommercialTerms({
+    await setOrderCommercialTermsWithRounding(orders, {
       orderId: unkRev.orderId,
       idempotencyKey: 'oe-unk-r',
       currencyCode: 'VND',
@@ -728,7 +728,7 @@ describe('Block D1.4D Food Cost Ratio & Operational Gross Profit (PostgreSQL)', 
 
   it('44-55 — reversals: later, same-position, backdated; signed math; zero denominator', async () => {
     await receiveMilkStock(20, '10000');
-    const order = await openMilkOrder('3.5');
+    const order = await openMilkOrder('4');
     await completePriced(order.orderId, {
       idempotencyKey: 'oe-rev',
       businessDate: '2026-03-10',
@@ -737,8 +737,8 @@ describe('Block D1.4D Food Cost Ratio & Operational Gross Profit (PostgreSQL)', 
     });
 
     const saleDay = await economics.compute(baseQuery({ businessDate: '2026-03-10' }));
-    expect(saleDay.foodCostRatio).toBe('0.35');
-    expect(saleDay.operationalGrossProfitMinor).toBe('65000');
+    expect(saleDay.foodCostRatio).toBe('0.4');
+    expect(saleDay.operationalGrossProfitMinor).toBe('60000');
 
     await orders.reverseCompletedOrder({
       orderId: order.orderId,
@@ -751,9 +751,9 @@ describe('Block D1.4D Food Cost Ratio & Operational Gross Profit (PostgreSQL)', 
 
     const revDay = await economics.compute(baseQuery({ businessDate: '2026-03-15' }));
     expect(revDay.revenue.revenueBasisMinor).toBe('-100000');
-    expect(revDay.cogs.actualCogsMinor).toBe('-35000');
-    expect(revDay.foodCostRatio).toBe('0.35');
-    expect(revDay.operationalGrossProfitMinor).toBe('-65000');
+    expect(revDay.cogs.actualCogsMinor).toBe('-40000');
+    expect(revDay.foodCostRatio).toBe('0.4');
+    expect(revDay.operationalGrossProfitMinor).toBe('-60000');
 
     const both = await economics.compute(
       baseQuery({ businessDateFrom: '2026-03-10', businessDateTo: '2026-03-15' }),

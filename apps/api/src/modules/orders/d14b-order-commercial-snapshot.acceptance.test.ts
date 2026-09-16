@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import pg from 'pg';
 import { runMigrations } from '../../db/migrate.js';
-import { acceptFinalMerchandiseTerms } from '../../test/commercial-terms.js';
+import { acceptFinalMerchandiseTerms, setOrderCommercialTermsWithRounding } from '../../test/commercial-terms.js';
 import { seedBlockCFixture, type BlockCFixture } from '../../test/seed.js';
 import { GoodsIssueService } from '../inventory/goods-issue-service.js';
 import { DomainValidationError, IdempotencyConflictError, OrderImmutableError } from './errors.js';
@@ -158,7 +158,7 @@ describe('Block D1.4B Order Commercial Snapshot (PostgreSQL)', () => {
     });
     const full = await orders.getOrder(order.orderId);
     const [l1, l2] = full.lines;
-    await orders.setOrderCommercialTerms({
+    await setOrderCommercialTermsWithRounding(orders, {
       orderId: order.orderId,
       idempotencyKey: 'd14b-1',
       currencyCode: 'VND',
@@ -222,7 +222,7 @@ describe('Block D1.4B Order Commercial Snapshot (PostgreSQL)', () => {
     });
     const full = await orders.getOrder(order.orderId);
     const sorted = [...full.lines].sort((a, b) => a.lineNumber - b.lineNumber);
-    const accepted = await orders.setOrderCommercialTerms({
+    const accepted = await setOrderCommercialTermsWithRounding(orders, {
       orderId: order.orderId,
       idempotencyKey: 'd14b-alloc',
       currencyCode: 'VND',
@@ -249,7 +249,7 @@ describe('Block D1.4B Order Commercial Snapshot (PostgreSQL)', () => {
   it('11-12 — reject over-discount and zero-basis nonzero order discount', async () => {
     const o = await openMilkOrder('1');
     await expect(
-      orders.setOrderCommercialTerms({
+      setOrderCommercialTermsWithRounding(orders, {
         orderId: o.orderId,
         idempotencyKey: 'd14b-over',
         currencyCode: 'VND',
@@ -261,7 +261,7 @@ describe('Block D1.4B Order Commercial Snapshot (PostgreSQL)', () => {
     ).rejects.toBeInstanceOf(DomainValidationError);
 
     await expect(
-      orders.setOrderCommercialTerms({
+      setOrderCommercialTermsWithRounding(orders, {
         orderId: o.orderId,
         idempotencyKey: 'd14b-zerobase',
         currencyCode: 'VND',
@@ -282,7 +282,7 @@ describe('Block D1.4B Order Commercial Snapshot (PostgreSQL)', () => {
   it('13-14 — complimentary item Revenue 0 with real Actual COGS > 0', async () => {
     await receiveMilk(10, '10000');
     const o = await openMilkOrder('1');
-    await orders.setOrderCommercialTerms({
+    await setOrderCommercialTermsWithRounding(orders, {
       orderId: o.orderId,
       idempotencyKey: 'd14b-comp',
       currencyCode: 'VND',
@@ -316,7 +316,7 @@ describe('Block D1.4B Order Commercial Snapshot (PostgreSQL)', () => {
 
   it('15-16 — third-party funding preserves merchant Revenue Basis', async () => {
     const o = await openMilkOrder('1');
-    const accepted = await orders.setOrderCommercialTerms({
+    const accepted = await setOrderCommercialTermsWithRounding(orders, {
       orderId: o.orderId,
       idempotencyKey: 'd14b-3p',
       currencyCode: 'VND',
@@ -337,7 +337,7 @@ describe('Block D1.4B Order Commercial Snapshot (PostgreSQL)', () => {
 
   it('17-20 — tax/tip/non-merch/customerPayable excluded from Revenue Basis', async () => {
     const o = await openMilkOrder('1');
-    const accepted = await orders.setOrderCommercialTerms({
+    const accepted = await setOrderCommercialTermsWithRounding(orders, {
       orderId: o.orderId,
       idempotencyKey: 'd14b-tax',
       currencyCode: 'VND',
@@ -355,7 +355,7 @@ describe('Block D1.4B Order Commercial Snapshot (PostgreSQL)', () => {
   it('21 — one sales currency frozen on Order commercial snapshot', async () => {
     await receiveMilk(5, '10000');
     const o = await openMilkOrder('1');
-    await orders.setOrderCommercialTerms({
+    await setOrderCommercialTermsWithRounding(orders, {
       orderId: o.orderId,
       idempotencyKey: 'd14b-cur',
       currencyCode: 'VND',
@@ -376,7 +376,7 @@ describe('Block D1.4B Order Commercial Snapshot (PostgreSQL)', () => {
 
   it('24-28 — set-terms idempotency, reprice OPEN, reject after COMPLETE/CANCEL', async () => {
     const o = await openMilkOrder('1');
-    const a = await orders.setOrderCommercialTerms({
+    const a = await setOrderCommercialTermsWithRounding(orders, {
       orderId: o.orderId,
       idempotencyKey: 'same-key',
       currencyCode: 'VND',
@@ -384,7 +384,7 @@ describe('Block D1.4B Order Commercial Snapshot (PostgreSQL)', () => {
       certainty: 'FINAL',
       lineTerms: [{ orderLineId: o.lines[0]!.orderLineId, grossMerchandiseMinor: '100' }],
     });
-    const dup = await orders.setOrderCommercialTerms({
+    const dup = await setOrderCommercialTermsWithRounding(orders, {
       orderId: o.orderId,
       idempotencyKey: 'same-key',
       currencyCode: 'VND',
@@ -396,7 +396,7 @@ describe('Block D1.4B Order Commercial Snapshot (PostgreSQL)', () => {
     expect(dup.semanticFingerprint).toBe(a.semanticFingerprint);
 
     await expect(
-      orders.setOrderCommercialTerms({
+      setOrderCommercialTermsWithRounding(orders, {
         orderId: o.orderId,
         idempotencyKey: 'same-key',
         currencyCode: 'VND',
@@ -406,7 +406,7 @@ describe('Block D1.4B Order Commercial Snapshot (PostgreSQL)', () => {
       }),
     ).rejects.toBeInstanceOf(IdempotencyConflictError);
 
-    const reprice = await orders.setOrderCommercialTerms({
+    const reprice = await setOrderCommercialTermsWithRounding(orders, {
       orderId: o.orderId,
       idempotencyKey: 'new-key',
       currencyCode: 'VND',
@@ -426,7 +426,7 @@ describe('Block D1.4B Order Commercial Snapshot (PostgreSQL)', () => {
     });
     const before = await orders.getCommercialSnapshot(o.orderId);
     await expect(
-      orders.setOrderCommercialTerms({
+      setOrderCommercialTermsWithRounding(orders, {
         orderId: o.orderId,
         idempotencyKey: 'after-complete',
         currencyCode: 'VND',
@@ -441,7 +441,7 @@ describe('Block D1.4B Order Commercial Snapshot (PostgreSQL)', () => {
     const o2 = await openMilkOrder('1');
     await orders.cancelOrder({ orderId: o2.orderId, reason: 'guest left' });
     await expect(
-      orders.setOrderCommercialTerms({
+      setOrderCommercialTermsWithRounding(orders, {
         orderId: o2.orderId,
         idempotencyKey: 'after-cancel',
         currencyCode: 'VND',
@@ -464,7 +464,7 @@ describe('Block D1.4B Order Commercial Snapshot (PostgreSQL)', () => {
       }),
     ).rejects.toMatchObject({ code: 'COMMERCIAL_TERMS_REQUIRED' });
 
-    await orders.setOrderCommercialTerms({
+    await setOrderCommercialTermsWithRounding(orders, {
       orderId: o.orderId,
       idempotencyKey: 'unk',
       currencyCode: 'VND',
@@ -549,7 +549,7 @@ describe('Block D1.4B Order Commercial Snapshot (PostgreSQL)', () => {
     const a = await openMilkOrder('1');
     const b = await openMilkOrder('1');
     await expect(
-      orders.setOrderCommercialTerms({
+      setOrderCommercialTermsWithRounding(orders, {
         orderId: a.orderId,
         idempotencyKey: 'foreign',
         currencyCode: 'VND',

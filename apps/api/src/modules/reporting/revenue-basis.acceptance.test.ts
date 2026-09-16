@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { runMigrations } from '../../db/migrate.js';
-import { acceptFinalMerchandiseTerms } from '../../test/commercial-terms.js';
+import { acceptFinalMerchandiseTerms, setOrderCommercialTermsWithRounding } from '../../test/commercial-terms.js';
 import { seedBlockCFixture, type BlockCFixture } from '../../test/seed.js';
 import { GoodsIssueService } from '../inventory/goods-issue-service.js';
 import { DomainValidationError } from '../orders/errors.js';
@@ -219,7 +219,7 @@ describe('Block D1.4C Revenue Basis read model (PostgreSQL)', () => {
     });
     const full = await orders.getOrder(order2.orderId);
     const [l1, l2] = full.lines;
-    await orders.setOrderCommercialTerms({
+    await setOrderCommercialTermsWithRounding(orders, {
       orderId: order2.orderId,
       idempotencyKey: 'rev-multi',
       currencyCode: 'VND',
@@ -267,7 +267,7 @@ describe('Block D1.4C Revenue Basis read model (PostgreSQL)', () => {
     });
     const full = await orders.getOrder(order.orderId);
     const sorted = [...full.lines].sort((a, b) => a.lineNumber - b.lineNumber);
-    await orders.setOrderCommercialTerms({
+    await setOrderCommercialTermsWithRounding(orders, {
       orderId: order.orderId,
       idempotencyKey: 'rev-alloc',
       currencyCode: 'VND',
@@ -315,7 +315,7 @@ describe('Block D1.4C Revenue Basis read model (PostgreSQL)', () => {
   it('7-8 — complimentary FINAL zero ≠ UNKNOWN', async () => {
     await receiveMilkStock(10, '10000');
     const order = await openMilkOrder('1');
-    await orders.setOrderCommercialTerms({
+    await setOrderCommercialTermsWithRounding(orders, {
       orderId: order.orderId,
       idempotencyKey: 'rev-comp',
       currencyCode: 'VND',
@@ -350,7 +350,7 @@ describe('Block D1.4C Revenue Basis read model (PostgreSQL)', () => {
 
   it('9-13 — third-party funding; tax/tip/non-merch excluded; customerPayable differs', async () => {
     const order = await openMilkOrder('1');
-    await orders.setOrderCommercialTerms({
+    await setOrderCommercialTermsWithRounding(orders, {
       orderId: order.orderId,
       idempotencyKey: 'rev-3p',
       currencyCode: 'VND',
@@ -548,7 +548,7 @@ describe('Block D1.4C Revenue Basis read model (PostgreSQL)', () => {
   it('24-28 — UNKNOWN sale/reversal null; mixed aggregate; FINAL zero aggregate', async () => {
     await receiveMilkStock(5, '10000');
     const unk = await openMilkOrder('1');
-    await orders.setOrderCommercialTerms({
+    await setOrderCommercialTermsWithRounding(orders, {
       orderId: unk.orderId,
       idempotencyKey: 'rev-unk',
       currencyCode: 'VND',
@@ -846,7 +846,7 @@ describe('Block D1.4C Revenue Basis read model (PostgreSQL)', () => {
       dimension: 'VOLUME',
     });
     const full = await orders.getOrder(order.orderId);
-    await orders.setOrderCommercialTerms({
+    await setOrderCommercialTermsWithRounding(orders, {
       orderId: order.orderId,
       idempotencyKey: 'rev-sum',
       currencyCode: 'VND',

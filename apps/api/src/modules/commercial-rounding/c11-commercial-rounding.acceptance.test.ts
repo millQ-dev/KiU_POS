@@ -460,27 +460,25 @@ describe('C1.1 Orders automatic acceptance', () => {
       }),
     ).rejects.toMatchObject({ code: 'COMMERCIAL_ROUNDING_POLICY_REQUIRED' });
 
-    // OPTION A legacy path remains
+    // OPTION A bare explicit gross is rejected (ADR-0030 §29)
     const live = await orders.getOrder(order.orderId);
-    await orders.setOrderCommercialTerms({
-      orderId: order.orderId,
-      idempotencyKey: idem('legacy'),
-      currencyCode: 'VND',
-      minorUnitExponent: 0,
-      certainty: 'FINAL',
-      orderMerchantFundedDiscountMinor: '0',
-      lineTerms: [
-        {
-          orderLineId: live.lines[0]!.orderLineId,
-          resolvedUnitPriceMinor: '5000',
-          grossMerchandiseMinor: '5000',
-        },
-      ],
-    });
-    const status = await orders.getOpenCommercialStatus(order.orderId);
-    expect(status.commercialState).toBe('ACCEPTED');
-    expect(status.commercialGrossPolicy).toBe('EXPLICIT_GROSS_ONLY');
-    expect(status.lines[0]!.roundingPolicyId).toBeNull();
+    await expect(
+      orders.setOrderCommercialTerms({
+        orderId: order.orderId,
+        idempotencyKey: idem('legacy'),
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        certainty: 'FINAL',
+        orderMerchantFundedDiscountMinor: '0',
+        lineTerms: [
+          {
+            orderLineId: live.lines[0]!.orderLineId,
+            resolvedUnitPriceMinor: '5000',
+            grossMerchandiseMinor: '5000',
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'COMMERCIAL_ROUNDING_POLICY_REQUIRED' });
   });
 
   it('46–49 — CompleteOrder freezes; later policy does not mutate; reversal leaves frozen facts', async () => {
