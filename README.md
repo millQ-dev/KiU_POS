@@ -52,7 +52,10 @@ pnpm dev
 ```
 
 - API health: http://localhost:3000/health
-- Web shell: http://localhost:5173
+- Web KiU cashier shell: http://localhost:5173
+- First load uses **development outlet bootstrap** (`GET /api/v1/dev/cashier-contexts`) — not production authorization. Seed local DB (acceptance fixtures or manual) so outlets exist, then select an outlet.
+
+Cashier flow (P1.2): load ResolvedPosSurface → pages / Quick Access → New Order → tap ACTIVE **COUNT** item → `selectPosCountTap` → basket updates. MASS/VOLUME quantity entry is deferred (P1.3). No pay / commercial accept / tables.
 
 ## Commands
 

@@ -1,37 +1,33 @@
 # MillQ Current State
 
-**Checkpoint:** P1.1 POS Presentation Runtime & First Cashier Surface — **CURRENT**
+**Checkpoint:** P1.2 First KiU Cashier Frontend Shell — **CURRENT**
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)
 **Backup host:** GitHub `https://github.com/millQ-dev/MillQ.git` (mirror only)
-**Baseline:** Origin/GitHub main @ `862bdc633a43803067f19d2d215ba4d5d0316342`
-**ADR-0031:** **ACCEPTED** @ `862bdc6…`
-**ADR-0029:** **ACCEPTED**
-**M1.1:** **DONE**
+**Baseline:** Origin/GitHub main @ `f9b728e6731b9269bcdbcf9e5f32448811246814`
+**P1.1:** **DONE** @ `f9b728e…` (PR #45)
+**ADR-0031 / ADR-0029:** **ACCEPTED**
 **Updated:** 2026-09-16
 
 ## Runtime / CI / backup
 
 | Item | State |
 | --- | --- |
-| D1.4A–D1.4D economic vertical | **DONE** |
-| GOLDEN-1 Golden Restaurant Scenario | **DONE** — Live Menu/Pricing **PASS**; Live POS selection **PASS** (this PR) |
-| ADR-0029 Menu Publication / Availability / Base Pricing | **ACCEPTED** |
+| GOLDEN-1 | **DONE** — Live Menu/Pricing **PASS**; Live POS selection **PASS** |
 | M1.1 Menu Configuration & Resolution Runtime | **DONE** |
-| ADR-0031 POS Presentation, Layout Publication & Cashier Surface | **ACCEPTED** @ `862bdc6…` |
-| P1.1 POS Presentation Runtime + first cashier surface | **CURRENT** — backend/read surface; React cashier shell **DEFERRED P1.2** |
-| Promotions / Loyalty / Channel Menu / stock stop-list | **STOP** — not started |
-| COMMERCIAL ROUNDING POLICY (unit Money × fractional qty → official Money) | **DEFERRED Level C** — **ADR-0030 reserved, NOT created** |
+| P1.1 POS Presentation Runtime | **DONE** @ `f9b728e…` |
+| P1.2 First KiU Cashier Frontend Shell | **CURRENT** |
+| Identity / production session auth | **ABSENT** — P1.2 uses explicit **dev cashier bootstrap** only (not production authorization) |
+| COMMERCIAL ROUNDING POLICY (unit Money × fractional qty) | **DEFERRED Level C** — **ADR-0030 reserved, NOT created** |
+| Promotions / Loyalty / Floor/Table / Payments / Fiscalization | **STOP** — not started |
 
-## This PR (P1.1)
+## This PR (P1.2)
 
-- Migration `016_pos_presentation_layout.sql`
-- LayoutDefinition / immutable LayoutPublication / MenuPage / MenuSlot / Quick Access ≤10
-- LayoutAssignment (Tenant → Brand → Outlet); LegalEntity excluded; Terminal* DEFERRED
-- LayoutResolver + PosSurfaceResolver (∩ M1.1 MenuResolver)
-- PosSelectionService → existing AddOrderLine; tableless OPEN Order basket
-- OPTION A preserved (no unit×qty official Money)
-- Frontend: `apps/web` is health-only → **React cashier renderer = DEFERRED P1.2**
+- Thin HTTP transport for ResolvedPosSurface, selectPosCountTap, OpenOrder, get Order
+- React/Vite cashier shell at `/` (cashier primary); consumes P1.1 contracts only
+- COUNT one-tap add; MASS/VOLUME quantity entry **DEFERRED** (P1.3)
+- No SetOrderCommercialTerms / CompleteOrder / Payment on tap
+- No Floor/Table UI; no package forks; OPTION A preserved
 
 ## Next
 
-Independent review → merge → backup → **P1.2 First KiU Cashier Frontend Shell**
+Independent review → merge → backup → **P1.3 Cashier Order Interaction UX**

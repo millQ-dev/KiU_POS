@@ -143,3 +143,25 @@ export const selectPosItemSchema = z
   })
   .strict();
 export type SelectPosItemInput = z.infer<typeof selectPosItemSchema>;
+
+/** P1.2 COUNT one-tap — quantity/unit derived from Catalog; MASS/VOLUME rejected. */
+export const selectPosCountTapSchema = z
+  .object({
+    orderId: uuid,
+    layoutPublicationSlotId: uuid,
+    presentationContext: presentationContextSchema,
+    salesContext: z
+      .object({
+        tenantId: uuid,
+        brandId: uuid,
+        outletId: uuid,
+        terminalGroupId: uuid.nullable().optional(),
+        terminalId: uuid.nullable().optional(),
+        serviceMode: z.string().min(1).nullable().optional(),
+        orderChannel: z.string().min(1),
+        businessDateTime: isoInstant,
+      })
+      .strict(),
+  })
+  .strict();
+export type SelectPosCountTapInput = z.infer<typeof selectPosCountTapSchema>;

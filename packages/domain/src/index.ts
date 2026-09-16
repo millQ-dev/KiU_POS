@@ -3,6 +3,7 @@ export { Decimal, parseCanonicalDecimal, toCanonicalDecimal } from './decimal.js
 export {
   createMoney,
   addMoney,
+  formatMoneyDisplay,
   assertSameCurrency,
   moneyToCanonicalString,
   type Money,

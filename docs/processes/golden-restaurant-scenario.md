@@ -45,6 +45,7 @@
 | Historical Revenue/COGS/FC/OGP stable after later PriceRule/Publication | PASS |
 | POS Presentation / live cashier selection (Layout ∩ Menu → AddOrderLine) | PASS |
 | Historical economics stable after LayoutPublication v2 | PASS |
+| First React KiU cashier shell (consumes P1.1 HTTP contracts) | PASS |
 
 ## DEFERRED / EXPECTED STOP
 
@@ -58,7 +59,7 @@
 | Contribution Margin / channel fees | ADR-0019 future ladder |
 | Explainable Intelligence | Intelligence reads proven evidence only |
 | TOTAL_LOSS on main sale path | Keep on D1.2B suite (not main economic day) |
-| POS Presentation / MenuLayout runtime | **PASS** in P1.1 (backend/read); React cashier shell → **P1.2** |
+| React cashier shell / Order Interaction UX | **PASS** shell in P1.2; Order Interaction UX → **P1.3** |
 | Floor/Table runtime | DEFERRED — P1.1 proves tableless POS without Floor/Table |
 | Commercial RoundingPolicy (unit Money × fractional qty) | DEFERRED Level C — **ADR-0030 reserved, NOT created** |
 
