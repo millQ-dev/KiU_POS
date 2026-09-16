@@ -814,7 +814,12 @@ describe('Block D1.4C Revenue Basis read model (PostgreSQL)', () => {
     const after = await revenue.aggregateByLine(baseQuery({ orderId: order.orderId }));
     expect(after).toEqual(before);
     expect(cogs.foodCostRatioUnavailable).toBeDefined();
-    expect(() => cogs.foodCostRatioUnavailable()).toThrow(DomainValidationError);
+    try {
+      cogs.foodCostRatioUnavailable();
+      expect.unreachable('should throw');
+    } catch (e) {
+      expect((e as DomainValidationError).code).toBe('FOOD_COST_RATIO_USE_OPERATING_ECONOMICS');
+    }
   });
 
   it('48-49 — reversal drill-down; line FINAL sums equal order Revenue Basis', async () => {

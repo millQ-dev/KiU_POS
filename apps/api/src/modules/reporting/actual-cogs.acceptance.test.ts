@@ -1053,13 +1053,13 @@ describe('Block D1.4A Actual COGS read model (PostgreSQL)', () => {
     }
   });
 
-  it('41 — foodCostRatioUnavailable throws FOOD_COST_RATIO_UNAVAILABLE', () => {
+  it('41 — foodCostRatioUnavailable redirects to OperatingEconomics (D1.4D)', () => {
     expect(() => cogs.foodCostRatioUnavailable()).toThrow(DomainValidationError);
     try {
       cogs.foodCostRatioUnavailable();
     } catch (e) {
       expect(e).toBeInstanceOf(DomainValidationError);
-      expect((e as DomainValidationError).code).toBe('FOOD_COST_RATIO_UNAVAILABLE');
+      expect((e as DomainValidationError).code).toBe('FOOD_COST_RATIO_USE_OPERATING_ECONOMICS');
     }
   });
 });
