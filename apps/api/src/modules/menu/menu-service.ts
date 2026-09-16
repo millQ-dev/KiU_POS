@@ -52,8 +52,8 @@ function assertScopeIds(
       throw new DomainValidationError('INVALID_SALES_CONTEXT', 'BRAND scope requires brandId only');
     }
   } else if (scopeKind === 'OUTLET') {
-    if (!outletId) {
-      throw new DomainValidationError('INVALID_SALES_CONTEXT', 'OUTLET scope requires outletId');
+    if (!outletId || brandId) {
+      throw new DomainValidationError('INVALID_SALES_CONTEXT', 'OUTLET scope requires outletId only');
     }
   }
 }

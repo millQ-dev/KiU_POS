@@ -1022,6 +1022,23 @@ describe('M1.1 Menu Configuration & Resolution Runtime', () => {
     });
   });
 
+  it('OUTLET scope rejects stray brandId', async () => {
+    await expect(
+      menu.activatePriceRule({
+        tenantId: fx.tenantId,
+        catalogItemId: fx.milkItemId,
+        scopeKind: 'OUTLET',
+        outletId: fx.outletId,
+        brandId: fx.brandId,
+        amountMinor: '10000',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+        idempotencyKey: idem('outlet-brand'),
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_SALES_CONTEXT' });
+  });
+
   it('concurrency — overlapping assignment activation rejects', async () => {
     const { pub } = await publishDefault([fx.milkItemId]);
     const a = menu.assignMenu({

@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS menu_assignment (
   CONSTRAINT menu_assignment_scope_chk CHECK (
     (scope_kind = 'TENANT' AND brand_id IS NULL AND outlet_id IS NULL)
     OR (scope_kind = 'BRAND' AND brand_id IS NOT NULL AND outlet_id IS NULL)
-    OR (scope_kind = 'OUTLET' AND outlet_id IS NOT NULL)
+    OR (scope_kind = 'OUTLET' AND outlet_id IS NOT NULL AND brand_id IS NULL)
   ),
   CONSTRAINT menu_assignment_interval_chk CHECK (
     effective_to IS NULL OR effective_to > effective_from
@@ -196,7 +196,7 @@ CREATE TABLE IF NOT EXISTS availability_rule (
   CONSTRAINT availability_rule_scope_chk CHECK (
     (scope_kind = 'TENANT' AND brand_id IS NULL AND outlet_id IS NULL)
     OR (scope_kind = 'BRAND' AND brand_id IS NOT NULL AND outlet_id IS NULL)
-    OR (scope_kind = 'OUTLET' AND outlet_id IS NOT NULL)
+    OR (scope_kind = 'OUTLET' AND outlet_id IS NOT NULL AND brand_id IS NULL)
   ),
   CONSTRAINT availability_rule_interval_chk CHECK (
     effective_to IS NULL OR effective_to > effective_from
@@ -242,7 +242,7 @@ CREATE TABLE IF NOT EXISTS price_rule (
   CONSTRAINT price_rule_scope_chk CHECK (
     (scope_kind = 'TENANT' AND brand_id IS NULL AND outlet_id IS NULL)
     OR (scope_kind = 'BRAND' AND brand_id IS NOT NULL AND outlet_id IS NULL)
-    OR (scope_kind = 'OUTLET' AND outlet_id IS NOT NULL)
+    OR (scope_kind = 'OUTLET' AND outlet_id IS NOT NULL AND brand_id IS NULL)
   ),
   CONSTRAINT price_rule_interval_chk CHECK (
     effective_to IS NULL OR effective_to > effective_from
