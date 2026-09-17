@@ -2,7 +2,8 @@
 
 **Status:** DO NOT MERGE — stop for independent review
 **Branch:** `feature/p0-counter-service`
-**Head:** `HEAD_SHA`
+**Implementation commit:** `349da90`
+**Review branch tip:** see the final branch SHA in the handoff response
 **Base:** Cursor Origin `main` at `1390758`
 **GitHub backup:** `feature/p0-counter-service` on `millQ-dev/KiU_POS`
 
