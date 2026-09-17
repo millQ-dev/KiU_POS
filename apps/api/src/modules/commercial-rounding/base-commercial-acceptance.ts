@@ -88,6 +88,10 @@ export function assembleBaseCommercialLineTerms(input: {
     unit: string;
     dimension: string;
     modifierPriceDeltaMinor?: string;
+    modifierSnapshots?: ReadonlyArray<{
+      currencyCode: string;
+      minorUnitExponent: number;
+    }>;
   }>;
   resolvedLines: ReadonlyArray<{
     orderLineId: string;
@@ -144,6 +148,18 @@ export function assembleBaseCommercialLineTerms(input: {
         'FOREIGN_ORDER_LINE',
         `Resolved line ${line.orderLineId} missing from Order`,
       );
+    }
+
+    for (const modifier of orderLine.modifierSnapshots ?? []) {
+      if (
+        modifier.currencyCode !== line.currencyCode ||
+        modifier.minorUnitExponent !== line.minorUnitExponent
+      ) {
+        throw new DomainValidationError(
+          'MODIFIER_CURRENCY_MISMATCH',
+          `Modifier currency/exponent does not match authoritative item price for line ${line.orderLineId}`,
+        );
+      }
     }
 
     const modifierPriceDeltaMinor = BigInt(orderLine.modifierPriceDeltaMinor ?? '0');

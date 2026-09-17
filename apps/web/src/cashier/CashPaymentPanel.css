@@ -14,4 +14,11 @@
 .pos-cash-payment dt { color: var(--pos-text-muted); }
 .pos-cash-payment dd { margin: 0; font-weight: 800; font-variant-numeric: tabular-nums; }
 .pos-cash-payment__receipt { margin-top: 14px; border-top: 1px solid var(--pos-border); padding-top: 10px; }
-.pos-cash-payment__receipt pre { max-height: 180px; overflow: auto; margin: 10px 0 0; font-size: 10px; white-space: pre-wrap; }
+.pos-cash-payment__receipt-body { margin-top: 10px; padding: 10px; border: 1px solid var(--pos-border); background: var(--pos-surface); }
+.pos-cash-payment__receipt-meta, .pos-cash-payment__receipt-lines li > div, .pos-cash-payment__receipt-total div { display: flex; justify-content: space-between; gap: 12px; }
+.pos-cash-payment__receipt-meta { color: var(--pos-text-muted); font-size: 11px; }
+.pos-cash-payment__receipt-lines { display: grid; gap: 8px; margin: 12px 0; padding: 0; list-style: none; }
+.pos-cash-payment__receipt-lines li { padding-bottom: 8px; border-bottom: 1px solid var(--pos-border); }
+.pos-cash-payment__receipt-lines small { display: block; margin-top: 3px; color: var(--pos-text-muted); }
+.pos-cash-payment__receipt-total { display: grid; gap: 4px; margin: 0; font-variant-numeric: tabular-nums; }
+.pos-cash-payment__receipt-total dd { margin: 0; font-weight: 800; }

@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import type { ModifierGroup, ResolvedPosSlot } from '../api/types.js';
 import { formatMoneyDisplay } from '../money/formatMoneyDisplay.js';
+import { posCopy } from './posCopy.js';
 import './ModifierSelectionModal.css';
 
 type Props = {
@@ -22,6 +23,7 @@ function initialSelections(groups: ModifierGroup[]) {
 }
 
 export function ModifierSelectionModal({ slot, busy, onConfirm, onCancel }: Props) {
+  const language = 'en' as const;
   const titleId = useId();
   const groups = slot.modifierGroups ?? [];
   const [selected, setSelected] = useState<Record<string, string[]>>(() => initialSelections(groups));
@@ -55,7 +57,7 @@ export function ModifierSelectionModal({ slot, busy, onConfirm, onCancel }: Prop
 
   const submit = () => {
     if (!canSubmit) {
-      setError('Choose the required options before adding the item.');
+      setError(posCopy(language, 'chooseRequired'));
       return;
     }
     onConfirm(Object.entries(selected).map(([groupId, optionIds]) => ({ groupId, optionIds })));
@@ -66,10 +68,10 @@ export function ModifierSelectionModal({ slot, busy, onConfirm, onCancel }: Prop
       <div className="pos-modifiers__panel">
         <header className="pos-modifiers__header">
           <div>
-            <p className="pos-modifiers__eyebrow">Customize item</p>
+            <p className="pos-modifiers__eyebrow">{posCopy(language, 'customizeItem')}</p>
             <h2 id={titleId}>{slot.displayLabel}</h2>
           </div>
-          <button type="button" className="pos-modifiers__close" onClick={onCancel} disabled={busy} aria-label="Close">
+          <button type="button" className="pos-modifiers__close" onClick={onCancel} disabled={busy} aria-label={posCopy(language, 'close')}>
             ×
           </button>
         </header>
@@ -78,7 +80,7 @@ export function ModifierSelectionModal({ slot, busy, onConfirm, onCancel }: Prop
             <fieldset key={group.modifierGroupId} className="pos-modifiers__group">
               <legend>
                 {group.label}
-                <span>{group.minSelections > 0 ? 'Required' : 'Optional'}</span>
+                <span>{group.minSelections > 0 ? posCopy(language, 'required') : posCopy(language, 'optional')}</span>
               </legend>
               <div className="pos-modifiers__options">
                 {group.options.filter((option) => option.active).map((option) => {
@@ -105,8 +107,8 @@ export function ModifierSelectionModal({ slot, busy, onConfirm, onCancel }: Prop
           {error && <p className="pos-modifiers__error" role="alert">{error}</p>}
         </div>
         <footer className="pos-modifiers__actions">
-          <button type="button" className="pos-modifiers__button" onClick={onCancel} disabled={busy}>Cancel</button>
-          <button type="button" className="pos-modifiers__button pos-modifiers__button--primary" onClick={submit} disabled={busy}>Add to order</button>
+          <button type="button" className="pos-modifiers__button" onClick={onCancel} disabled={busy}>{posCopy(language, 'cancel')}</button>
+          <button type="button" className="pos-modifiers__button pos-modifiers__button--primary" onClick={submit} disabled={busy}>{posCopy(language, 'addToOrder')}</button>
         </footer>
       </div>
     </div>

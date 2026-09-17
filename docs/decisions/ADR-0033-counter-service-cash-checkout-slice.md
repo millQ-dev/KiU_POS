@@ -104,7 +104,14 @@ deferred.
 
 ### 5. Cash checkout and Settlement
 
-The checkout path uses the ADR-0032 boundary:
+The checkout path uses the ADR-0032 boundary and the canonical PAY1.1
+PaymentsService. ADR-0033 does not define a second Payment, TenderDefinition,
+PaymentAllocation, or Settlement runtime. Cash checkout asks PaymentsService
+to create the Payment, records verified system cash evidence, lets the service
+create the PaymentAllocation, and then uses Settlement reconciliation to derive
+the authoritative check/group state.
+
+The checkout path is:
 
 ```text
 accepted Order
@@ -125,6 +132,20 @@ The first slice supports one full Check and one cash tender. It records:
 - payment status;
 - CashShift reference;
 - idempotency evidence.
+
+This slice implements cash change now. `cash tendered = customer payable +
+change` is recorded as cash-shift evidence while the canonical Payment amount
+and Allocation amount remain the Customer Payable.
+
+When coverage satisfies the Settlement:
+
+- Payment lifecycle is `SUCCEEDED` (product language: `PAID`);
+- Settlement Check/Group is `SATISFIED`;
+- Order becomes `SUBMITTED`, never `COMPLETED`.
+
+The future `SUBMITTED → COMPLETED` transition remains the fulfillment and
+inventory boundary. It belongs to production hand-off / fulfillment and
+`CompleteOrder`, rather than to payment success.
 
 Split, mixed tenders, QR, provider callbacks, reconciliation, cash
 denomination rounding, tips, tax, and fiscal adapters are outside this slice.

@@ -241,6 +241,43 @@ export class PaymentsService {
     return res.rows[0] ? mapTender(res.rows[0]) : null;
   }
 
+  /**
+   * Resolve a configured tender through the canonical Payments boundary.
+   * Cash checkout uses this instead of writing TenderDefinition directly.
+   */
+  async ensureTenderDefinition(input: {
+    tenantId: string;
+    legalEntityId: string;
+    code: string;
+    displayName: string;
+    providerIdentity?: string | null;
+    railIdentity?: string | null;
+    instrumentFamily?: string | null;
+    presentationCapability?: string | null;
+  }): Promise<TenderDefinitionRow> {
+    const existing = await this.pool.query<TenderDb>(
+      `SELECT * FROM tender_definition
+       WHERE tenant_id = $1 AND legal_entity_id = $2 AND code = $3`,
+      [input.tenantId, input.legalEntityId, input.code],
+    );
+    if (existing.rows[0]) return mapTender(existing.rows[0]);
+
+    try {
+      return await this.createTenderDefinition(input);
+    } catch (err) {
+      if (!(err instanceof DomainValidationError) || err.code !== 'IDEMPOTENCY_CONFLICT') {
+        throw err;
+      }
+      const raced = await this.pool.query<TenderDb>(
+        `SELECT * FROM tender_definition
+         WHERE tenant_id = $1 AND legal_entity_id = $2 AND code = $3`,
+        [input.tenantId, input.legalEntityId, input.code],
+      );
+      if (!raced.rows[0]) throw err;
+      return mapTender(raced.rows[0]);
+    }
+  }
+
   async setTenderEnabled(tenderDefinitionId: string, enabled: boolean): Promise<TenderDefinitionRow> {
     const res = await this.pool.query<TenderDb>(
       `UPDATE tender_definition SET enabled = $2 WHERE tender_definition_id = $1 RETURNING *`,

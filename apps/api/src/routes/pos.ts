@@ -89,7 +89,6 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
   const selection = new PosSelectionService(pool, orders);
   const menuResolver = new MenuResolver(pool);
   const baseCommercial = new BaseCommercialAcceptanceService(pool, orders);
-  const cashCheckout = new CashCheckoutService(pool, orders);
 
   app.post('/api/v1/pos/surface/resolve', async (req, reply) => {
     try {
@@ -320,6 +319,7 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
         externalEffects: paymentsSvc.createExternalEffectProbe(),
       }),
   );
+  const cashCheckout = new CashCheckoutService(pool, orders, payments, settlements);
   await registerPaymentRoutes(app, payments);
   await registerDevPaymentSimulatorRoutes(app, payments);
   const checkout = new CheckoutOrchestrator(pool, orders, settlements);

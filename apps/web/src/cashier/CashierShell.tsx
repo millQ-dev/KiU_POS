@@ -18,6 +18,7 @@ import { ProductGrid } from './ProductGrid.js';
 import { QuantityEntryModal } from './QuantityEntryModal.js';
 import { ModifierSelectionModal } from './ModifierSelectionModal.js';
 import { QuickAccess } from './QuickAccess.js';
+import { posCopy } from './posCopy.js';
 import './CashierShell.css';
 
 function nowIso(): string {
@@ -464,8 +465,10 @@ export function CashierShell({ context, onChangeContext }: Props) {
         });
         setCashResult(result);
         applyOrder(result.order, null);
-        setSettlement(settlement);
-        setFeedback('Cash accepted. Order submitted; production tasks created.');
+        const authoritative = await posApi.getLiveSettlement(result.order.orderId);
+        if (!authoritative.settlement) throw new Error('Settlement state could not be reloaded after cash payment');
+        setSettlement(authoritative.settlement);
+        setFeedback(posCopy('en', 'cashSuccessFeedback'));
       } catch (err) {
         await handleMutationError(err, order.orderId);
       }

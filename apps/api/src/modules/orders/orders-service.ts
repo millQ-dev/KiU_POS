@@ -537,6 +537,7 @@ export class OrdersService {
       await this.assertNoLiveSettlement(client, input.orderId);
 
       const lockedLines = await this.loadLines(client, input.orderId);
+      const modifierSnapshotsByLine = await this.loadLineModifiers(client, input.orderId);
       const policy = await input.policies.resolveForOrder(
         client,
         input.orderId,
@@ -574,6 +575,10 @@ export class OrdersService {
             unit: l.unit,
             dimension: l.dimension,
             modifierPriceDeltaMinor: l.modifier_price_delta_minor,
+            modifierSnapshots: (modifierSnapshotsByLine.get(l.order_line_id) ?? []).map((modifier) => ({
+              currencyCode: String(modifier.currencyCode),
+              minorUnitExponent: Number(modifier.minorUnitExponent),
+            })),
           })),
           resolvedLines: resolved.lines,
           policy,

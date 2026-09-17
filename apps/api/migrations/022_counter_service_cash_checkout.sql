@@ -68,7 +68,7 @@ CREATE INDEX IF NOT EXISTS idx_order_line_modifier_line
   ON sales_order_line_modifier (order_line_id, position);
 
 -- ---------------------------------------------------------------------------
--- CashShift, Settlement, Payment, and receipt source records
+-- CashShift, command idempotency, and receipt source records
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS cash_shift (
   cash_shift_id UUID PRIMARY KEY,
@@ -90,58 +90,27 @@ CREATE TABLE IF NOT EXISTS cash_shift (
 CREATE INDEX IF NOT EXISTS idx_cash_shift_outlet_status
   ON cash_shift (outlet_id, status, opened_at DESC);
 
-CREATE TABLE IF NOT EXISTS tender_definition (
-  tender_definition_id UUID PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS cash_checkout_idempotency (
+  cash_checkout_idempotency_id UUID PRIMARY KEY,
   tenant_id UUID NOT NULL REFERENCES tenant (tenant_id),
   legal_entity_id UUID NOT NULL REFERENCES legal_entity (legal_entity_id),
-  code TEXT NOT NULL,
-  display_name TEXT NOT NULL,
-  enabled BOOLEAN NOT NULL DEFAULT TRUE,
-  provider_identity TEXT,
-  rail_identity TEXT,
-  instrument_family TEXT,
-  presentation_capability TEXT,
-  external_config_ref TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (tenant_id, legal_entity_id, code)
-);
-
-CREATE TABLE IF NOT EXISTS payment (
-  payment_id UUID PRIMARY KEY,
-  tenant_id UUID NOT NULL REFERENCES tenant (tenant_id),
-  legal_entity_id UUID NOT NULL REFERENCES legal_entity (legal_entity_id),
-  tender_definition_id UUID NOT NULL REFERENCES tender_definition (tender_definition_id),
-  currency_code TEXT NOT NULL,
-  minor_unit_exponent INTEGER NOT NULL CHECK (minor_unit_exponent BETWEEN 0 AND 4),
-  requested_amount_minor TEXT NOT NULL,
-  lifecycle_state TEXT NOT NULL CHECK (lifecycle_state IN ('INITIATED', 'PENDING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'EXPIRED', 'UNKNOWN')),
-  create_idempotency_key TEXT NOT NULL,
-  merchant_payment_reference TEXT NOT NULL,
-  provider_transaction_reference TEXT,
-  reconciliation_state TEXT NOT NULL DEFAULT 'NONE' CHECK (reconciliation_state IN ('NONE', 'AWAITING', 'RECONCILED', 'QUARANTINED')),
-  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (legal_entity_id, create_idempotency_key),
-  CONSTRAINT payment_amount_digits_chk CHECK (requested_amount_minor ~ '^[0-9]+$')
-);
-
-CREATE TABLE IF NOT EXISTS payment_allocation (
-  payment_allocation_id UUID PRIMARY KEY,
-  payment_id UUID NOT NULL REFERENCES payment (payment_id),
-  settlement_check_id UUID NOT NULL REFERENCES settlement_check (settlement_check_id),
-  settlement_group_id UUID NOT NULL REFERENCES settlement_group (settlement_group_id),
-  tenant_id UUID NOT NULL REFERENCES tenant (tenant_id),
-  legal_entity_id UUID NOT NULL REFERENCES legal_entity (legal_entity_id),
-  amount_minor TEXT NOT NULL,
+  order_id UUID NOT NULL REFERENCES sales_order (order_id),
+  cash_shift_id UUID NOT NULL REFERENCES cash_shift (cash_shift_id),
+  settlement_check_id UUID NOT NULL,
+  payment_id UUID REFERENCES payment (payment_id),
+  idempotency_key TEXT NOT NULL,
+  payable_minor TEXT NOT NULL,
+  tendered_minor TEXT NOT NULL,
   currency_code TEXT NOT NULL,
   minor_unit_exponent INTEGER NOT NULL CHECK (minor_unit_exponent BETWEEN 0 AND 4),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  allocation_idempotency_key TEXT NOT NULL,
-  active BOOLEAN NOT NULL DEFAULT TRUE,
-  UNIQUE (payment_id, allocation_idempotency_key),
-  CONSTRAINT payment_allocation_amount_digits_chk CHECK (amount_minor ~ '^[1-9][0-9]*$|^0$')
+  UNIQUE (legal_entity_id, idempotency_key),
+  CONSTRAINT cash_checkout_idem_payable_digits_chk CHECK (payable_minor ~ '^[0-9]+$'),
+  CONSTRAINT cash_checkout_idem_tendered_digits_chk CHECK (tendered_minor ~ '^[0-9]+$')
 );
+
+CREATE INDEX IF NOT EXISTS idx_cash_checkout_idem_order
+  ON cash_checkout_idempotency (order_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS cash_shift_transaction (
   cash_shift_transaction_id UUID PRIMARY KEY,

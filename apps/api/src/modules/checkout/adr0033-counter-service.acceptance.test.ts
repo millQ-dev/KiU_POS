@@ -10,6 +10,9 @@ import { MenuService } from '../menu/index.js';
 import { BaseCommercialAcceptanceService } from '../commercial-rounding/base-commercial-acceptance.js';
 import { CommercialRoundingPolicyService } from '../commercial-rounding/rounding-policy-service.js';
 import { CashCheckoutService } from './cash-checkout-service.js';
+import { PaymentsService } from '../payments/payments-service.js';
+import { SettlementService } from '../settlement/settlement-service.js';
+import { createWiredPaymentsAndSettlement } from '../../routes/payments.js';
 
 const DATABASE_URL = process.env.DATABASE_URL ?? 'postgresql://millq:millq@localhost:5432/millq_dev';
 
@@ -19,6 +22,8 @@ describe('ADR-0033 counter-service cash checkout', () => {
   let orders: OrdersService;
   let shifts: CashShiftService;
   let checkout: CashCheckoutService;
+  let payments: PaymentsService;
+  let settlements: SettlementService;
   let menu: MenuService;
   let commercialAcceptance: BaseCommercialAcceptanceService;
   let policies: CommercialRoundingPolicyService;
@@ -31,7 +36,14 @@ describe('ADR-0033 counter-service cash checkout', () => {
     fx = await seedBlockCFixture(pool);
     orders = new OrdersService(pool);
     shifts = new CashShiftService(pool);
-    checkout = new CashCheckoutService(pool, orders);
+    ({ payments, settlements } = createWiredPaymentsAndSettlement(
+      pool,
+      (paymentsSvc) => new SettlementService(pool, {
+        coverageReader: paymentsSvc.createCoverageReader(),
+        externalEffects: paymentsSvc.createExternalEffectProbe(),
+      }),
+    ));
+    checkout = new CashCheckoutService(pool, orders, payments, settlements);
     menu = new MenuService(pool);
     commercialAcceptance = new BaseCommercialAcceptanceService(pool, orders);
     policies = new CommercialRoundingPolicyService(pool);
@@ -190,12 +202,20 @@ describe('ADR-0033 counter-service cash checkout', () => {
       `SELECT
          (SELECT COUNT(*)::int FROM payment WHERE payment_id = $1) AS payments,
          (SELECT COUNT(*)::int FROM payment_allocation WHERE payment_id = $1 AND active = TRUE) AS allocations,
+         (SELECT requested_amount_minor FROM payment WHERE payment_id = $1) AS payable,
+         (SELECT amount_minor FROM cash_shift_transaction WHERE payment_id = $1) AS shift_amount,
+         (SELECT tendered_minor FROM cash_shift_transaction WHERE payment_id = $1) AS tendered,
+         (SELECT change_minor FROM cash_shift_transaction WHERE payment_id = $1) AS change,
          (SELECT COUNT(*)::int FROM cash_shift_transaction WHERE payment_id = $1) AS shift_transactions,
          (SELECT COUNT(*)::int FROM production_task WHERE order_id = $2) AS production_tasks,
          (SELECT COUNT(*)::int FROM receipt WHERE order_id = $2) AS receipts`,
       [result.payment.payment_id, order.orderId],
     );
-    expect(counts.rows[0]).toEqual({ payments: 1, allocations: 1, shift_transactions: 1, production_tasks: 1, receipts: 1 });
+    expect(counts.rows[0]).toMatchObject({
+      payments: 1, allocations: 1, payable: '150000', shift_amount: '150000',
+      tendered: '200000', change: '50000', shift_transactions: 1, production_tasks: 1, receipts: 1,
+    });
+    expect(BigInt(counts.rows[0].shift_amount) + BigInt(counts.rows[0].change)).toBe(BigInt(counts.rows[0].tendered));
 
     const retry = await checkout.checkout({
       orderId: order.orderId,
@@ -206,6 +226,85 @@ describe('ADR-0033 counter-service cash checkout', () => {
       deviceId: shift.deviceId,
     });
     expect(retry.payment.payment_id).toBe(result.payment.payment_id);
+
+    await expect(
+      checkout.checkout({
+        orderId: order.orderId,
+        cashShiftId: shift.cashShiftId,
+        tenderedMinor: '210000',
+        idempotencyKey: `adr0033-cash-${order.orderId}`,
+        actorId: fx.actorId,
+        deviceId: shift.deviceId,
+      }),
+    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+  });
+
+  it('serializes concurrent retries and rejects key reuse on another Order', async () => {
+    const shift = await shifts.ensureDevOpenShift({
+      tenantId: fx.tenantId, legalEntityId: fx.legalEntityId, outletId: fx.outletId,
+      cashierId: fx.actorId, deviceId: randomUUID(),
+    });
+    const order = await acceptedOrder();
+    const key = `adr0033-concurrent-${order.orderId}`;
+    const payload = {
+      orderId: order.orderId, cashShiftId: shift.cashShiftId, tenderedMinor: '150000',
+      idempotencyKey: key, actorId: fx.actorId, deviceId: shift.deviceId,
+    };
+    const [first, second] = await Promise.all([checkout.checkout(payload), checkout.checkout(payload)]);
+    expect(first.payment.payment_id).toBe(second.payment.payment_id);
+    const count = await pool.query(`SELECT COUNT(*)::int AS count FROM payment WHERE create_idempotency_key = $1`, [key]);
+    expect(count.rows[0]!.count).toBe(1);
+
+    const otherShift = await shifts.ensureDevOpenShift({
+      tenantId: fx.tenantId, legalEntityId: fx.legalEntityId, outletId: fx.outletId,
+      cashierId: fx.actorId, deviceId: randomUUID(),
+    });
+    await expect(checkout.checkout({ ...payload, cashShiftId: otherShift.cashShiftId, deviceId: otherShift.deviceId })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+
+    const other = await acceptedOrder();
+    await expect(checkout.checkout({ ...payload, orderId: other.orderId })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+  });
+
+  it('validates CashShift cashier and device context', async () => {
+    const order = await acceptedOrder();
+    const shift = await shifts.ensureDevOpenShift({
+      tenantId: fx.tenantId, legalEntityId: fx.legalEntityId, outletId: fx.outletId,
+      cashierId: fx.actorId, deviceId: randomUUID(),
+    });
+    await expect(checkout.checkout({
+      orderId: order.orderId, cashShiftId: shift.cashShiftId, tenderedMinor: '150000',
+      idempotencyKey: `adr0033-wrong-cashier-${order.orderId}`, actorId: randomUUID(), deviceId: shift.deviceId,
+    })).rejects.toMatchObject({ code: 'CASHIER_CONTEXT_MISMATCH' });
+  });
+
+  it('blocks Order cancellation behind a live Settlement until safe abort', async () => {
+    const order = await acceptedOrder();
+    const settlement = await settlements.openSettlement({
+      orderId: order.orderId,
+      idempotencyKey: `adr0033-cancel-lock-${order.orderId}`,
+      actorId: fx.actorId,
+      deviceId: randomUUID(),
+    });
+    await expect(orders.cancelOrder({ orderId: order.orderId, reason: 'test' })).rejects.toMatchObject({ code: 'SETTLEMENT_EDIT_LOCKED' });
+    const aborted = await settlements.abortSettlement({ settlementGroupId: settlement.settlementGroupId, expectedVersion: settlement.version });
+    expect(aborted.state).toBe('ABORTED');
+    expect((await orders.cancelOrder({ orderId: order.orderId, reason: 'test' })).status).toBe('CANCELLED');
+  });
+
+  it('rejects a modifier snapshot whose currency differs from the authoritative item price', async () => {
+    const order = await orders.openOrder({
+      tenantId: fx.tenantId, legalEntityId: fx.legalEntityId, outletId: fx.outletId, channel: 'TAKEAWAY',
+    });
+    await orders.addOrderLine({
+      orderId: order.orderId, catalogItemId: fx.milkItemId, quantity: '1', unit: 'L', dimension: 'VOLUME',
+      modifierSelections: [{ groupId: modifierGroupId, optionIds: [mediumOptionId, oatOptionId] }],
+    });
+    await pool.query(`UPDATE sales_order_line_modifier SET currency_code = 'USD', minor_unit_exponent = 2 WHERE order_line_id = (SELECT order_line_id FROM sales_order_line WHERE order_id = $1) AND modifier_option_id = $2`, [order.orderId, oatOptionId]);
+    await expect(commercialAcceptance.calculateAndAcceptBaseCommercialTerms({
+      orderId: order.orderId,
+      salesContext: { tenantId: fx.tenantId, brandId: fx.brandId, outletId: fx.outletId, orderChannel: 'TAKEAWAY', businessDateTime: '2026-09-17T08:00:00.000Z' },
+      idempotencyKey: `adr0033-modifier-currency-${order.orderId}`,
+    })).rejects.toMatchObject({ code: 'MODIFIER_CURRENCY_MISMATCH' });
   });
 
   it('rejects cash underpayment without mutating order or creating Payment', async () => {

@@ -220,7 +220,16 @@ export type CashCheckoutResult = {
     cashierId: string;
     currencyCode: string;
     minorUnitExponent: number;
-    lines: unknown[];
+    lines: Array<{
+      order_line_id: string;
+      line_number: number;
+      quantity: string;
+      unit: string;
+      catalog_item_name: string;
+      resolved_unit_price_minor: string;
+      gross_merchandise_minor: string;
+      modifiers: Array<{ group: string; option: string; priceDeltaMinor: string }>;
+    }>;
     subtotalMinor: string;
     totalMinor: string;
     paymentMethod: string;

@@ -1,120 +1,74 @@
-# KiU POS — P0 Counter-Service Review Packet
+# KiU POS — P0 Counter-Service Remediation Review Packet
 
-=== ПАКЕТ ДЛЯ CHATGPT (безопасный handoff) ===
+**Status:** DO NOT MERGE — stop for independent review
+**Branch:** `feature/p0-counter-service`
+**Head:** `HEAD_SHA`
+**Base:** Cursor Origin `main` at `1390758`
+**GitHub backup:** `feature/p0-counter-service` on `millQ-dev/KiU_POS`
 
-Проект: MillQ / KiU POS  
-Роль получателя: независимый стратегический и архитектурный ревьюер  
-Задача: оценить блок перед merge и вернуть `APPROVE` или `REQUEST CHANGES`.
+## Scope
 
-## 1) Цель блока
-
-Довести первый реальный vertical slice для Vietnamese counter-service кафе:
+This remediation preserves the first Vietnamese counter-service slice and reconciles it with canonical S1.1/PAY1.1 runtime contracts:
 
 ```text
 bootstrap OPEN CashShift
-→ takeaway Order DRAFT
-→ products + modifiers
-→ authoritative commercial pricing
-→ cash checkout
-→ Payment success
+→ takeaway Order OPEN
+→ modifiers + authoritative commercial terms
+→ canonical Payment / verified cash outcome
+→ canonical PaymentAllocation
+→ Settlement reconciliation
+→ Payment SUCCEEDED / product PAID
 → Order SUBMITTED
 → production tasks
-→ receipt payload + preview
+→ receipt payload + readable preview
 ```
 
-## 2) Ссылки
+No merge, QR, KDS, physical printer adapter, or Shift UI was started.
 
-- Branch: `feature/p0-counter-service`
-- Tip commit: `3ca15886f33ded958ef8966f3989cf5e43425c50`
-- Short commit: `3ca1588`
-- Base: Origin `main` at `c94afe0`
-- Origin branch: `feature/p0-counter-service`
-- GitHub backup branch: `feature/p0-counter-service`
-- PR: ещё не создан
-- Checkpoint: `docs/processes/current-state.md`
-- Product brief: `docs/product/p0-counter-service-cash-checkout.md`
-- ADR: `docs/decisions/ADR-0033-counter-service-cash-checkout-slice.md`
+## Changed areas
 
-## 3) Контекст продукта
+- Renumbered P0 migrations after canonical `020_payments_core.sql` and `021_payments_intended_settlement.sql` to `022` and `023`.
+- Removed duplicate P0 Payment, TenderDefinition, and PaymentAllocation schema.
+- Added P0 cash-command idempotency evidence without duplicating PAY1.1 economic entities.
+- Reworked `CashCheckoutService` to use `PaymentsService`, verified cash outcome recording, PaymentAllocation, and Settlement reconciliation.
+- Added semantic conflict checks for order, shift, tendered amount, payable, currency, and exponent; concurrent retries are serialized.
+- Added cashier/device validation against CashShift.
+- Validated modifier snapshot currency and minor-unit exponent against the authoritative item price before applying a delta.
+- Kept Order cancellation blocked by a live Settlement; safe abort remains an explicit `AbortSettlement` path.
+- Reloaded authoritative Settlement state after cash checkout in the POS UI.
+- Added RU/EN/VI dictionaries and coverage tests for new modifier/payment copy.
+- Replaced JSON receipt output with a readable receipt preview. No physical printer success is simulated.
+- Reconciled ADR-0033 explicitly with ADR-0032: cash change is implemented, satisfied payment/settlement produces Order `SUBMITTED`, and future `SUBMITTED → COMPLETED` remains the fulfillment/inventory boundary.
 
-KiU — реальный POS для F&B. Первый пилот — кафе без столов, Vietnamese-first,
-с поддержкой RU/EN/VI. Критерий качества: operational correctness, скорость,
-ясность и устойчивость к ошибкам важнее декоративности.
+## Verification
 
-## 4) Что сделано
+- Clean database migration: `001` through `023` applied successfully.
+- Backend: **21 test files, 280 tests passed**.
+- ADR-0033 regression suite: **7 tests passed**.
+- Web: **2 test files, 29 tests passed** with `NODE_ENV=test`.
+- Monorepo typecheck: passed.
+- Production build: passed for API, web, domain, and contracts.
+- `git diff --check`: passed.
 
-- Добавлен реальный `CashShift` через development bootstrap fixture.
-- Добавлены минимальные modifiers: required/optional, min/max, zero-price и fixed price delta.
-- Modifier selections сохраняются вместе с `OrderLine`.
-- Fixed modifier delta участвует в backend authoritative commercial calculation.
-- Добавлен `SUBMITTED` как post-checkout Order state; `OPEN` сохранён как техническое имя draft.
-- Cash checkout использует canonical Settlement и provider-neutral Payments Core.
-- Product-level `PAID` отображается через Payments Core lifecycle `SUCCEEDED`.
-- Cash evidence хранится в `CashShiftTransaction`: tendered и change.
-- После submit создаются idempotent production tasks для kitchen items.
-- Создаётся canonical receipt payload и UI preview; физический принтер не имитируется.
-- В `apps/web` добавлены modifier drawer, cash payment panel, receipt preview и KiU touch tokens.
-- Settlement coverage reader теперь видит только активные allocations от `SUCCEEDED` payments.
+Commands used:
 
-## 5) Сознательно не сделано
+```text
+env -u DATABASE_URL -u PORT -u NODE_ENV DATABASE_URL=<clean-db> pnpm --filter @millq/api migrate
+env -u DATABASE_URL -u PORT -u NODE_ENV DATABASE_URL=<clean-db> pnpm --filter @millq/api test -- --run
+NODE_ENV=test pnpm --filter @millq/web test -- --run
+env -u PORT -u NODE_ENV -u DATABASE_URL pnpm typecheck
+env -u PORT -u NODE_ENV -u DATABASE_URL pnpm build
+git diff --check
+```
 
-- QR/VietQR provider и конкретный gateway.
-- Fiscal/e-invoice provider и tax-law UX.
-- Физический 80 mm printer adapter.
-- Полноценный KDS и production state progression до `READY/COMPLETED`.
-- Отдельный production UI `Open Shift / Close Shift`.
-- Tables, reservations, split payment, refunds и void.
-- Offline payment semantics.
+## Unresolved risks for reviewer
 
-## 6) Решения
+- Cash, Payment, and local receipt writes cross service transaction boundaries; a process failure after canonical Payment success and before local finalization needs a future recovery/reconciliation workflow.
+- The cash tender is bootstrapped on first use; production tender configuration and provider/fiscal policies remain future work.
+- Fiscalization, offline semantics, refund/void, QR/card, physical printing, and full KDS remain outside this branch.
+- UI language is covered for RU/EN/VI but the first runtime still defaults to English; per-user session language selection remains future work.
+- Touch and localization review still needs a real 10–15 inch device/staff pass.
 
-### Accepted
+## Reviewer request
 
-- Первый slice — counter-service/takeaway без tables.
-- Payment не делает Order `COMPLETED`.
-- Kitchen tasks создаются после Order submission, не от basket tap и не напрямую от Payment.
-- Fiscal не блокирует первый cash pilot.
-- Receipt — payload + preview; физическая печать — future adapter.
-- Origin остаётся canonical host; этот файл и branch также отправлены в GitHub как backup.
-
-### Scaffolding
-
-- Cash tender definition `CASH` bootstrap-ится при первом cash checkout.
-- Development context остаётся bootstrap-only и не является production Identity.
-- В первом slice используются synthetic-realistic fixture data.
-
-## 7) Проверки
-
-- Backend: `262 passed` across `20` test files.
-- ADR-0033 acceptance: golden cash route, modifier pricing, underpayment, idempotency — passed.
-- Web: `26 passed`.
-- Monorepo `pnpm typecheck` — passed.
-- Web production build — passed.
-- `git diff --check` — passed.
-- Dev API bootstrap and cash shift endpoint проверены вручную.
-
-## 8) Риски и вопросы
-
-- Нужно проверить migration path на чистой БД, где Payments Core ещё не существует в отдельной ветке.
-- Нужна независимая проверка того, что текущая canonical Payments Core schema совпадает с Origin runtime contract.
-- Нужен staff test на touch display 10–15" с RU/EN/VI strings.
-- Нужно подтвердить продуктовую терминологию: показывать кассиру `Paid`, оставляя в backend `SUCCEEDED`.
-- Визуальный live screenshot review не выполнен: доступного browser surface в рабочем окружении не было; выполнены build и component tests.
-
-## 9) Рекомендация исполнителя
-
-`APPROVE WITH CHANGES` для review stage: блок достаточно целостен для независимого
-review и staff test, но merge должен ждать проверки migration contract и ручного
-touch/localization прохода.
-
-## 10) Просьба к ревьюеру
-
-Ответь структурировано:
-
-A. Вердикт: `APPROVE` / `REQUEST CHANGES`  
-B. Почему — 2–5 пунктов  
-C. Обязательные правки до merge  
-D. Отдельно проверь Order/Payment/Production lifecycle и Settlement coverage  
-E. Что должно войти в следующее ТЗ: QR, KDS, shift close, fiscal или другое
-
-=== КОНЕЦ ПАКЕТА ===
+Please independently review lifecycle separation, money conservation, semantic idempotency, concurrency behavior, Settlement coverage, and the migration boundary before any merge. Return `APPROVE` or `REQUEST CHANGES`.
