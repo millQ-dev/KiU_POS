@@ -198,16 +198,27 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 | **Facts out** | AUDIT events |
 | **Depends on** | All (references) |
 
+### Tax
+
+| | |
+| --- | --- |
+| **Owns** | TaxClassification, TaxPolicy (versioned/effective-dated), TaxClassificationAssignment validation, tax calculation, TaxLineSnapshot / TaxOrderSnapshot, tax RoundingPolicy **context usage**, tax configuration audit provenance |
+| **Does not own** | CatalogItem identity; Menu/POS presentation; Promotions funding proposals; Settlement payable SoT; FiscalDocument; Revenue Basis SoT; Vietnam rate table as code |
+| **Key concepts** | PricingTaxMode `TAX_INCLUSIVE` \| `TAX_EXCLUSIVE`; TaxRoundingStrategy (policy-driven, e.g. `LINE_ROUND_THEN_SUM` first supported — not universal default); TaxTreatment (STANDARD/REDUCED/ZERO_RATE/EXEMPT/NOT_SUBJECT/UNKNOWN/MISSING — not collapsed to numeric zero); TaxableBase ≠ Customer Payable ≠ Revenue Basis; TaxClassificationAssignment scoped by Tenant/LegalEntity/jurisdiction/effective interval (Catalog identity ≠ Tax config); ADR-0033 **Accepted** |
+| **Commands in** | (future TAX1.1) ResolveTaxPolicy, CalculateTax, AcceptTaxSnapshot — not launched by ADR alone |
+| **Facts out** | (future) TaxSnapshotAccepted, TaxSnapshotInvalidated |
+| **Depends on** | Organization (LegalEntity), JurisdictionProfile (ADR-0012), Catalog (assignment refs), Orders commercial/funding facts, ADR-0030 commercial gross |
+
 ### Fiscalization
 
 | | |
 | --- | --- |
 | **Owns** | FiscalPolicy, FiscalSeries, FiscalDocument, FiscalSubmission, correction chains, provider adapter **interface**, fiscal reconciliation |
-| **Does not own** | LegalEntity master data beyond fiscal binding; Order/Payment SoT; legal production clearance |
-| **Key concepts** | Architecture boundary now (Accepted ADR-0014); Order ≠ FiscalDocument; immutable docs + correction chains; offline queue statuses; LEGAL GATE G2 for go-live; provider impl later |
+| **Does not own** | LegalEntity master data beyond fiscal binding; Order/Payment SoT; Tax calculation / TaxOrderSnapshot SoT; legal production clearance |
+| **Key concepts** | Architecture boundary now (Accepted ADR-0014); Order ≠ FiscalDocument; immutable docs + correction chains; offline queue statuses; LEGAL GATE G2 for go-live; provider impl later; consumes frozen Tax facts (ADR-0033) |
 | **Commands in** | SubmitFiscal, RecordFiscalCorrection |
 | **Facts out** | FiscalSubmitted, FiscalCorrected |
-| **Depends on** | Organization (LegalEntity), JurisdictionProfile, Payments/Orders settlement outcomes |
+| **Depends on** | Organization (LegalEntity), JurisdictionProfile, Tax (frozen TaxOrderSnapshot when required), Payments/Orders settlement outcomes |
 
 ### Floor / Table Engine
 
