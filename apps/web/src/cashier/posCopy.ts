@@ -4,7 +4,7 @@ export const POS_COPY_KEYS = [
   'customizeItem', 'close', 'required', 'optional', 'chooseRequired', 'cancel',
   'addToOrder', 'paymentAccepted', 'cash', 'received', 'change', 'orderState',
   'kitchen', 'inProgress', 'noProductionItems', 'receiptPreview', 'due',
-  'cashReceived', 'receivedMustCover', 'takeCashAndSubmit', 'paymentNote', 'total', 'cashSuccessFeedback',
+  'cashReceived', 'receivedMustCover', 'takeCashAndSubmit', 'paymentNote', 'total', 'cashSuccessFeedback', 'paymentStepReady', 'pay',
 ] as const;
 
 export type PosCopyKey = (typeof POS_COPY_KEYS)[number];
@@ -16,7 +16,7 @@ const copy: Record<PosLanguage, Record<PosCopyKey, string>> = {
     paymentAccepted: 'Payment accepted', cash: 'Cash', received: 'Received', change: 'Change', orderState: 'Order state',
     kitchen: 'Kitchen', inProgress: 'In progress', noProductionItems: 'No production items', receiptPreview: 'Receipt preview',
     due: 'Due', cashReceived: 'Cash received (VND)', receivedMustCover: 'Received cash must cover the Customer Payable.',
-    takeCashAndSubmit: 'Take cash and submit order', paymentNote: 'Payment is recorded separately. The order is submitted after successful cash acceptance; kitchen tasks are created from Order Submitted.', total: 'Total', cashSuccessFeedback: 'Cash accepted. Order submitted; production tasks created.',
+    takeCashAndSubmit: 'Take cash and submit order', paymentNote: 'Payment is recorded separately. The order is submitted after successful cash acceptance; kitchen tasks are created from Order Submitted.', total: 'Total', cashSuccessFeedback: 'Cash accepted. Order submitted; production tasks created.', paymentStepReady: 'Payment ready — Customer Payable frozen', pay: 'Pay',
   },
   ru: {
     customizeItem: 'Настроить позицию', close: 'Закрыть', required: 'Обязательно', optional: 'Необязательно',
@@ -24,7 +24,7 @@ const copy: Record<PosLanguage, Record<PosCopyKey, string>> = {
     paymentAccepted: 'Оплата принята', cash: 'Наличные', received: 'Получено', change: 'Сдача', orderState: 'Состояние заказа',
     kitchen: 'Кухня', inProgress: 'В работе', noProductionItems: 'Кухонных позиций нет', receiptPreview: 'Предпросмотр чека',
     due: 'К оплате', cashReceived: 'Получено наличными (VND)', receivedMustCover: 'Сумма наличных должна покрывать сумму к оплате.',
-    takeCashAndSubmit: 'Принять наличные и отправить заказ', paymentNote: 'Оплата записывается отдельно. После успешного приёма наличных заказ отправляется; кухонные задачи создаются из события отправки заказа.', total: 'Итого', cashSuccessFeedback: 'Наличные приняты. Заказ отправлен, кухонные задачи созданы.',
+    takeCashAndSubmit: 'Принять наличные и отправить заказ', paymentNote: 'Оплата записывается отдельно. После успешного приёма наличных заказ отправляется; кухонные задачи создаются из события отправки заказа.', total: 'Итого', cashSuccessFeedback: 'Наличные приняты. Заказ отправлен, кухонные задачи созданы.', paymentStepReady: 'Оплата готова — сумма к оплате зафиксирована', pay: 'Оплатить',
   },
   vi: {
     customizeItem: 'Tùy chỉnh món', close: 'Đóng', required: 'Bắt buộc', optional: 'Tùy chọn',
@@ -32,7 +32,7 @@ const copy: Record<PosLanguage, Record<PosCopyKey, string>> = {
     paymentAccepted: 'Đã nhận thanh toán', cash: 'Tiền mặt', received: 'Đã nhận', change: 'Tiền thừa', orderState: 'Trạng thái đơn',
     kitchen: 'Bếp', inProgress: 'Đang thực hiện', noProductionItems: 'Không có món cần chế biến', receiptPreview: 'Xem trước hóa đơn',
     due: 'Cần thu', cashReceived: 'Tiền mặt nhận (VND)', receivedMustCover: 'Số tiền nhận phải đủ số tiền khách cần thanh toán.',
-    takeCashAndSubmit: 'Nhận tiền và gửi đơn', paymentNote: 'Khoản thanh toán được ghi nhận riêng. Đơn được gửi sau khi nhận tiền mặt thành công; tác vụ bếp được tạo từ sự kiện gửi đơn.', total: 'Tổng cộng', cashSuccessFeedback: 'Đã nhận tiền mặt. Đơn đã được gửi và tác vụ bếp đã được tạo.',
+    takeCashAndSubmit: 'Nhận tiền và gửi đơn', paymentNote: 'Khoản thanh toán được ghi nhận riêng. Đơn được gửi sau khi nhận tiền mặt thành công; tác vụ bếp được tạo từ sự kiện gửi đơn.', total: 'Tổng cộng', cashSuccessFeedback: 'Đã nhận tiền mặt. Đơn đã được gửi và tác vụ bếp đã được tạo.', paymentStepReady: 'Sẵn sàng thanh toán — đã cố định số tiền khách cần trả', pay: 'Thanh toán',
   },
 };
 

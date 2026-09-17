@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react';
 import type { CashCheckoutResult, SettlementProjection } from '../api/types.js';
 import { formatMoneyDisplay } from '../money/formatMoneyDisplay.js';
-import { posCopy } from './posCopy.js';
+import { posCopy, type PosLanguage } from './posCopy.js';
 import './CashPaymentPanel.css';
 
 type Props = {
   settlement: SettlementProjection;
   busy: boolean;
   result: CashCheckoutResult | null;
+  language?: PosLanguage;
   onPay: (tenderedMinor: string) => void;
 };
 
-export function CashPaymentPanel({ settlement, busy, result, onPay }: Props) {
-  const language = 'en' as const;
+export function CashPaymentPanel({ settlement, busy, result, language = 'ru', onPay }: Props) {
   const [tendered, setTendered] = useState(settlement.customerPayableMinor);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {

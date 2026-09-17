@@ -22,8 +22,8 @@ New Order
 → add kitchen item
 → change quantity 1 → 2
 → remove mistaken item
-→ accept authoritative commercial result
-→ Pay / Cash
+→ Pay (commercial acceptance and Settlement are automated behind the staff action)
+→ Cash
 → enter tendered amount
 → confirm payment
 → Order SUBMITTED

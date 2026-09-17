@@ -96,16 +96,22 @@ CREATE TABLE IF NOT EXISTS cash_checkout_idempotency (
   legal_entity_id UUID NOT NULL REFERENCES legal_entity (legal_entity_id),
   order_id UUID NOT NULL REFERENCES sales_order (order_id),
   cash_shift_id UUID NOT NULL REFERENCES cash_shift (cash_shift_id),
-  settlement_check_id UUID NOT NULL,
+  settlement_check_id UUID,
+  settlement_group_id UUID,
   payment_id UUID REFERENCES payment (payment_id),
   idempotency_key TEXT NOT NULL,
-  payable_minor TEXT NOT NULL,
+  payable_minor TEXT,
   tendered_minor TEXT NOT NULL,
   currency_code TEXT NOT NULL,
   minor_unit_exponent INTEGER NOT NULL CHECK (minor_unit_exponent BETWEEN 0 AND 4),
+  actor_id UUID NOT NULL,
+  device_id UUID NOT NULL,
+  state TEXT NOT NULL DEFAULT 'RESERVED'
+    CHECK (state IN ('RESERVED', 'PAYMENT_RECONCILED', 'FINALIZED')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (legal_entity_id, idempotency_key),
-  CONSTRAINT cash_checkout_idem_payable_digits_chk CHECK (payable_minor ~ '^[0-9]+$'),
+  CONSTRAINT cash_checkout_idem_payable_digits_chk CHECK (payable_minor IS NULL OR payable_minor ~ '^[0-9]+$'),
   CONSTRAINT cash_checkout_idem_tendered_digits_chk CHECK (tendered_minor ~ '^[0-9]+$')
 );
 

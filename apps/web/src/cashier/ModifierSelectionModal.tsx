@@ -1,12 +1,13 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import type { ModifierGroup, ResolvedPosSlot } from '../api/types.js';
 import { formatMoneyDisplay } from '../money/formatMoneyDisplay.js';
-import { posCopy } from './posCopy.js';
+import { posCopy, type PosLanguage } from './posCopy.js';
 import './ModifierSelectionModal.css';
 
 type Props = {
   slot: ResolvedPosSlot;
   busy: boolean;
+  language?: PosLanguage;
   onConfirm: (selections: Array<{ groupId: string; optionIds: string[] }>) => void;
   onCancel: () => void;
 };
@@ -22,8 +23,7 @@ function initialSelections(groups: ModifierGroup[]) {
   ) as Record<string, string[]>;
 }
 
-export function ModifierSelectionModal({ slot, busy, onConfirm, onCancel }: Props) {
-  const language = 'en' as const;
+export function ModifierSelectionModal({ slot, busy, language = 'ru', onConfirm, onCancel }: Props) {
   const titleId = useId();
   const groups = slot.modifierGroups ?? [];
   const [selected, setSelected] = useState<Record<string, string[]>>(() => initialSelections(groups));

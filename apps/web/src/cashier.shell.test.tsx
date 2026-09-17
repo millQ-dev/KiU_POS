@@ -21,6 +21,7 @@ import type {
   OrderLine,
   ResolvedPosSlot,
   ResolvedPosSurface,
+  SettlementProjection,
 } from './api/types.js';
 import { ApiError } from './api/types.js';
 import { posApi } from './api/client.js';
@@ -43,6 +44,7 @@ vi.mock('./api/client.js', () => ({
     openSettlement: vi.fn(),
     getLiveSettlement: vi.fn(),
     abortSettlement: vi.fn(),
+    checkoutCash: vi.fn(),
   },
 }));
 
@@ -416,19 +418,11 @@ describe('cashier components', () => {
     expect(screen.getByText(/no commercial gross/i)).toBeTruthy();
   });
 
-  it('renders commercial needs-reacceptance and current states', () => {
-    const { rerender } = render(
-      <OrderBasketPanel order={orderWithEgg} {...basketProps} commercial={needsReacceptance} />,
-    );
-    expect(screen.getByText(/Order changed — calculate/i)).toBeTruthy();
-    expect(screen.getByRole('button', { name: /Calculate & accept current prices/i })).toBeTruthy();
-    rerender(
-      <OrderBasketPanel order={orderWithEgg} {...basketProps} commercial={acceptedCommercial} />,
-    );
-    expect(screen.getByText(/Commercial terms accepted/i)).toBeTruthy();
-    expect(screen.getByText(/Merchandise gross \(authoritative\)/i)).toBeTruthy();
-    expect(screen.getByRole('button', { name: /Reprice & accept current prices/i })).toBeTruthy();
-    expect(screen.getByText(/Line gross \(backend\): 10000/i)).toBeTruthy();
+  it('exposes a single staff Pay action and hides commercial internals', () => {
+    render(<OrderBasketPanel order={orderWithEgg} {...basketProps} commercial={needsReacceptance} />);
+    expect(screen.getByRole('button', { name: 'Оплатить' })).toBeTruthy();
+    expect(screen.queryByText(/Commercial terms accepted|Order changed — calculate/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /Calculate & accept|Reprice & accept/i })).toBeNull();
   });
 });
 
@@ -513,7 +507,7 @@ describe('CashierShell integration (mocked API)', () => {
       eggLine.orderLineId,
       expect.objectContaining({ quantity: '3' }),
     ));
-    expect(await screen.findByText(/Order changed — calculate/i)).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Оплатить' })).toBeTruthy();
   });
 
   it('remove line clears selection and updates basket', async () => {
@@ -584,40 +578,7 @@ describe('CashierShell integration (mocked API)', () => {
     await waitFor(() => expect(mockedApi.openOrder).toHaveBeenCalledTimes(2));
   });
 
-  it('Refresh prices resolves unit prices without accepting terms', async () => {
-    const egg = activeCount();
-    mockedApi.resolveSurface.mockResolvedValue(surfaceWith(egg));
-    mockedApi.openOrder.mockResolvedValue(orderWithEgg);
-    mockedApi.getCommercialStatus.mockResolvedValue(needsReacceptance);
-    mockedApi.resolveMenuPrices.mockResolvedValue({
-      orderId: orderWithEgg.orderId,
-      note: 'UNIT_PRICE_RESOLUTION_ONLY',
-      commercialGrossPolicy: 'EXPLICIT_GROSS_ONLY',
-      lines: [
-        {
-          orderLineId: eggLine.orderLineId,
-          catalogItemId: eggLine.catalogItemId,
-          quantity: '2',
-          availabilityStatus: 'AVAILABLE',
-          resolvedUnitPriceMinor: '120000',
-          currencyCode: 'VND',
-          minorUnitExponent: 0,
-          menuPublicationId: 'mp',
-          priceRuleId: 'pr',
-        },
-      ],
-    });
-
-    render(<CashierShell context={ctx} onChangeContext={vi.fn()} />);
-    await screen.findByText(/2 ea/);
-    fireEvent.click(screen.getByRole('button', { name: /Refresh current unit prices/i }));
-    await waitFor(() => expect(mockedApi.resolveMenuPrices).toHaveBeenCalled());
-    expect(await screen.findByText(/Current unit price: 120000 VND/i)).toBeTruthy();
-    expect(mockedApi.resolveMenuPrices.mock.calls[0]).toBeTruthy();
-    expect(JSON.stringify(mockedApi)).not.toMatch(/setOrderCommercialTerms/);
-  });
-
-  it('Calculate & accept uses backend path and shows merchandise gross', async () => {
+  it('Pay automates commercial acceptance and opens the settlement', async () => {
     const egg = activeCount();
     mockedApi.resolveSurface.mockResolvedValue(surfaceWith(egg));
     mockedApi.openOrder.mockResolvedValue(orderWithEgg);
@@ -628,31 +589,32 @@ describe('CashierShell integration (mocked API)', () => {
       commercialGrossPolicy: 'BASE_LIST_LINE_GROSS_ROUNDED',
     };
     mockedApi.calculateAndAcceptCommercialTerms.mockResolvedValue({ commercialStatus: accepted });
+    const settlement: SettlementProjection = {
+      settlementGroupId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      orderId: orderWithEgg.orderId,
+      state: 'COLLECTING',
+      currencyCode: 'VND',
+      merchandiseGrossMinor: '10000',
+      customerPayableMinor: '10000',
+      allocatedAmountMinor: '0',
+      outstandingAmountMinor: '10000',
+      version: 1,
+      checks: [],
+    };
+    mockedApi.openSettlement.mockResolvedValue(settlement);
 
     render(<CashierShell context={ctx} onChangeContext={vi.fn()} />);
     await screen.findByText(/2 ea/);
-    fireEvent.click(screen.getByRole('button', { name: /Calculate & accept current prices/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Оплатить' }));
     await waitFor(() => expect(mockedApi.calculateAndAcceptCommercialTerms).toHaveBeenCalled());
-    expect(await screen.findByText(/Merchandise gross \(authoritative\): 10000 VND/i)).toBeTruthy();
+    await waitFor(() => expect(mockedApi.openSettlement).toHaveBeenCalledWith(
+      orderWithEgg.orderId,
+      expect.objectContaining({ idempotencyKey: expect.any(String) }),
+    ));
+    expect(await screen.findByText(/Оплата готова/i)).toBeTruthy();
     expect(JSON.stringify(mockedApi.calculateAndAcceptCommercialTerms.mock.calls)).not.toMatch(
       /amountMinor\s*\*|Math\.round|parseFloat/,
     );
-  });
-
-  it('policy-required error surfaces without inventing totals', async () => {
-    const egg = activeCount();
-    mockedApi.resolveSurface.mockResolvedValue(surfaceWith(egg));
-    mockedApi.openOrder.mockResolvedValue(orderWithEgg);
-    mockedApi.getCommercialStatus.mockResolvedValue(needsReacceptance);
-    mockedApi.calculateAndAcceptCommercialTerms.mockRejectedValue(
-      new ApiError(400, 'COMMERCIAL_ROUNDING_POLICY_REQUIRED', 'No policy'),
-    );
-
-    render(<CashierShell context={ctx} onChangeContext={vi.fn()} />);
-    await screen.findByText(/2 ea/);
-    fireEvent.click(screen.getByRole('button', { name: /Calculate & accept current prices/i }));
-    expect(await screen.findByText(/COMMERCIAL_ROUNDING_POLICY_REQUIRED/i)).toBeTruthy();
-    expect(screen.queryByText(/Merchandise gross \(authoritative\)/i)).toBeNull();
   });
 
   it('weighted tile opens quantity modal and posts explicit quantity', async () => {

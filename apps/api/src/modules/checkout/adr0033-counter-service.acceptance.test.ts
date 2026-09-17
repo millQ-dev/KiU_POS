@@ -231,6 +231,17 @@ describe('ADR-0033 counter-service cash checkout', () => {
       checkout.checkout({
         orderId: order.orderId,
         cashShiftId: shift.cashShiftId,
+        tenderedMinor: '200000',
+        idempotencyKey: `adr0033-cash-${order.orderId}`,
+        actorId: randomUUID(),
+        deviceId: shift.deviceId,
+      }),
+    ).rejects.toMatchObject({ code: 'CASHIER_CONTEXT_MISMATCH' });
+
+    await expect(
+      checkout.checkout({
+        orderId: order.orderId,
+        cashShiftId: shift.cashShiftId,
         tenderedMinor: '210000',
         idempotencyKey: `adr0033-cash-${order.orderId}`,
         actorId: fx.actorId,
@@ -275,6 +286,77 @@ describe('ADR-0033 counter-service cash checkout', () => {
       orderId: order.orderId, cashShiftId: shift.cashShiftId, tenderedMinor: '150000',
       idempotencyKey: `adr0033-wrong-cashier-${order.orderId}`, actorId: randomUUID(), deviceId: shift.deviceId,
     })).rejects.toMatchObject({ code: 'CASHIER_CONTEXT_MISMATCH' });
+    const settlementsCreated = await pool.query(`SELECT COUNT(*)::int AS count FROM settlement_group WHERE order_id = $1`, [order.orderId]);
+    expect(settlementsCreated.rows[0]!.count).toBe(0);
+
+    const deviceOrder = await acceptedOrder();
+    await expect(checkout.checkout({
+      orderId: deviceOrder.orderId, cashShiftId: shift.cashShiftId, tenderedMinor: '150000',
+      idempotencyKey: `adr0033-wrong-device-${deviceOrder.orderId}`, actorId: fx.actorId, deviceId: randomUUID(),
+    })).rejects.toMatchObject({ code: 'DEVICE_CONTEXT_MISMATCH' });
+    const deviceSettlements = await pool.query(`SELECT COUNT(*)::int AS count FROM settlement_group WHERE order_id = $1`, [deviceOrder.orderId]);
+    expect(deviceSettlements.rows[0]!.count).toBe(0);
+  });
+
+  it('recovers after Payment reconciliation failpoint and finalizes exactly once', async () => {
+    const order = await acceptedOrder();
+    const shift = await shifts.ensureDevOpenShift({
+      tenantId: fx.tenantId, legalEntityId: fx.legalEntityId, outletId: fx.outletId,
+      cashierId: fx.actorId, deviceId: randomUUID(),
+    });
+    const key = `adr0033-recovery-${order.orderId}`;
+    const failpointCheckout = new CashCheckoutService(
+      pool,
+      orders,
+      payments,
+      settlements,
+      async () => { throw new Error('FAILPOINT_AFTER_PAYMENT_RECONCILIATION'); },
+    );
+    await expect(failpointCheckout.checkout({
+      orderId: order.orderId, cashShiftId: shift.cashShiftId, tenderedMinor: '150000',
+      idempotencyKey: key, actorId: fx.actorId, deviceId: shift.deviceId,
+    })).rejects.toThrow('FAILPOINT_AFTER_PAYMENT_RECONCILIATION');
+
+    const interrupted = await pool.query(
+      `SELECT c.state, c.payment_id, o.status, sg.state AS settlement_state,
+              (SELECT COUNT(*)::int FROM cash_shift_transaction tx WHERE tx.order_id = c.order_id) AS shift_transactions,
+              (SELECT COUNT(*)::int FROM production_task pt WHERE pt.order_id = c.order_id) AS production_tasks,
+              (SELECT COUNT(*)::int FROM receipt r WHERE r.order_id = c.order_id) AS receipts
+       FROM cash_checkout_idempotency c
+       JOIN sales_order o ON o.order_id = c.order_id
+       JOIN settlement_group sg ON sg.settlement_group_id = c.settlement_group_id
+       WHERE c.idempotency_key = $1`,
+      [key],
+    );
+    expect(interrupted.rows[0]).toMatchObject({
+      state: 'PAYMENT_RECONCILED', payment_id: expect.any(String), status: 'OPEN',
+      settlement_state: 'SATISFIED', shift_transactions: 0, production_tasks: 0, receipts: 0,
+    });
+
+    const recovered = await checkout.checkout({
+      orderId: order.orderId, cashShiftId: shift.cashShiftId, tenderedMinor: '150000',
+      idempotencyKey: key, actorId: fx.actorId, deviceId: shift.deviceId,
+    });
+    expect(recovered.order.status).toBe('SUBMITTED');
+    const finalized = await pool.query(
+      `SELECT c.state,
+              (SELECT COUNT(*)::int FROM payment p WHERE p.create_idempotency_key = $1) AS payments,
+              (SELECT COUNT(*)::int FROM payment_allocation pa WHERE pa.payment_id = c.payment_id AND pa.active = TRUE) AS allocations,
+              (SELECT COUNT(*)::int FROM cash_shift_transaction tx WHERE tx.order_id = c.order_id) AS shift_transactions,
+              (SELECT COUNT(*)::int FROM production_task pt WHERE pt.order_id = c.order_id) AS production_tasks,
+              (SELECT COUNT(*)::int FROM receipt r WHERE r.order_id = c.order_id) AS receipts,
+              (SELECT COUNT(*)::int FROM audit_record a WHERE a.aggregate_id = c.order_id AND a.action = 'ORDER_SUBMITTED') AS audits
+       FROM cash_checkout_idempotency c WHERE c.idempotency_key = $1`,
+      [key],
+    );
+    expect(finalized.rows[0]).toEqual({
+      state: 'FINALIZED', payments: 1, allocations: 1, shift_transactions: 1,
+      production_tasks: 1, receipts: 1, audits: 1,
+    });
+    expect((await checkout.checkout({
+      orderId: order.orderId, cashShiftId: shift.cashShiftId, tenderedMinor: '150000',
+      idempotencyKey: key, actorId: fx.actorId, deviceId: shift.deviceId,
+    })).payment.payment_id).toBe(recovered.payment.payment_id);
   });
 
   it('blocks Order cancellation behind a live Settlement until safe abort', async () => {

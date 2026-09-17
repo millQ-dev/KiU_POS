@@ -385,6 +385,109 @@ export class OrdersService {
   }
 
   /**
+   * Application boundary for OrderSubmitted.
+   *
+   * Payment success may be retried independently from this transaction. The
+   * Order transition and production task derivation therefore live here and
+   * are safe to invoke again after a process failure.
+   */
+  async submitOrderAfterPayment(input: {
+    orderId: string;
+    idempotencyKey: string;
+    paymentId: string;
+    settlementGroupId: string;
+    actorId: string;
+    deviceId: string;
+  }) {
+    if (!input.idempotencyKey.trim()) {
+      throw new DomainValidationError('VALIDATION', 'idempotencyKey is required');
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const order = await this.lockOrder(client, input.orderId);
+      if (order.status === 'CANCELLED' || order.status === 'COMPLETED') {
+        throw new OrderImmutableError('Only OPEN or SUBMITTED Orders can enter OrderSubmitted');
+      }
+
+      const firstTransition = order.status === 'OPEN';
+      if (firstTransition) {
+        await client.query(
+          `UPDATE sales_order
+           SET status = 'SUBMITTED', submitted_at = NOW(), submitted_by = $2,
+               actor_id = $2, device_id = $3
+           WHERE order_id = $1`,
+          [input.orderId, input.actorId, input.deviceId],
+        );
+      }
+
+      const taskRows = await client.query<{
+        order_line_id: string;
+        catalog_item_id: string;
+        catalog_item_name: string;
+        quantity: string;
+        unit: string;
+        modifiers: unknown;
+      }>(
+        `SELECT l.order_line_id, l.catalog_item_id, c.name AS catalog_item_name,
+                l.quantity, l.unit,
+                COALESCE(jsonb_agg(jsonb_build_object(
+                  'groupLabel', m.group_label, 'optionLabel', m.option_label,
+                  'priceDeltaMinor', m.price_delta_minor
+                ) ORDER BY m.position) FILTER (WHERE m.order_line_modifier_id IS NOT NULL), '[]'::jsonb) AS modifiers
+         FROM sales_order_line l
+         JOIN catalog_item c ON c.catalog_item_id = l.catalog_item_id
+         LEFT JOIN sales_order_line_modifier m ON m.order_line_id = l.order_line_id
+         WHERE l.order_id = $1 AND c.requires_production = TRUE
+         GROUP BY l.order_line_id, l.catalog_item_id, c.name, l.quantity, l.unit, l.line_number
+         ORDER BY l.line_number`,
+        [input.orderId],
+      );
+      for (const task of taskRows.rows) {
+        await client.query(
+          `INSERT INTO production_task (
+             production_task_id, tenant_id, outlet_id, order_id, order_line_id,
+             catalog_item_id, status, quantity, unit, label, modifier_snapshot_json, idempotency_key
+           ) VALUES ($1,$2,$3,$4,$5,$6,'IN_PROGRESS',$7,$8,$9,$10::jsonb,$11)
+           ON CONFLICT (idempotency_key) DO NOTHING`,
+          [
+            randomUUID(), order.tenant_id, order.outlet_id, input.orderId,
+            task.order_line_id, task.catalog_item_id, task.quantity, task.unit,
+            task.catalog_item_name, JSON.stringify(task.modifiers),
+            `order-submitted:${input.orderId}:${task.order_line_id}`,
+          ],
+        );
+      }
+
+      if (firstTransition) {
+        await client.query(
+          `INSERT INTO audit_record (
+             audit_id, tenant_id, actor_id, aggregate_type, aggregate_id, action,
+             before_state, after_state, correlation_id, risk_level
+           ) VALUES ($1,$2,$3,'Order',$4,'ORDER_SUBMITTED',$5::jsonb,$6::jsonb,$7,'NORMAL')`,
+          [
+            randomUUID(), order.tenant_id, input.actorId, input.orderId,
+            JSON.stringify({ status: 'OPEN' }),
+            JSON.stringify({
+              status: 'SUBMITTED', paymentId: input.paymentId,
+              settlementGroupId: input.settlementGroupId,
+              idempotencyKey: input.idempotencyKey,
+            }),
+            randomUUID(),
+          ],
+        );
+      }
+      await client.query('COMMIT');
+      return this.getOrder(input.orderId);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * D1.4B — Accept explicit commercial terms while Order is OPEN (ADR-0028).
    * Not a pricing engine: receives already-resolved commercial economics.
    */

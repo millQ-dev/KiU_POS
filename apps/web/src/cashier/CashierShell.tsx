@@ -18,7 +18,7 @@ import { ProductGrid } from './ProductGrid.js';
 import { QuantityEntryModal } from './QuantityEntryModal.js';
 import { ModifierSelectionModal } from './ModifierSelectionModal.js';
 import { QuickAccess } from './QuickAccess.js';
-import { posCopy } from './posCopy.js';
+import { posCopy, type PosLanguage } from './posCopy.js';
 import './CashierShell.css';
 
 function nowIso(): string {
@@ -68,6 +68,7 @@ export function CashierShell({ context, onChangeContext }: Props) {
   const [cashResult, setCashResult] = useState<CashCheckoutResult | null>(null);
   const [settlement, setSettlement] = useState<SettlementProjection | null>(null);
   const [settlementBusy, setSettlementBusy] = useState(false);
+  const [language, setLanguage] = useState<PosLanguage>('ru');
   const inFlightRef = useRef(false);
 
   const liveSettlement =
@@ -420,12 +421,23 @@ export function CashierShell({ context, onChangeContext }: Props) {
     void withMutationGuard(async () => {
       setSettlementBusy(true);
       try {
+        if (commercial?.commercialState !== 'ACCEPTED') {
+          setAcceptingCommercial(true);
+          const salesContext = salesPayload(context).salesContext;
+          const accepted = await posApi.calculateAndAcceptCommercialTerms(order.orderId, {
+            salesContext,
+            idempotencyKey: `cashier-pay-accept:${order.orderId}:${Date.now()}`,
+          });
+          setCommercial(accepted.commercialStatus);
+          setAcceptingCommercial(false);
+        }
         const next = await posApi.openSettlement(order.orderId, {
           idempotencyKey: `open-settlement:${order.orderId}:${Date.now()}`,
         });
         setSettlement(next);
-        setFeedback('Checkout opened — Customer Payable frozen');
+        setFeedback(posCopy(language, 'paymentStepReady'));
       } catch (err) {
+        setAcceptingCommercial(false);
         await handleMutationError(err, order.orderId);
       } finally {
         setSettlementBusy(false);
@@ -468,7 +480,7 @@ export function CashierShell({ context, onChangeContext }: Props) {
         const authoritative = await posApi.getLiveSettlement(result.order.orderId);
         if (!authoritative.settlement) throw new Error('Settlement state could not be reloaded after cash payment');
         setSettlement(authoritative.settlement);
-        setFeedback(posCopy('en', 'cashSuccessFeedback'));
+        setFeedback(posCopy(language, 'cashSuccessFeedback'));
       } catch (err) {
         await handleMutationError(err, order.orderId);
       }
@@ -486,6 +498,14 @@ export function CashierShell({ context, onChangeContext }: Props) {
           </span>
         </div>
         <div className="pos-shell__actions">
+          <label className="pos-shell__language">
+            <span className="sr-only">Language</span>
+            <select aria-label="Language" value={language} onChange={(event) => setLanguage(event.target.value as PosLanguage)}>
+              <option value="ru">RU</option>
+              <option value="en">EN</option>
+              <option value="vi">VI</option>
+            </select>
+          </label>
           <button type="button" className="pos-shell__btn" onClick={() => void loadSurface()} disabled={surfaceLoading}>
             Refresh surface
           </button>
@@ -564,6 +584,7 @@ export function CashierShell({ context, onChangeContext }: Props) {
             onOpenCheckout={onOpenCheckout}
             onAbortCheckout={onAbortCheckout}
             cashResult={cashResult}
+            language={language}
             onCashPay={onCashPay}
             onCancelOrder={onCancelOrder}
             onNewOrder={() => {
@@ -586,6 +607,7 @@ export function CashierShell({ context, onChangeContext }: Props) {
         <ModifierSelectionModal
           slot={modifierSlot}
           busy={mutationBusy}
+          language={language}
           onCancel={() => setModifierSlot(null)}
           onConfirm={(selections) => void addSlotWithModifiers(modifierSlot, selections)}
         />

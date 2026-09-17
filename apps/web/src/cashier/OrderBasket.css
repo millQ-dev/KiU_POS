@@ -139,3 +139,18 @@
   color: var(--pos-text-muted);
   line-height: 1.4;
 }
+
+.pos-basket__pay {
+  width: 100%;
+  min-height: 56px;
+  margin: 12px 0;
+  border: 2px solid var(--pos-accent-dark);
+  border-radius: var(--pos-control-radius);
+  background: var(--pos-accent);
+  color: white;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.pos-basket__pay:disabled { opacity: .6; cursor: not-allowed; }

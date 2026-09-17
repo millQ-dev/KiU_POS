@@ -152,6 +152,27 @@ denomination rounding, tips, tax, and fiscal adapters are outside this slice.
 
 Payment remains non-custodial and does not write inventory.
 
+### 5a. Explicit reconciliation with ADR-0032
+
+This slice narrows and implements the cash exception that ADR-0032 left for
+future Settlement/Payment work:
+
+- cash change is implemented as P0 cash-shift evidence;
+- the canonical Payment and PaymentAllocation cover only Customer Payable;
+- no cash denomination rounding is introduced;
+- a satisfied Check/Settlement and successful Payment produce Order
+  `SUBMITTED`, never Order `COMPLETED`;
+- the future `SUBMITTED → COMPLETED` transition remains the fulfillment and
+  inventory boundary owned by Checkout/CompleteOrder policy.
+
+Cash checkout also has a durable command boundary. The command reservation,
+canonical Payment/Settlement reconciliation, and local finalization are
+recoverable across process transaction boundaries. A retry reuses the
+canonical Payment and allocation, repairs the idempotent OrderSubmitted
+transition and production tasks, and records the CashShift transaction and
+receipt exactly once. A failpoint after Payment/Settlement reconciliation is
+covered by the acceptance suite.
+
 ### 6. Receipt
 
 After successful cash payment, the system produces a canonical receipt payload

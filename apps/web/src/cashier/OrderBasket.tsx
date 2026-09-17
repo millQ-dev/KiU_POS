@@ -6,10 +6,9 @@ import type {
   OrderLine,
   SettlementProjection,
 } from '../api/types.js';
-import { CommercialStatusPanel } from './CommercialStatus.js';
 import { OrderLineEditor } from './OrderLineEditor.js';
-import { SettlementCheckoutPanel } from './SettlementCheckout.js';
 import { CashPaymentPanel } from './CashPaymentPanel.js';
+import { posCopy, type PosLanguage } from './posCopy.js';
 import './OrderBasket.css';
 
 type Props = {
@@ -32,6 +31,7 @@ type Props = {
   onOpenCheckout: () => void;
   onAbortCheckout: () => void;
   cashResult?: CashCheckoutResult | null;
+  language?: PosLanguage;
   onCashPay?: (tenderedMinor: string) => void;
   onCancelOrder: () => void;
   onNewOrder: () => void;
@@ -64,9 +64,9 @@ export function OrderBasketPanel({
   onCashPay = () => undefined,
   onCancelOrder,
   onNewOrder,
+  language = 'ru',
 }: Props) {
   const selected = order?.lines.find((l) => l.orderLineId === selectedLineId) ?? null;
-  const commercialAccepted = commercial?.commercialState === 'ACCEPTED';
 
   return (
     <aside className="pos-basket" aria-label="Order basket">
@@ -143,30 +143,23 @@ export function OrderBasketPanel({
         </div>
       )}
 
-      <CommercialStatusPanel
-        status={commercial}
-        priceResolution={priceResolution}
-        refreshing={refreshingPrices}
-        accepting={acceptingCommercial}
-        editable={editable && !!order}
-        onRefreshPrices={onRefreshPrices}
-        onAcceptCurrentPrices={onAcceptCurrentPrices}
-      />
-
-      <SettlementCheckoutPanel
-        settlement={settlement}
-        commercialAccepted={!!commercialAccepted}
-        editableOrder={editable && !!order}
-        busy={mutationBusy || settlementBusy || loading}
-        onOpenCheckout={onOpenCheckout}
-        onAbortCheckout={onAbortCheckout}
-      />
+      {editable && order && order.lines.length > 0 && !settlement && (
+        <button
+          type="button"
+          className="pos-basket__pay"
+          disabled={mutationBusy || settlementBusy || loading}
+          onClick={onOpenCheckout}
+        >
+          {posCopy(language, 'pay')}
+        </button>
+      )}
 
       {settlement && (cashResult || (settlement.state === 'COLLECTING' && settlement.customerPayableMinor !== '0')) && (
         <CashPaymentPanel
           settlement={settlement}
           busy={mutationBusy || settlementBusy || loading}
           result={cashResult ?? null}
+          language={language}
           onPay={onCashPay}
         />
       )}

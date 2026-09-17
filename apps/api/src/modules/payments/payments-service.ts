@@ -446,6 +446,18 @@ export class PaymentsService {
     return res.rows[0] ? mapPayment(res.rows[0]) : null;
   }
 
+  async getPaymentByCreateIdempotencyKey(
+    legalEntityId: string,
+    createIdempotencyKey: string,
+  ): Promise<PaymentProjection | null> {
+    const res = await this.pool.query<PaymentDb>(
+      `SELECT * FROM payment
+       WHERE legal_entity_id = $1 AND create_idempotency_key = $2`,
+      [legalEntityId, createIdempotencyKey],
+    );
+    return res.rows[0] ? mapPayment(res.rows[0]) : null;
+  }
+
   /**
    * Record verified (or explicitly UNVERIFIED) provider outcome evidence.
    * Adapters must verify signatures before calling with VERIFIED.
