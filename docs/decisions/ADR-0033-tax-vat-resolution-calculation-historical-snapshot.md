@@ -1,7 +1,8 @@
 # ADR-0033: Tax / VAT Resolution, Calculation & Historical Snapshot
 
-- **Status:** Proposed (Level C — awaiting PO Accept)
+- **Status:** Accepted
 - **Date:** 2026-09-17
+- **Accepted:** 2026-09-17 (PO ACCEPT WITH DELTAS — rounding strategy policy-driven; TaxClassificationAssignment scoped; independent re-review APPROVE)
 - **Decision owners:** Product Owner and System Architect
 - **Related:** ADR-0002, ADR-0008, ADR-0012, ADR-0014, ADR-0016, ADR-0025, ADR-0028, ADR-0029, ADR-0030, ADR-0032; Architecture v1.2 / v1.3; domain-module-map; P0 Vietnam Fiscalization Readiness (`NEEDS_TAX_ARCHITECTURE`)
 - **Blocks enabled after Accept (implementation not launched by this ADR):**
@@ -33,9 +34,10 @@ This ADR freezes **machinery**, not a Vietnam rate table.
 | --- | --- |
 | **Tax domain** | Dedicated module owning tax semantics, policy, calculation, and historical tax snapshots |
 | **TaxClassification** | Versioned, jurisdiction-aware tax treatment class for sellable merchandise/service — **not** a raw percentage and **not** a Catalog UI category |
-| **TaxClassificationAssignment** | Binding of a sellable Catalog identity → TaxClassification under LegalEntity/jurisdiction applicability |
-| **TaxPolicy** | Versioned, effective-dated policy: pricing tax mode, rate/treatment, taxable-base rule, rounding-context refs |
+| **TaxClassificationAssignment** | Tax-owned, effective-dated binding: CatalogItem identity → TaxClassification under Tenant + LegalEntity + jurisdiction applicability — **not** a global field on CatalogItem |
+| **TaxPolicy** | Versioned, effective-dated policy: pricing tax mode, rate/treatment, taxable-base rule, **TaxRoundingStrategy**, rounding-context refs |
 | **PricingTaxMode** | `TAX_INCLUSIVE` \| `TAX_EXCLUSIVE` |
+| **TaxRoundingStrategy** | Explicit versioned policy choice for how line/order tax Money is rounded and aggregated (e.g. `LINE_ROUND_THEN_SUM`, future `AGGREGATE_THEN_ROUND`) — **not** a jurisdiction-independent system default |
 | **TaxTreatment** | `STANDARD_RATE` \| `REDUCED_RATE` \| `ZERO_RATE` \| `EXEMPT` \| `NOT_SUBJECT_TO_TAX` \| `UNKNOWN` \| `MISSING_CONFIGURATION` |
 | **TaxableBase** | Authoritative Money basis to which the resolved tax treatment applies for a line (policy-defined; not an alias) |
 | **TaxLineSnapshot** | Immutable historical line-level tax result |
@@ -99,18 +101,65 @@ Durable entity with at least:
 
 Historical Orders reference **TaxClassification identity + TaxPolicy version**, not live Catalog labels.
 
-### 3. Classification assignment (canonical owner)
+### 3. Classification assignment (Tax-owned; Catalog identity independent)
 
-**Canonical assignment owner:** `CatalogItem` (sellable Catalog identity) → `TaxClassification` via **TaxClassificationAssignment**, scoped by **Tenant + LegalEntity (+ jurisdiction applicability)**.
+**TaxClassification** is a Tax-owned semantic identity.
+
+**TaxClassificationAssignment** is Tax-owned configuration. It binds:
+
+```text
+CatalogItem identity
+  → effective-dated TaxClassificationAssignment
+  → TaxClassification
+```
+
+**Assignment applicability (binding minimum):**
+
+- tenant
+- LegalEntity
+- jurisdiction applicability (via JurisdictionProfile / LegalEntity binding)
+- effective interval `[effectiveFrom, effectiveTo)`
+
+**Forbidden:**
+
+- a globally mutable `taxClassificationId` (or equivalent) on CatalogItem that is valid across every LegalEntity;
+- treating Catalog/Menu identity as Tax configuration;
+- LegalEntity owning Catalog/Menu identity.
+
+**Consequence (binding):**
+
+```text
+Same CatalogItem identity
+  MAY resolve to different TaxClassification / TaxPolicy
+  for different LegalEntities / jurisdictions / effective dates
+without cloning Catalog identity.
+```
+
+```text
+Catalog identity  ≠  Tax configuration
+```
+
+**Resolution path (server-side only):**
+
+```text
+Order
+  → Tenant / LegalEntity
+  → CatalogItem (line identity)
+  → effective TaxClassificationAssignment @ businessDateTime
+  → TaxClassification
+  → TaxPolicyVersion
+```
 
 **Precedence (binding):**
 
-1. Explicit LegalEntity-scoped assignment for the CatalogItem at `businessDateTime`.
+1. Explicit TaxClassificationAssignment matching Tenant + LegalEntity + jurisdiction + CatalogItem at `businessDateTime`.
 2. If missing and Tax is required for the sellable → `TAX_CLASSIFICATION_REQUIRED` (fail closed).
 3. No inheritance from Menu page, POS layout, Outlet color, or Brand defaults that bypass LegalEntity scope.
 4. Outlet may **restrict** which classifications are sellable locally only if a future accepted Outlet policy exists; Outlet never invents rates.
 
 Menu/POS may **display** classification labels for operators; display is not SoT.
+
+Historical accepted Tax snapshots store **resolved** classification/policy facts. Later assignment changes do **not** mutate old Orders.
 
 ### 4. TaxPolicy resolver
 
@@ -134,11 +183,12 @@ commercial funding facts     # D1.4B-compatible inputs (see §7)
 | Multiple conflicting policies | `TAX_POLICY_AMBIGUOUS` |
 | Classification missing/invalid | `TAX_CLASSIFICATION_REQUIRED` / `TAX_CLASSIFICATION_INVALID` |
 | Rounding context missing | `TAX_ROUNDING_POLICY_REQUIRED` |
+| TaxRoundingStrategy missing when Tax calculation required | `TAX_ROUNDING_STRATEGY_REQUIRED` (fail closed) |
 | Treatment `UNKNOWN` / `MISSING_CONFIGURATION` when fiscal/tax required | fail closed — **never** silent `0%` |
 
-**No cross-tenant TaxPolicy use. No cross-LegalEntity TaxPolicy use** unless a future shared-configuration ADR is Accepted.
+**No cross-tenant TaxPolicy use. No cross-LegalEntity TaxPolicy / TaxClassification use** unless a future shared-configuration ADR is Accepted.
 
-Caller-supplied `tenantId` / `taxPolicyId` / rates must not override Order→LegalEntity authoritative relationship.
+Caller-supplied `tenantId` / `taxPolicyId` / `taxClassificationId` / rates must not override Order→LegalEntity authoritative resolution. Prefer **not accepting** authoritative Tax IDs from cashier/API input at all. If mismatched caller values are present: **reject** — do not silently replace.
 
 ### 5. PricingTaxMode — TAX_INCLUSIVE / TAX_EXCLUSIVE (mandatory)
 
@@ -239,9 +289,24 @@ Frontend / cashier **never** calculates authoritative VAT.
 
 **OpenSettlement / Checkout (binding intent for TAX1.1):** when Tax is required for the LegalEntity/jurisdiction, opening Settlement or advancing checkout that needs PRESENT tax must fail closed on missing/stale TaxOrderSnapshot (`TAX_SNAPSHOT_REQUIRED` / `TAX_SNAPSHOT_STALE`) — Settlement must not invent ABSENT→PRESENT(0).
 
-### 9. Line vs order rounding (mandatory)
+### 9. TaxRoundingStrategy (mandatory — policy-driven, not universal default)
 
-**Canonical model:**
+Exact Vietnam VAT rounding / aggregation semantics remain **LEGAL_UNKNOWN** (Decree 254 / Circular 91 do not prescribe a universal computational algorithm for VAT line arithmetic in the readiness research). Therefore architecture **MUST NOT** elevate any strategy to a permanent jurisdiction-independent system default.
+
+**Binding:**
+
+```text
+TaxRoundingStrategy is an explicit versioned / effective-dated policy choice
+on TaxPolicy (or TaxPolicy-bound rounding configuration).
+```
+
+**First supported named strategy** (implementation / fixture-capable; not a legal universal default):
+
+```text
+LINE_ROUND_THEN_SUM
+```
+
+Conceptual behaviour when that strategy is selected:
 
 ```text
 For each OrderLine:
@@ -250,30 +315,42 @@ For each OrderLine:
   calculate/round line tax Money using named TaxCalculationContext(s)
 Then:
   order/rate aggregates = sum of frozen line results
+  (no second hidden re-round unless a named aggregate context is also selected)
 ```
 
-**Default:** line-round-then-sum.  
-**Not default:** aggregate taxable base across lines → single VAT → allocate residuals to lines.
+**Architecture must also be able to represent**, without redesign, other deterministic strategies when verified legal/provider semantics require them, e.g.:
 
-If a future jurisdiction/provider requires aggregate-then-allocate:
+```text
+AGGREGATE_THEN_ROUND
+```
 
-- introduce an explicit named **TaxAggregationPolicy** / residual allocation ADR;
-- until Accepted, residual-cent redistribution to lines is **unsupported** (same discipline as Settlement split rounding).
+(or further named strategies Accepted later).
+
+| Rule | Binding |
+| --- | --- |
+| Missing required TaxRoundingStrategy | fail closed (`TAX_ROUNDING_STRATEGY_REQUIRED`) |
+| Hidden fallback strategy | **forbidden** |
+| Residual allocation of aggregate VAT back onto lines | **unsupported** until an explicit residual-allocation ADR is Accepted |
+| Silent `LINE_ROUND_THEN_SUM` when strategy unset | **forbidden** |
+
+`LINE_ROUND_THEN_SUM` may appear in Vietnam MVP fixtures **only** when the LegalEntity TaxPolicy explicitly selects it — never as unnamed global arithmetic.
 
 ### 10. Named Tax RoundingPolicy contexts
 
 ADR-0030 `BASE_LIST_LINE_GROSS` **does not** own tax rounding.
 
-This ADR freezes these **named contexts** (policies versioned/effective-dated per LegalEntity + jurisdiction + context):
+This ADR freezes these **named contexts** (policies versioned/effective-dated per LegalEntity + jurisdiction + context). Which contexts a given TaxRoundingStrategy uses is policy-defined:
 
 | Context | Purpose |
 | --- | --- |
 | `TAX_INCLUSIVE_EXTRACTION` | Split inclusive Money into taxable base + VAT |
 | `TAX_LINE_TAXABLE_BASE` | Round taxable base when policy requires a rounded base distinct from commercial gross |
 | `TAX_LINE_VAT_AMOUNT` | Round line VAT / tax amount |
-| `TAX_RATE_AGGREGATE_VAT` | Optional re-round when an aggregate-by-rate total must be official Money distinct from sum-of-lines — **default unused** under line-round-then-sum (aggregate = exact sum of line VAT minors) |
+| `TAX_RATE_AGGREGATE_VAT` | Round aggregate-by-rate total when strategy/policy requires an official aggregate Money distinct from sum-of-lines |
 
-Decree 254 / Circular 91 research does **not** prescribe a universal computational rounding algorithm for VAT line arithmetic (LEGAL_UNKNOWN for exact algorithm). Therefore Tax RoundingPolicy is **configurable/versioned**. Product may choose HALF_UP quantum 1 for VND in fixtures only when explicitly configured — **never** as an unnamed global default.
+Missing required RoundingPolicy for a context demanded by the selected TaxRoundingStrategy → `TAX_ROUNDING_POLICY_REQUIRED`.
+
+Product may choose HALF_UP quantum 1 for VND in fixtures only when explicitly configured — **never** as an unnamed global default.
 
 All authoritative arithmetic: decimal-safe; **no JS `Number`**.
 
@@ -295,6 +372,7 @@ All authoritative arithmetic: decimal-safe; **no JS `Number`**.
 - quantity canonical decimal + UoM
 - funding input fingerprint/refs (merchant/third-party/compliment components used)
 - RoundingPolicy version ids per context used + rounding deltas / provenance
+- TaxRoundingStrategy id/version used
 - businessDateTime used for resolution
 - calculation semantic fingerprint
 
@@ -302,7 +380,8 @@ All authoritative arithmetic: decimal-safe; **no JS `Number`**.
 
 - orderId + acceptance identity/version
 - references to TaxLineSnapshots
-- aggregates by TaxTreatment/rate (sum of lines)
+- TaxRoundingStrategy id/version used
+- aggregates by TaxTreatment/rate (per selected strategy)
 - total tax Money / total incl-tax merchandise tax view as needed
 - coupled commercial acceptance identity / fingerprint
 - acceptor provenance / idempotency key
@@ -405,6 +484,7 @@ Exact public error codes follow repo conventions at TAX1.1; semantics required n
 | `TAX_CLASSIFICATION_INVALID` | Assignment/class not applicable |
 | `TAX_CALCULATION_UNAVAILABLE` | Cannot compute authoritatively |
 | `TAX_ROUNDING_POLICY_REQUIRED` | Named tax rounding context missing |
+| `TAX_ROUNDING_STRATEGY_REQUIRED` | TaxRoundingStrategy missing when calculation required |
 | `TAX_SNAPSHOT_REQUIRED` | Required snapshot missing at checkout/complete |
 | `TAX_SNAPSHOT_STALE` | Fingerprint mismatch / invalidated |
 
@@ -441,8 +521,9 @@ TaxClassification, TaxPolicy versions, taxable base, VAT amounts, Tax snapshots,
 ### Threats (non-exhaustive)
 
 - client/cashier selects lower tax rate or treatment
-- client submits `vatAmount` / `taxableBase` / `taxRate` / `taxPolicyId` as trusted facts
-- cross-tenant or cross-LegalEntity TaxPolicy use
+- client submits `vatAmount` / `taxableBase` / `taxRate` / `taxPolicyId` / `taxClassificationId` as trusted facts
+- caller injects TaxClassification or TaxPolicy from another LegalEntity
+- cross-tenant or cross-LegalEntity TaxPolicy / assignment use
 - forced stale policy / snapshot
 - historical snapshot tampering / ordinary CRUD mutate
 - rounding manipulation / extreme decimals / overflow
@@ -452,11 +533,19 @@ TaxClassification, TaxPolicy versions, taxable base, VAT amounts, Tax snapshots,
 
 ```text
 Authoritative Tax inputs and results are server-resolved only.
+
+Future runtime derives:
+  Order → Tenant / LegalEntity → CatalogItem
+    → effective TaxClassificationAssignment → TaxPolicy
+
 Frontend/cashier MUST NOT submit trusted authoritative:
-  taxRate | taxableBase | vatAmount | taxPolicyId | taxTreatment
+  taxRate | taxableBase | vatAmount | taxPolicyId | taxClassificationId | taxTreatment
 ```
 
-Clients may submit **intent** (e.g. request company invoice buyer identity — Fiscal/Orders concern) but never authoritative Tax Money.
+Prefer not accepting authoritative Tax IDs from cashier/API input at all.  
+If a caller supplies classification/policy IDs that do not match server resolution for the Order’s Tenant/LegalEntity: **reject** — do **not** silently replace mismatched values.
+
+Clients may submit **intent** (e.g. request company invoice buyer identity — Fiscal/Orders concern) but never authoritative Tax Money or assignment/policy identifiers.
 
 ### Authorization
 
@@ -492,17 +581,19 @@ Every Tax runtime PR requires **FUNCTIONAL + ARCHITECTURE + SECURITY** APPROVE. 
 1. Cashier cannot select tax rate  
 2. Client `vatAmount` rejected/ignored  
 3. Cross-tenant TaxPolicy rejected  
-4. Cross-LegalEntity TaxPolicy rejected  
-5. Missing TaxClassification fails closed  
+4. Cross-LegalEntity TaxPolicy / TaxClassification rejected (no silent replace)  
+5. Missing TaxClassificationAssignment fails closed  
 6. Ambiguous policy fails closed  
 7. Stale Tax snapshot rejected  
-8. Completed Order stable after policy change  
+8. Completed Order stable after policy/assignment change  
 9. Duplicate accept idempotent  
 10. Concurrent accept/edit cannot freeze wrong VAT  
 11. Extreme decimal input rejected  
-12. TaxPolicy mutation requires privileged boundary  
+12. TaxPolicy / assignment mutation requires privileged boundary  
 13. Accepted Tax snapshot cannot ordinary-CRUD mutate  
 14. Fiscalization cannot issue using fabricated Tax facts  
+15. Client-supplied foreign LegalEntity `taxClassificationId` / `taxPolicyId` rejected  
+16. Missing TaxRoundingStrategy fails closed (no hidden default)  
 
 ---
 
@@ -512,7 +603,7 @@ Illustrative rates only unless a fixture cites official effective-dated config.
 
 | ID | Scenario |
 | --- | --- |
-| A | `TAX_INCLUSIVE` COUNT line → base + VAT via `TAX_INCLUSIVE_EXTRACTION` + `TAX_LINE_VAT_AMOUNT` |
+| A | `TAX_INCLUSIVE` COUNT line with explicit TaxRoundingStrategy `LINE_ROUND_THEN_SUM` → base + VAT via named contexts |
 | B | `TAX_EXCLUSIVE` COUNT line → VAT on base; amount incl VAT |
 | C | Fractional MASS/VOLUME quantity; decimal-safe |
 | D | Two lines, different TaxClassification / rates; aggregates by rate |
@@ -520,9 +611,11 @@ Illustrative rates only unless a fixture cites official effective-dated config.
 | F | Third-party-funded discount; Revenue Basis vs TaxableBase distinction held |
 | G | Compliment; explicit fact; policy-driven tax outcome |
 | H | `ZERO_RATE` vs `EXEMPT` vs `NOT_SUBJECT_TO_TAX` not collapsed |
-| I | Next-day TaxPolicy change; completed Order unchanged |
+| I | Next-day TaxPolicy / assignment change; completed Order unchanged |
 | J | Quantity mutation invalidates commercial + Tax acceptance |
 | K | Reversal uses original frozen Tax facts |
+| L | Same CatalogItem → different TaxClassificationAssignment per LegalEntity |
+| M | Missing TaxRoundingStrategy fails closed (no hidden LINE_ROUND_THEN_SUM) |
 
 ---
 
@@ -544,7 +637,7 @@ Launch ADR-0014 delta separately after TAX1.1 semantics are Accepted/runtime-rea
 
 - Exact offline/deferred transmission windows (Circular 91 counsel)  
 - Edge dine-in timing vs Decree 254 Art. 9  
-- Exact VAT computational rounding algorithm in law (hence configurable Tax RoundingPolicy)  
+- Exact VAT computational rounding / aggregation algorithm in law (hence configurable TaxRoundingStrategy + RoundingPolicy; Vietnam LEGAL_UNKNOWN)  
 - Provider certification / signing / HSM details  
 - Provider selection  
 
@@ -567,7 +660,9 @@ Launch ADR-0014 delta separately after TAX1.1 semantics are Accepted/runtime-rea
 | Embed Tax only inside commercial JSON blob | Weak Tax ownership; harder isolation/security; Reporting/Fiscal unclear SoT |
 | Infer inclusive/exclusive from VN/VND | Illegal convenience; merchants may differ |
 | Reuse `BASE_LIST_LINE_GROSS` for VAT | Forbidden by ADR-0030 / ADR-0032 |
-| Aggregate-then-allocate residuals by default | Hidden dong redistribution; needs explicit policy |
+| Universal system default `LINE_ROUND_THEN_SUM` | Vietnam rounding LEGAL_UNKNOWN; must be explicit TaxRoundingStrategy |
+| Hidden residual allocation of aggregate VAT | Needs explicit Accepted residual policy |
+| Global `taxClassificationId` on CatalogItem | Couples Catalog identity to one Tax treatment across LegalEntities |
 | Hardcode Vietnam 8%/10% in ADR | Rate table belongs in effective-dated config |
 | Collapse exempt/zero/unknown to 0 | Destroys legal/reporting semantics |
 
@@ -580,7 +675,8 @@ Launch ADR-0014 delta separately after TAX1.1 semantics are Accepted/runtime-rea
 - [x] TaxableBase ≠ payable ≠ merchandise ≠ Revenue Basis  
 - [x] Discount funding scenarios preserved without inventing VN statute  
 - [x] Multiple rates + non-collapsed treatments  
-- [x] Named tax rounding contexts; line-round-then-sum default  
+- [x] Named tax rounding contexts; TaxRoundingStrategy policy-driven (not universal default)  
+- [x] TaxClassificationAssignment scoped (Catalog identity ≠ Tax config)  
 - [x] Historical Tax snapshots + invalidation + CompleteOrder consume-only  
 - [x] Settlement / Fiscalization / Reporting boundaries  
 - [x] Security threat model + adversarial tests listed  
@@ -589,9 +685,11 @@ Launch ADR-0014 delta separately after TAX1.1 semantics are Accepted/runtime-rea
 ## Status progression
 
 ```text
-Proposed → (independent TAX/MONEY/SECURITY review APPROVE)
-        → PO Accept (Level C)
-        → Accepted
+Proposed
+  → independent TAX/MONEY/SECURITY review APPROVE
+  → PO ACCEPT WITH DELTAS (2026-09-17)
+  → deltas incorporated + independent re-review APPROVE
+  → Accepted
 ```
 
-Runtime TAX1.1 requires separate launch after Accept.
+Runtime TAX1.1 requires separate launch after Accept — **not** started by this ADR.
