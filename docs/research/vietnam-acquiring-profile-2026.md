@@ -48,7 +48,7 @@ Legal conclusions are **not** attorney advice. Flag attorney confirmation separa
 
 - Decree **52/2024/NĐ-CP** (issued 15 May 2024, effective **1 July 2024**) governs non-cash payments, payment services, and **payment intermediary services**, replacing Decree 101. Sources: [Công báo / Chính phủ](https://congbao.chinhphu.vn/van-ban/nghi-dinh-so-52-2024-nd-cp-41938/50259.htm); English summary [LuatVietnam](https://english.luatvietnam.vn/tai-chinh/decree-52-2024-nd-cp-on-non-cash-payment-336447-d1.html); firm note [Allen & Gledhill](https://www.allenandgledhill.com/vn/publication/articles/28438/new-regulations-on-cashless-payments-in-in-effect).
 - Payment intermediary services include: financial switching, international switching, ACH/clearing, e-wallet, collection/payment support, electronic payment gateway. IPS providers are **non-bank** organisations **licensed by SBV**.
-- Circular **40/2024/TT-NHNN** (17 July 2024) implements IPS provision rules.
+- Circular **40/2024/TT-NHNN** (issued/effective **17 July 2024**) regulates provision of payment intermediary services. Official Công báo listing: [congbao.chinhphu.vn — Thông tư 40/2024/TT-NHNN](https://congbao.chinhphu.vn/van-ban/thong-tu-so-40-2024-tt-nhnn-42371.htm) (Công báo 885+886; PDF/DOC linked there). Article-level licence analysis still **REQUIRES OFFICIAL TEXT CONFIRMATION** by counsel.
 
 **VERIFIED CURRENT FACT (capital thresholds — secondary English summaries of Decree 52):**
 

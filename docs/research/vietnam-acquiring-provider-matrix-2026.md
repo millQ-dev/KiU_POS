@@ -25,18 +25,18 @@
 | Capability | MoMo | ZaloPay | VNPAY | Bank VietQR (OCB-class) | SePay (claim) | NAPAS direct |
 | --- | --- | --- | --- | --- | --- | --- |
 | Create payment | YES (docs) | YES `/v2/create` | YES payment URL / genqr | QR generate APIs | YES REST claim | **UNKNOWN** public API |
-| Dynamic QR | YES (payType qr) | YES (QR channels) | YES genqr | YES | YES VietQRPay claim | Product yes (marketing) |
+| Dynamic QR | YES (payType qr) | YES (QR channels) | YES genqr | YES — OCB `generate-qr-code-for-merchant-vietqr` (portal) | YES | Product yes (marketing) |
 | Merchant-presented | YES | YES | YES | YES | YES | YES |
 | Customer-presented | **UNKNOWN** product | **UNKNOWN** | **UNKNOWN** | **UNKNOWN** | **UNKNOWN** | VIETQRMe product (NAPAS) — ISV API UNKNOWN |
 | QR expiry | **SALES/docs per product** | Order timeout / inquiry after 15m | ExpireDate in QR specs (lib notes) | **SALES** | Claims | **SALES** |
 | Deeplink / redirect | YES | YES | YES return URL | Optional | YES | **SALES** |
-| Server callback/IPN | YES IPN | YES callback | YES IPN | Transaction sync / callbacks (vietqr.vn pattern) | Claims webhook | Via partner |
+| Server callback/IPN | YES IPN | YES callback | YES IPN | **UNKNOWN/SALES** (do not assume vietqr.vn host2host sync) | Claims webhook | Via partner |
 | Callback retry | **SALES** | Miss → inquiry after 15m (docs) | **SALES** | **SALES** | **SALES** | **SALES** |
 | Signature/auth | HMAC-SHA256 | HMAC (`key2` callback) | `vnp_SecureHash` | Bearer/Basic patterns | Basic Auth claim | **UNKNOWN** |
-| Status inquiry | YES | YES `/v2/query` | YES merchant transaction API | check-order / bank query | Claims | Via partner |
-| Idempotency | `requestId` unique; dup → code 40 | `app_trans_id` merchant TX | `vnp_TxnRef` uniqueness rules | **SALES** | **SALES** | **SALES** |
-| Merchant request ID | requestId / orderId | app_trans_id | vnp_TxnRef | order fields | Claims | Order-linked (marketing) |
-| Provider TX ID | transId | zp_trans_id | vnp_TransactionNo | bank TX | Claims | **SALES** |
+| Status inquiry | YES | YES `/v2/query` | YES merchant transaction API | Merchant register + generate QR documented (OCB); **inquiry/callback UNKNOWN/SALES** | Claims | Via partner |
+| Idempotency | `requestId` unique; dup → code 40 | `app_trans_id` merchant TX | `vnp_TxnRef` uniqueness rules | **UNKNOWN/SALES** | **SALES** | **SALES** |
+| Merchant request ID | requestId / orderId | app_trans_id | vnp_TxnRef | **SALES** (order fields likely) | Claims | Order-linked (marketing) |
+| Provider TX ID | transId | zp_trans_id | vnp_TransactionNo | **UNKNOWN/SALES** | Claims | **SALES** |
 | Refund | YES (docs) | YES async + query_refund | YES refund API | **SALES** | **SALES** | Mentions refunds in VietQRPay marketing |
 | Partial refund | **SALES** | Docs allow amount; bank-dependent | **SALES** | **SALES** | **SALES** | **SALES** |
 | Void/cancel | Capture/cancel patterns (AIO) | **SALES** | **SALES** | **SALES** | **SALES** | Cancellations mentioned |
