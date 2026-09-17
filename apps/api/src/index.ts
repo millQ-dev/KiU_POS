@@ -21,7 +21,9 @@ async function main() {
   await registerHealthRoutes(app, pool);
   await registerGoodsReceiptRoutes(app, pool);
   await registerPosRoutes(app, pool);
-  await registerDevCashierBootstrapRoutes(app, pool);
+  if (env.APP_ENV === 'local' || (env.APP_ENV === 'preview' && env.ALLOW_DEV_CASHIER_BOOTSTRAP === '1')) {
+    await registerDevCashierBootstrapRoutes(app, pool);
+  }
 
   app.get('/', async () => ({
     name: 'MillQ API',

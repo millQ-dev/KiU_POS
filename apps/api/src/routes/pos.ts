@@ -458,11 +458,12 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
 
 /**
  * Development-only outlet context bootstrap — NOT production authorization.
- * Enabled when NODE_ENV !== 'production' or ALLOW_DEV_CASHIER_BOOTSTRAP=1.
+ * Registered only for local/preview environments with ALLOW_DEV_CASHIER_BOOTSTRAP=1.
  */
 export async function registerDevCashierBootstrapRoutes(app: FastifyInstance, pool: pg.Pool) {
+  const appEnv = process.env.APP_ENV ?? (process.env.NODE_ENV === 'production' ? 'production' : 'local');
   const allowed =
-    process.env.NODE_ENV !== 'production' || process.env.ALLOW_DEV_CASHIER_BOOTSTRAP === '1';
+    appEnv === 'local' || (appEnv === 'preview' && process.env.ALLOW_DEV_CASHIER_BOOTSTRAP === '1');
   const cashShifts = new CashShiftService(pool);
 
   app.post('/api/v1/dev/cash-shifts', async (req, reply) => {

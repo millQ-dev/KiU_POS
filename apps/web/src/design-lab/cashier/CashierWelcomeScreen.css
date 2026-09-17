@@ -1,0 +1,231 @@
+.kiu-welcome {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: clamp(24px, 5vw, 64px);
+  background:
+    linear-gradient(135deg, rgba(168, 111, 74, 0.11), transparent 46%),
+    var(--pos-bg);
+}
+
+.kiu-welcome__frame {
+  width: min(1080px, 100%);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.82fr);
+  gap: clamp(24px, 5vw, 64px);
+  align-items: stretch;
+}
+
+.kiu-welcome__intro {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--pos-space-5);
+}
+
+.kiu-welcome__mark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pos-space-2);
+  color: var(--pos-accent-dark);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.kiu-welcome__mark::before {
+  content: '';
+  width: 32px;
+  height: 4px;
+  background: var(--pos-accent);
+  border-radius: var(--pos-control-radius);
+}
+
+.kiu-welcome__title {
+  max-width: 12ch;
+  margin: 0;
+  font-size: clamp(2.25rem, 5vw, 4.5rem);
+  line-height: 0.98;
+  letter-spacing: -0.045em;
+}
+
+.kiu-welcome__lead {
+  max-width: 42rem;
+  margin: 0;
+  color: var(--pos-text-muted);
+  font-size: clamp(1.05rem, 1.8vw, 1.3rem);
+  line-height: 1.45;
+}
+
+.kiu-welcome__sequence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pos-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kiu-welcome__sequence li {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 var(--pos-space-3);
+  border: 1px solid var(--pos-border);
+  border-radius: var(--pos-control-radius);
+  background: rgba(255, 255, 255, 0.58);
+  color: var(--pos-text-muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.kiu-welcome__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pos-space-4);
+  padding: clamp(20px, 3vw, 32px);
+  border: 2px solid var(--pos-border-strong);
+  border-radius: var(--pos-panel-radius);
+  background: var(--pos-surface);
+  box-shadow: 0 4px 16px rgba(32, 35, 33, 0.1);
+}
+
+.kiu-welcome__panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--pos-space-3);
+}
+
+.kiu-welcome__eyebrow {
+  margin: 0 0 var(--pos-space-1);
+  color: var(--pos-text-muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.kiu-welcome__panel-title {
+  margin: 0;
+  font-size: 1.4rem;
+  line-height: 1.2;
+}
+
+.kiu-welcome__fixture {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border: 1px solid var(--pos-warn);
+  border-radius: var(--pos-control-radius);
+  color: #8a5f00;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.kiu-welcome__context {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--pos-space-3);
+  margin: 0;
+}
+
+.kiu-welcome__context div {
+  min-width: 0;
+  padding: var(--pos-space-3);
+  border: 1px solid var(--pos-border);
+  border-radius: var(--pos-control-radius);
+  background: var(--pos-surface-2);
+}
+
+.kiu-welcome__context dt {
+  margin-bottom: var(--pos-space-1);
+  color: var(--pos-text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.kiu-welcome__context dd {
+  overflow: hidden;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kiu-welcome__language-label {
+  margin: 0 0 var(--pos-space-2);
+  color: var(--pos-text-muted);
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.kiu-welcome__languages {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--pos-space-2);
+}
+
+.kiu-welcome__language {
+  min-height: var(--pos-touch);
+  border: 2px solid var(--pos-border);
+  border-radius: var(--pos-control-radius);
+  background: var(--pos-surface);
+  color: var(--pos-text);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.kiu-welcome__language:hover,
+.kiu-welcome__language[data-selected='true'] {
+  border-color: var(--pos-accent-dark);
+  background: var(--pos-accent-soft);
+}
+
+.kiu-welcome__language[data-selected='true'] {
+  box-shadow: inset 0 0 0 1px var(--pos-accent-dark);
+}
+
+.kiu-welcome__continue {
+  min-height: 56px;
+  margin-top: var(--pos-space-2);
+  border: 2px solid var(--pos-accent-dark);
+  border-radius: var(--pos-control-radius);
+  background: var(--pos-accent);
+  color: #fff;
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.kiu-welcome__continue:hover {
+  background: var(--pos-accent-dark);
+}
+
+.kiu-welcome__note {
+  margin: 0;
+  color: var(--pos-text-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 760px) {
+  .kiu-welcome {
+    place-items: start center;
+  }
+
+  .kiu-welcome__frame {
+    grid-template-columns: 1fr;
+  }
+
+  .kiu-welcome__title {
+    max-width: none;
+  }
+}

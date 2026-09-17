@@ -10,7 +10,8 @@
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "migrate": "node --import tsx src/db/migrate.ts"
+    "migrate": "node --import tsx src/db/migrate.ts",
+    "preview:reset": "node --import tsx src/db/preview-reset.ts"
   },
   "dependencies": {
     "@millq/contracts": "workspace:*",

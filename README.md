@@ -38,7 +38,7 @@ Details: [`docs/processes/origin-github-hosting.md`](docs/processes/origin-githu
 
 ## Local development
 
-Requirements: Node.js ≥ 20, pnpm 9, PostgreSQL 16 (Docker Compose **or** local install).
+Requirements: Node.js ≥ 22.13, pnpm 9, PostgreSQL 16 (Docker Compose **or** local install).
 
 ```bash
 cp .env.example .env

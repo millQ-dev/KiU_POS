@@ -1,0 +1,25 @@
+# Render API_UPSTREAM for the preview runtime (for example, api:3000).
+# The deploy adapter owns the final host/TLS configuration.
+server {
+  listen 8080;
+  root /usr/share/nginx/html;
+
+  location = /health {
+    proxy_pass http://${API_UPSTREAM}/health;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Release-SHA $http_x_release_sha;
+  }
+
+  location /api/ {
+    proxy_pass http://${API_UPSTREAM};
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+}
