@@ -50,7 +50,7 @@ No merge, QR, KDS, physical printer adapter, or Shift UI was started.
 - ADR-0033 regression suite: **8 tests passed**, including failpoint recovery, invalid context without Settlement, and wrong-context replay rejection.
 - Web: **3 test files, 36 tests passed** with `NODE_ENV=test`, including RU/EN/VI critical P0 render coverage.
 - API and web typecheck: passed.
-- Production build: to be recorded after the final clean run.
+- Production build: passed for API, web, domain, and contracts.
 - `git diff --check`: passed.
 
 Commands used:
