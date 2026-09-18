@@ -4,6 +4,7 @@ import { loadEnv } from './config.js';
 import { createPool } from './db/pool.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerGoodsReceiptRoutes } from './routes/goods-receipts.js';
+import { registerGuestMenuRoutes } from './routes/guest-menu.js';
 import { registerDevCashierBootstrapRoutes, registerPosRoutes } from './routes/pos.js';
 
 async function main() {
@@ -21,6 +22,7 @@ async function main() {
   await registerHealthRoutes(app, pool);
   await registerGoodsReceiptRoutes(app, pool);
   await registerPosRoutes(app, pool);
+  await registerGuestMenuRoutes(app, pool);
   await registerDevCashierBootstrapRoutes(app, pool);
 
   app.get('/', async () => ({

@@ -1,0 +1,188 @@
+.gm-page {
+  --gm-bg: #f6f1e8;
+  --gm-ink: #1c1916;
+  --gm-muted: #6b635a;
+  --gm-accent: #0f6b4c;
+  --gm-card: #fffdf8;
+  --gm-line: #e4ddd2;
+  min-height: 100%;
+  margin: 0;
+  padding: 0 0 48px;
+  background:
+    radial-gradient(120% 80% at 10% -10%, #ffe8c8 0%, transparent 55%),
+    radial-gradient(90% 60% at 100% 0%, #d9f0e5 0%, transparent 50%),
+    var(--gm-bg);
+  color: var(--gm-ink);
+  font-family: 'Source Serif 4', 'Iowan Old Style', 'Palatino Linotype', Palatino, serif;
+}
+
+.gm-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 28px 20px 12px;
+}
+
+.gm-brand {
+  margin: 0;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gm-accent);
+  font-family: 'DM Sans', 'Segoe UI', sans-serif;
+}
+
+.gm-outlet {
+  margin: 6px 0 0;
+  font-size: 1.85rem;
+  line-height: 1.15;
+  font-weight: 600;
+}
+
+.gm-table {
+  margin: 8px 0 0;
+  color: var(--gm-muted);
+  font-family: 'DM Sans', 'Segoe UI', sans-serif;
+  font-size: 0.9rem;
+}
+
+.gm-langs {
+  display: flex;
+  gap: 4px;
+  background: rgba(255, 253, 248, 0.85);
+  border: 1px solid var(--gm-line);
+  border-radius: 999px;
+  padding: 4px;
+}
+
+.gm-lang {
+  border: 0;
+  background: transparent;
+  color: var(--gm-muted);
+  font-family: 'DM Sans', 'Segoe UI', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  min-height: 36px;
+  min-width: 40px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.gm-lang-active {
+  background: var(--gm-accent);
+  color: #fff;
+}
+
+.gm-section {
+  padding: 8px 20px 0;
+}
+
+.gm-section-title {
+  margin: 12px 0 16px;
+  font-size: 1.15rem;
+}
+
+.gm-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.gm-card {
+  display: grid;
+  grid-template-columns: 1fr;
+  background: var(--gm-card);
+  border: 1px solid var(--gm-line);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.gm-card-unavailable {
+  opacity: 0.55;
+}
+
+.gm-photo {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  display: block;
+  background: #ddd6cb;
+}
+
+.gm-photo-placeholder {
+  background:
+    linear-gradient(135deg, #e8dfd2, #f3eee6 40%, #d7cfc2);
+}
+
+.gm-card-body {
+  padding: 14px 16px 16px;
+}
+
+.gm-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.gm-dish {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.gm-price {
+  margin: 0;
+  white-space: nowrap;
+  font-family: 'DM Sans', 'Segoe UI', sans-serif;
+  font-weight: 700;
+  color: var(--gm-accent);
+}
+
+.gm-desc {
+  margin: 8px 0 0;
+  color: var(--gm-muted);
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.gm-badge {
+  margin: 10px 0 0;
+  font-family: 'DM Sans', 'Segoe UI', sans-serif;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #8a4b2e;
+}
+
+.gm-muted,
+.gm-error {
+  padding: 48px 24px;
+  text-align: center;
+  font-family: 'DM Sans', 'Segoe UI', sans-serif;
+}
+
+.gm-error {
+  color: #8a2f2f;
+}
+
+@media (min-width: 720px) {
+  .gm-page {
+    max-width: 720px;
+    margin: 0 auto;
+  }
+
+  .gm-card {
+    grid-template-columns: 220px 1fr;
+  }
+
+  .gm-photo {
+    aspect-ratio: auto;
+    height: 100%;
+    min-height: 160px;
+  }
+}

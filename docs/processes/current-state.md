@@ -1,10 +1,10 @@
 # MillQ Current State
 
-**Checkpoint:** ADR-0033 Tax/VAT Architecture — **ACCEPTED** (PO ACCEPT WITH DELTAS; awaiting merge/backup confirmation)
+**Checkpoint:** Guest QR Menu read-only MVP — implementation PR (Level B), pending review (do not merge until review)
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)
-**Backup host:** GitHub `millQ-dev/MillQ` / `millQ-dev/KiU_POS`
-**Equality baseline (pre-ADR):** `9c97702e8462fa5277ee63edbd0f6dcccf929217`
-**Updated:** 2026-09-17
+**Backup host:** GitHub `millQ-dev/KiU_POS`
+**Equality baseline:** `fa107d1dc5ec8fda96fa130371c4c6b7d55135f6` (Origin == GitHub at launch)
+**Updated:** 2026-09-18
 
 ## Runtime / CI / backup
 
@@ -12,23 +12,21 @@
 | --- | --- |
 | S1.1 Settlement Foundation | **CLOSED** |
 | PAY1.1 Payments Core | **CLOSED** |
-| Vietnam Acquiring Integration Profile | **CLOSED** — research only |
-| Production payment provider adapters | **NOT STARTED** — awaiting PO route / sales-legal |
-| P0 Vietnam Fiscalization Readiness | **CLOSED** — verdict `NEEDS_TAX_ARCHITECTURE` |
-| ADR-0033 Tax/VAT Architecture | **ACCEPTED** (deltas: TaxRoundingStrategy policy-driven; TaxClassificationAssignment scoped) |
-| Tax runtime (TAX1.1) | **NOT STARTED** — awaiting separate PO launch |
-| Fiscalization runtime (FISC1.1) | **NOT STARTED** — blocked by Tax runtime + possible ADR-0014 delta |
+| ADR-0033 Tax/VAT Architecture | **ACCEPTED** @ `fa107d1` |
+| Tax runtime (TAX1.1) | **NOT STARTED** |
+| Fiscalization runtime (FISC1.1) | **NOT STARTED** — blocked by Tax runtime |
+| ADR-0035 Employee Engagement + Guest QR (docs) | **OPEN** Origin PR#63 — strategic review; do not merge yet |
+| Guest QR Menu read-only runtime | **IN REVIEW** — `feature/guest-qr-menu-readonly` (this PR) |
 | Cash / refund / void-after-success | **NOT STARTED** |
 
 ## Architecture / research
 
-- `docs/decisions/ADR-0033-tax-vat-resolution-calculation-historical-snapshot.md` — **Accepted**
-- Fiscal readiness: `docs/research/vietnam-fiscalization-*-2026.md`
-- Acquiring: `docs/research/vietnam-acquiring-*-2026.md`
+- Guest QR pipeline: `docs/architecture/guest-qr-menu-read-only-surface.md`
+- Reuses MenuResolver + `orderChannel: DIRECT` (no new channel taxonomy)
+- Capability key: `guest_menu.qr` via `outlet_capability_config`
 
 ## Next
 
-1. ChatGPT verifies Origin/GitHub equality after merge+backup.
-2. Then PO launches **TAX1.1 Tax Domain Runtime** (not auto-started).
-3. Then ADR-0014 delta (if still needed) → FISC1.1.
-4. Payment adapter still waiting sales/legal route selection.
+1. Independent review of Guest QR Level B PR (do not merge until APPROVE).
+2. Strategic review of ADR-0035 docs PR#63.
+3. TAX1.1 after PO launch.
