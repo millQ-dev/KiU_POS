@@ -8,6 +8,7 @@
   --pos-border: #d9d1c5;
   --pos-border-strong: #202a29;
   --pos-text: #202321;
+  --pos-text-strong: #2e3d3b;
   --pos-text-muted: #6d736f;
   --pos-accent: #a86f4a;
   --pos-accent-dark: #815238;
@@ -20,6 +21,7 @@
   --pos-success-soft: #e3f3e9;
   --pos-warn: #d89a26;
   --pos-danger: #d9534f;
+  --pos-info: #2f8cc9;
   --pos-disabled: #a9aaa5;
   --pos-radius: 6px;
   --pos-control-radius: 4px;

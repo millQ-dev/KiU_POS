@@ -14,14 +14,18 @@ architecture. No later cashier, QR, KDS or shift screen was added.
 - two-zone onboarding/context composition;
 - restrained Copper and Teal gradient fields;
 - large readable heading and short supporting copy;
-- compact context card;
+- KiU wordmark and globe-based locale selector in the intro header;
+- CloudPos-inspired context card with large outlined fields;
 - explicit primary action;
 - strong KiU borders and 48px touch controls.
 
 ## Changed canonical files
 
 - `apps/web/src/design-lab/cashier/CashierWelcomeScreen.css`
+- `apps/web/src/design-lab/cashier/CashierWelcomeScreen.tsx`
+- `apps/web/src/design-lab/cashier/CashierWelcomeScreen.test.tsx`
 - `apps/web/src/styles/tokens.css`
+- `apps/web/public/brand/kiu-logo-transparent.png`
 - `docs/design/figma-kiu-mapping.md`
 
 Forge mirrors the same first-screen treatment in its local visual library:
@@ -44,4 +48,3 @@ Forge mirrors the same first-screen treatment in its local visual library:
 Review `01-welcome` on a real 10–15 inch landscape touch display. Check
 contrast, hit areas, RU/EN/VI expansion and whether the gradient remains a
 background aid. The next chronological cashier screen waits for this review.
-

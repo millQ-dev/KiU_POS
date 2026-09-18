@@ -4,10 +4,10 @@ import './CashierWelcomeScreen.css';
 export type WelcomeLanguage = 'ru' | 'en' | 'vi';
 
 type Copy = {
-  mark: string;
   title: string;
   lead: string;
   context: string;
+  contextPrompt: string;
   outlet: string;
   terminal: string;
   cashier: string;
@@ -21,10 +21,10 @@ type Copy = {
 
 const copy: Record<WelcomeLanguage, Copy> = {
   ru: {
-    mark: 'KiU · касса',
     title: 'Готовы к рабочему дню',
-    lead: 'Counter-service касса для быстрого и точного заказа навынос.',
+    lead: 'Передовая система учета и сервиса для работы кафе и ресторанов на базе ИИ',
     context: 'Рабочий контекст',
+    contextPrompt: 'Проверьте рабочий контекст',
     outlet: 'Точка',
     terminal: 'Терминал',
     cashier: 'Кассир',
@@ -36,10 +36,10 @@ const copy: Record<WelcomeLanguage, Copy> = {
     note: 'Дизайн-лаборатория: контекст подготовлен фикстурой. Production auth и UI смены сюда не добавляются.',
   },
   en: {
-    mark: 'KiU · cashier',
     title: 'Ready for service',
-    lead: 'A counter-service cashier for fast, accurate takeaway orders.',
+    lead: 'An advanced AI-powered system for accounting and service in cafés and restaurants.',
     context: 'Working context',
+    contextPrompt: 'Check the working context',
     outlet: 'Outlet',
     terminal: 'Terminal',
     cashier: 'Cashier',
@@ -51,10 +51,10 @@ const copy: Record<WelcomeLanguage, Copy> = {
     note: 'Design lab only: this context comes from a fixture. Production auth and shift UI are not added here.',
   },
   vi: {
-    mark: 'KiU · thu ngân',
     title: 'Sẵn sàng phục vụ',
-    lead: 'Quầy thu ngân phục vụ nhanh và chính xác cho đơn mang đi.',
+    lead: 'Hệ thống quản lý và dịch vụ tiên tiến cho quán cà phê và nhà hàng trên nền tảng AI.',
     context: 'Ngữ cảnh làm việc',
+    contextPrompt: 'Kiểm tra ngữ cảnh làm việc',
     outlet: 'Cửa hàng',
     terminal: 'Thiết bị',
     cashier: 'Thu ngân',
@@ -76,17 +76,28 @@ type Props = {
 
 export function CashierWelcomeScreen({ context, language, onLanguageChange, onContinue }: Props) {
   const text = copy[language];
-  const languages: Array<[WelcomeLanguage, string]> = [
-    ['ru', 'RU'],
-    ['en', 'EN'],
-    ['vi', 'VI'],
-  ];
 
   return (
     <main className="kiu-welcome" aria-label={text.title}>
       <div className="kiu-welcome__frame">
         <section className="kiu-welcome__intro">
-          <div className="kiu-welcome__mark">{text.mark}</div>
+          <div className="kiu-welcome__intro-topline">
+            <span className="kiu-welcome__logo">
+              <img src="/brand/kiu-logo-transparent.png" alt="KiU" draggable="false" />
+            </span>
+            <label className="kiu-welcome__locale">
+              <span className="kiu-welcome__globe" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.4 2.4 3.6 5.4 3.6 9s-1.2 6.6-3.6 9c-2.4-2.4-3.6-5.4-3.6-9S9.6 5.4 12 3Z" /></svg>
+              </span>
+              <span className="sr-only">{text.language}</span>
+              <select value={language} aria-label={text.language} onChange={(event) => onLanguageChange(event.target.value as WelcomeLanguage)}>
+                <option value="ru">RU</option>
+                <option value="en">EN</option>
+                <option value="vi">VI</option>
+              </select>
+              <span className="kiu-welcome__select-chevron" aria-hidden="true">⌄</span>
+            </label>
+          </div>
           <h1 className="kiu-welcome__title">{text.title}</h1>
           <p className="kiu-welcome__lead">{text.lead}</p>
         </section>
@@ -94,7 +105,7 @@ export function CashierWelcomeScreen({ context, language, onLanguageChange, onCo
         <section className="kiu-welcome__panel" aria-label={text.context}>
           <header className="kiu-welcome__panel-header">
             <div>
-              <p className="kiu-welcome__eyebrow">{text.context}</p>
+              <p className="kiu-welcome__eyebrow">{text.contextPrompt}</p>
               <h2 className="kiu-welcome__panel-title">{context.outletName}</h2>
             </div>
             <span className="kiu-welcome__fixture">{text.fixture}</span>
@@ -102,40 +113,22 @@ export function CashierWelcomeScreen({ context, language, onLanguageChange, onCo
 
           <dl className="kiu-welcome__context">
             <div>
-              <dt>{text.outlet}</dt>
+              <dt><span>{text.outlet}</span><span className="kiu-welcome__context-chevron" aria-hidden="true">⌄</span></dt>
               <dd>{context.outletName}</dd>
             </div>
             <div>
-              <dt>{text.terminal}</dt>
+              <dt><span>{text.terminal}</span><span className="kiu-welcome__context-chevron" aria-hidden="true">⌄</span></dt>
               <dd>{context.deviceId}</dd>
             </div>
             <div>
-              <dt>{text.shift}</dt>
+              <dt><span>{text.shift}</span><span className="kiu-welcome__context-chevron" aria-hidden="true">⌄</span></dt>
               <dd>{text.open}</dd>
             </div>
             <div>
-              <dt>{text.cashier}</dt>
+              <dt><span>{text.cashier}</span><span className="kiu-welcome__context-chevron" aria-hidden="true">⌄</span></dt>
               <dd>{context.cashierId.slice(0, 8)}</dd>
             </div>
           </dl>
-
-          <div>
-            <p className="kiu-welcome__language-label">{text.language}</p>
-            <div className="kiu-welcome__languages" role="group" aria-label={text.language}>
-              {languages.map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  className="kiu-welcome__language"
-                  data-selected={language === value}
-                  aria-pressed={language === value}
-                  onClick={() => onLanguageChange(value)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
 
           <button type="button" className="kiu-welcome__continue" onClick={onContinue}>
             {text.continue}

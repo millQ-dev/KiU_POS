@@ -39,9 +39,9 @@ describe('cashier welcome design-lab screen', () => {
 
     expect(screen.getByRole('heading', { name: 'Готовы к рабочему дню' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Открыть кассу' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Язык интерфейса' }), { target: { value: 'en' } });
     expect(screen.getByRole('heading', { name: 'Ready for service' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'VI' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Interface language' }), { target: { value: 'vi' } });
     expect(screen.getByRole('heading', { name: 'Sẵn sàng phục vụ' })).toBeTruthy();
   });
 });
