@@ -1,4 +1,7 @@
 .kiu-welcome {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   min-height: 100%;
   display: grid;
   place-items: center;
@@ -8,7 +11,32 @@
     var(--pos-bg);
 }
 
+.kiu-welcome::before,
+.kiu-welcome::after {
+  position: absolute;
+  z-index: -1;
+  content: '';
+  width: clamp(280px, 34vw, 560px);
+  height: clamp(280px, 34vw, 560px);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.kiu-welcome::before {
+  top: -24%;
+  left: -10%;
+  background: radial-gradient(circle at 64% 64%, rgba(168, 111, 74, 0.3) 0 18%, rgba(168, 111, 74, 0.12) 43%, transparent 72%);
+}
+
+.kiu-welcome::after {
+  right: -12%;
+  bottom: -27%;
+  background: radial-gradient(circle at 30% 30%, rgba(44, 184, 166, 0.22) 0 16%, rgba(44, 184, 166, 0.09) 42%, transparent 72%);
+}
+
 .kiu-welcome__frame {
+  position: relative;
+  z-index: 1;
   width: min(1080px, 100%);
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(360px, 0.82fr);
@@ -88,7 +116,18 @@
   border: 2px solid var(--pos-border-strong);
   border-radius: var(--pos-panel-radius);
   background: var(--pos-surface);
-  box-shadow: 0 4px 16px rgba(32, 35, 33, 0.1);
+  box-shadow: 0 1px 0 rgba(32, 35, 33, 0.12);
+  position: relative;
+  overflow: hidden;
+}
+
+.kiu-welcome__panel::before {
+  content: '';
+  display: block;
+  position: absolute;
+  inset: 0 0 auto;
+  height: 5px;
+  background: linear-gradient(90deg, var(--pos-accent), var(--pos-teal));
 }
 
 .kiu-welcome__panel-header {
@@ -96,6 +135,9 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--pos-space-3);
+  padding-top: var(--pos-space-2);
+  padding-bottom: var(--pos-space-3);
+  border-bottom: 1px solid var(--pos-border-soft, var(--pos-border));
 }
 
 .kiu-welcome__eyebrow {
