@@ -1,34 +1,30 @@
 # MillQ Current State
 
-**Checkpoint:** ADR-0033 Tax/VAT Architecture — **ACCEPTED** (PO ACCEPT WITH DELTAS; awaiting merge/backup confirmation)
+**Checkpoint:** GUEST1.1 Guest QR Menu Public Read Projection — Level B PR#64 pending merge gate (FUNCTIONAL + ARCHITECTURE + SECURITY APPROVE)
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)
-**Backup host:** GitHub `millQ-dev/MillQ` / `millQ-dev/KiU_POS`
-**Equality baseline (pre-ADR):** `9c97702e8462fa5277ee63edbd0f6dcccf929217`
-**Updated:** 2026-09-17
+**Backup host:** GitHub `millQ-dev/KiU_POS`
+**Equality baseline:** `fa107d1dc5ec8fda96fa130371c4c6b7d55135f6` (Origin == GitHub at launch)
+**Updated:** 2026-09-18
 
 ## Runtime / CI / backup
 
 | Item | State |
 | --- | --- |
-| S1.1 Settlement Foundation | **CLOSED** |
-| PAY1.1 Payments Core | **CLOSED** |
-| Vietnam Acquiring Integration Profile | **CLOSED** — research only |
-| Production payment provider adapters | **NOT STARTED** — awaiting PO route / sales-legal |
-| P0 Vietnam Fiscalization Readiness | **CLOSED** — verdict `NEEDS_TAX_ARCHITECTURE` |
-| ADR-0033 Tax/VAT Architecture | **ACCEPTED** (deltas: TaxRoundingStrategy policy-driven; TaxClassificationAssignment scoped) |
-| Tax runtime (TAX1.1) | **NOT STARTED** — awaiting separate PO launch |
-| Fiscalization runtime (FISC1.1) | **NOT STARTED** — blocked by Tax runtime + possible ADR-0014 delta |
-| Cash / refund / void-after-success | **NOT STARTED** |
+| ADR-0033 Tax/VAT Architecture | **ACCEPTED** @ `fa107d1` |
+| Tax runtime (TAX1.1) | **NOT STARTED** |
+| Fiscalization runtime (FISC1.1) | **NOT STARTED** |
+| ADR-0035 Employee Engagement docs | **OPEN** Origin PR#63 — strategic review |
+| GUEST1.1 Guest QR Public Read | **IN REVIEW** — Origin PR#64; Security APPROVE after remediation; merge gate not closed |
 
-## Architecture / research
+## Architecture notes
 
-- `docs/decisions/ADR-0033-tax-vat-resolution-calculation-historical-snapshot.md` — **Accepted**
-- Fiscal readiness: `docs/research/vietnam-fiscalization-*-2026.md`
-- Acquiring: `docs/research/vietnam-acquiring-*-2026.md`
+- Capability: `guest_menu.qr` via **PackageEntitlement ∧ OutletCapabilityConfig** (fail closed)
+- Public cache: **none** (`Cache-Control: no-store`); Referrer-Policy: no-referrer
+- orderChannel: existing `DIRECT` only (no GUEST_QR channel)
+- Admin mint/revoke: `/api/v1/dev/guest-menu/*` only (disabled in production)
 
 ## Next
 
-1. ChatGPT verifies Origin/GitHub equality after merge+backup.
-2. Then PO launches **TAX1.1 Tax Domain Runtime** (not auto-started).
-3. Then ADR-0014 delta (if still needed) → FISC1.1.
-4. Payment adapter still waiting sales/legal route selection.
+1. Independent FUNCTIONAL + ARCHITECTURE review APPROVE on PR#64.
+2. Then merge Origin + `scripts/backup-origin-to-github.sh` + ChatGPT equality verify.
+3. TAX1.1 after PO launch.
