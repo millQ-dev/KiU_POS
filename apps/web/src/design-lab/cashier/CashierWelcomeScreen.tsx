@@ -7,7 +7,6 @@ type Copy = {
   mark: string;
   title: string;
   lead: string;
-  sequence: string[];
   context: string;
   outlet: string;
   terminal: string;
@@ -25,7 +24,6 @@ const copy: Record<WelcomeLanguage, Copy> = {
     mark: 'KiU · касса',
     title: 'Готовы к рабочему дню',
     lead: 'Counter-service касса для быстрого и точного заказа навынос.',
-    sequence: ['Заказ', 'Модификаторы', 'Оплата', 'Кухня'],
     context: 'Рабочий контекст',
     outlet: 'Точка',
     terminal: 'Терминал',
@@ -41,7 +39,6 @@ const copy: Record<WelcomeLanguage, Copy> = {
     mark: 'KiU · cashier',
     title: 'Ready for service',
     lead: 'A counter-service cashier for fast, accurate takeaway orders.',
-    sequence: ['Order', 'Modifiers', 'Payment', 'Kitchen'],
     context: 'Working context',
     outlet: 'Outlet',
     terminal: 'Terminal',
@@ -57,7 +54,6 @@ const copy: Record<WelcomeLanguage, Copy> = {
     mark: 'KiU · thu ngân',
     title: 'Sẵn sàng phục vụ',
     lead: 'Quầy thu ngân phục vụ nhanh và chính xác cho đơn mang đi.',
-    sequence: ['Đơn hàng', 'Tùy chọn', 'Thanh toán', 'Bếp'],
     context: 'Ngữ cảnh làm việc',
     outlet: 'Cửa hàng',
     terminal: 'Thiết bị',
@@ -93,11 +89,6 @@ export function CashierWelcomeScreen({ context, language, onLanguageChange, onCo
           <div className="kiu-welcome__mark">{text.mark}</div>
           <h1 className="kiu-welcome__title">{text.title}</h1>
           <p className="kiu-welcome__lead">{text.lead}</p>
-          <ul className="kiu-welcome__sequence" aria-label="Cashier flow">
-            {text.sequence.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
         </section>
 
         <section className="kiu-welcome__panel" aria-label={text.context}>

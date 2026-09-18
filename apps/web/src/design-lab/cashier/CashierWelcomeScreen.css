@@ -86,28 +86,6 @@
   line-height: 1.45;
 }
 
-.kiu-welcome__sequence {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--pos-space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.kiu-welcome__sequence li {
-  display: inline-flex;
-  align-items: center;
-  min-height: 36px;
-  padding: 0 var(--pos-space-3);
-  border: 1px solid var(--pos-border);
-  border-radius: var(--pos-control-radius);
-  background: rgba(255, 255, 255, 0.58);
-  color: var(--pos-text-muted);
-  font-size: 0.85rem;
-  font-weight: 700;
-}
-
 .kiu-welcome__panel {
   display: flex;
   flex-direction: column;
