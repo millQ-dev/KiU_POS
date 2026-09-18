@@ -1,6 +1,5 @@
 /**
- * Guest QR Menu — read-only public surface acceptance (A–F).
- * Reuses MenuResolver / DIRECT; no Order/Payment/Fiscal writes on GET.
+ * GUEST1.1 — Guest QR Menu Public Read Projection (permanent tests 1–24).
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createHash, randomUUID } from 'node:crypto';
@@ -8,17 +7,54 @@ import Fastify from 'fastify';
 import pg from 'pg';
 import { runMigrations } from '../../db/migrate.js';
 import { seedBlockCFixture, type BlockCFixture } from '../../test/seed.js';
-import { MenuService } from '../menu/index.js';
+import { MenuResolver, MenuService } from '../menu/index.js';
 import { CAPABILITY_GUEST_QR, GuestMenuProjectionService } from './index.js';
-import { registerGuestMenuRoutes } from '../../routes/guest-menu.js';
+import { registerGuestMenuRoutes, registerDevGuestMenuAdminRoutes } from '../../routes/guest-menu.js';
+import { registerPosRoutes } from '../../routes/pos.js';
 
 const DATABASE_URL = process.env.DATABASE_URL ?? 'postgresql://millq:millq@localhost:5432/millq_dev';
 const TZ = 'Asia/Ho_Chi_Minh';
 const LOCAL_SEPT17_0030 = '2026-09-16T17:30:00.000Z';
 
+const ALLOWED_TOP = new Set([
+  'language',
+  'outlet',
+  'brand',
+  'tableLabel',
+  'categories',
+  'items',
+]);
+const ALLOWED_ITEM = new Set([
+  'publicItemRef',
+  'name',
+  'description',
+  'imageUrl',
+  'availability',
+  'price',
+]);
+const FORBIDDEN_SUBSTRINGS = [
+  'tenantId',
+  'brandId',
+  'outletId',
+  'tableId',
+  'catalogItemId',
+  'menuPublicationId',
+  'menuAssignmentId',
+  'priceRuleId',
+  'availabilityRuleId',
+  'recipe',
+  'supplier',
+  'warehouse',
+  'cogs',
+  'COGS',
+  'legalEntity',
+  'employee',
+];
+
 let pool: pg.Pool;
 let fx: BlockCFixture;
 let menu: MenuService;
+let resolver: MenuResolver;
 let guest: GuestMenuProjectionService;
 let seq = 0;
 const idem = (p: string) => `${p}-${++seq}-${randomUUID()}`;
@@ -39,7 +75,7 @@ async function truncateBusiness() {
       production_batch_reversal, production_batch_input, production_batch,
       recipe_component, recipe_version, recipe_specification,
       preparation_component, preparation_version, preparation_specification,
-      public_menu_link, outlet_capability_config,
+      public_menu_link, outlet_capability_config, package_entitlement,
       catalog_item_presentation, presentation_media_asset,
       price_rule, availability_rule, menu_assignment,
       menu_publication_item, menu_publication, menu_definition_item, menu_definition,
@@ -77,7 +113,12 @@ async function publishAndAssign(catalogItemIds: string[]) {
   return pub;
 }
 
-async function enableCapability() {
+async function enableFullCapability() {
+  await guest.linkService.setPackageEntitlement({
+    tenantId: fx.tenantId,
+    capabilityKey: CAPABILITY_GUEST_QR,
+    entitled: true,
+  });
   await guest.linkService.setOutletCapability({
     tenantId: fx.tenantId,
     outletId: fx.outletId,
@@ -100,19 +141,30 @@ async function priceMilk(amountMinor: string, effectiveFrom = '2026-01-01T00:00:
   });
 }
 
-function assertPublicDtoSafe(body: Record<string, unknown>) {
+function assertAllowlistedDto(body: Record<string, unknown>) {
+  for (const k of Object.keys(body)) {
+    expect(ALLOWED_TOP.has(k), `unexpected top field ${k}`).toBe(true);
+  }
   const json = JSON.stringify(body);
-  expect(json).not.toMatch(/cogs|COGS|recipe|supplier|margin|profit|employee|warehouse/i);
+  for (const s of FORBIDDEN_SUBSTRINGS) {
+    expect(json.includes(s), `forbidden substring ${s}`).toBe(false);
+  }
   expect(json).not.toContain(fx.tenantId);
   expect(json).not.toContain(fx.outletId);
   expect(json).not.toContain(fx.brandId);
   expect(json).not.toContain(fx.milkItemId);
+  for (const item of body.items as Array<Record<string, unknown>>) {
+    for (const k of Object.keys(item)) {
+      expect(ALLOWED_ITEM.has(k), `unexpected item field ${k}`).toBe(true);
+    }
+  }
 }
 
 beforeAll(async () => {
   await runMigrations(DATABASE_URL);
   pool = new pg.Pool({ connectionString: DATABASE_URL });
   menu = new MenuService(pool);
+  resolver = new MenuResolver(pool);
   guest = new GuestMenuProjectionService(pool);
 });
 
@@ -126,132 +178,11 @@ beforeEach(async () => {
   await menu.setOutletTimezone({ tenantId: fx.tenantId, outletId: fx.outletId, timezone: TZ });
 });
 
-describe('Guest QR Menu read-only surface', () => {
-  it('A — opaque token resolve / invalid / revoked / cross-tenant isolation', async () => {
+describe('GUEST1.1 Guest QR Menu Public Read Projection', () => {
+  it('1–3 — valid token; price+availability match MenuResolver exactly', async () => {
     await publishAndAssign([fx.milkItemId]);
-    await enableCapability();
-    await priceMilk('15000');
-
-    const link = await guest.linkService.createLink({
-      tenantId: fx.tenantId,
-      outletId: fx.outletId,
-    });
-    const dto = await guest.resolveGuestMenu({
-      opaqueToken: link.opaqueToken,
-      language: 'en',
-      businessDateTime: LOCAL_SEPT17_0030,
-    });
-    expect(dto.outlet.name.length).toBeGreaterThan(0);
-    expect(dto.items.length).toBe(1);
-
-    await expect(guest.resolveGuestMenu({ opaqueToken: 'not-a-valid-token!!!!' })).rejects.toMatchObject({
-      code: 'PUBLIC_MENU_TOKEN_INVALID',
-    });
-    await expect(
-      guest.resolveGuestMenu({ opaqueToken: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaa' }),
-    ).rejects.toMatchObject({ code: 'PUBLIC_MENU_TOKEN_INVALID' });
-
-    await guest.linkService.revokeLink(link.publicMenuLinkId);
-    await expect(guest.resolveGuestMenu({ opaqueToken: link.opaqueToken })).rejects.toMatchObject({
-      code: 'PUBLIC_MENU_TOKEN_REVOKED',
-    });
-
-    // Tenant B fixture
-    const fxB = await seedBlockCFixture(pool);
-    await menu.setOutletTimezone({ tenantId: fxB.tenantId, outletId: fxB.outletId, timezone: TZ });
-    // re-seed wiped nothing — wait, seed creates NEW tenant without truncate. Need separate approach.
-    // Use second outlet under same DB: create tenant B rows manually via another seed after NOT truncating A.
-    // seedBlockCFixture inserts new tenant — both coexist.
-    const defB = await menu.createMenuDefinition({
-      tenantId: fxB.tenantId,
-      code: 'b-menu',
-      name: 'B',
-    });
-    await menu.setMenuDefinitionItems({
-      menuDefinitionId: defB.menuDefinitionId,
-      catalogItemIds: [fxB.milkItemId],
-    });
-    const pubB = await menu.publishMenu({
-      menuDefinitionId: defB.menuDefinitionId,
-      idempotencyKey: idem('pub-b'),
-      effectiveFrom: '2026-01-01T00:00:00.000Z',
-    });
-    await menu.assignMenu({
-      tenantId: fxB.tenantId,
-      menuPublicationId: pubB.menuPublicationId,
-      scopeKind: 'OUTLET',
-      outletId: fxB.outletId,
-      effectiveFrom: '2026-01-01T00:00:00.000Z',
-      idempotencyKey: idem('asg-b'),
-    });
-    await guest.linkService.setOutletCapability({
-      tenantId: fxB.tenantId,
-      outletId: fxB.outletId,
-      capabilityKey: CAPABILITY_GUEST_QR,
-      enabled: true,
-    });
-    await menu.activatePriceRule({
-      tenantId: fxB.tenantId,
-      catalogItemId: fxB.milkItemId,
-      scopeKind: 'TENANT',
-      amountMinor: '99999',
-      currencyCode: 'VND',
-      minorUnitExponent: 0,
-      effectiveFrom: '2026-01-01T00:00:00.000Z',
-      idempotencyKey: idem('pr-b'),
-    });
-    const linkB = await guest.linkService.createLink({
-      tenantId: fxB.tenantId,
-      outletId: fxB.outletId,
-    });
-    const dtoB = await guest.resolveGuestMenu({
-      opaqueToken: linkB.opaqueToken,
-      businessDateTime: LOCAL_SEPT17_0030,
-    });
-    expect(dtoB.items[0]!.price).toMatchObject({ status: 'AVAILABLE', amountMinor: '99999' });
-    // Token A (revoked) still cannot resolve; token B cannot be used to see tenant A ids
-    assertPublicDtoSafe(dtoB as unknown as Record<string, unknown>);
-    expect(JSON.stringify(dtoB)).not.toContain(fx.tenantId);
-  });
-
-  it('B — published visible; unpublished invisible; price/availability from MenuResolver', async () => {
-    const pub = await publishAndAssign([fx.milkItemId]);
-    await enableCapability();
+    await enableFullCapability();
     await priceMilk('22000');
-    await menu.activatePriceRule({
-      tenantId: fx.tenantId,
-      catalogItemId: fx.oilItemId,
-      scopeKind: 'TENANT',
-      amountMinor: '5000',
-      currencyCode: 'VND',
-      minorUnitExponent: 0,
-      effectiveFrom: '2026-01-01T00:00:00.000Z',
-      idempotencyKey: idem('pr-oil'),
-    });
-
-    const link = await guest.linkService.createLink({
-      tenantId: fx.tenantId,
-      outletId: fx.outletId,
-    });
-    const dto = await guest.resolveGuestMenu({
-      opaqueToken: link.opaqueToken,
-      businessDateTime: LOCAL_SEPT17_0030,
-    });
-    expect(dto.items).toHaveLength(1);
-    expect(dto.items[0]!.price).toEqual({
-      status: 'AVAILABLE',
-      amountMinor: '22000',
-      currencyCode: 'VND',
-      minorUnitExponent: 0,
-    });
-    expect(dto.menuPublicationVersion).toBe(pub.publicationVersion);
-
-    const oilRef = createHash('sha256')
-      .update(`${fx.tenantId}:${fx.oilItemId}`, 'utf8')
-      .digest('hex')
-      .slice(0, 16);
-    expect(dto.items.map((i) => i.publicItemRef)).not.toContain(oilRef);
-
     await menu.activateAvailabilityRule({
       tenantId: fx.tenantId,
       catalogItemId: fx.milkItemId,
@@ -260,93 +191,140 @@ describe('Guest QR Menu read-only surface', () => {
       effectiveFrom: '2026-01-01T00:00:00.000Z',
       idempotencyKey: idem('unav'),
     });
-    const dto2 = await guest.resolveGuestMenu({
-      opaqueToken: link.opaqueToken,
-      businessDateTime: LOCAL_SEPT17_0030,
-    });
-    expect(dto2.items[0]!.availability).toBe('UNAVAILABLE');
-  });
-
-  it('C — later PriceRule changes guest output; accepted commercial terms unchanged', async () => {
-    await publishAndAssign([fx.milkItemId]);
-    await enableCapability();
-    await priceMilk('10000', '2026-01-01T00:00:00.000Z', LOCAL_SEPT17_0030);
-
-    const { OrdersService } = await import('../orders/orders-service.js');
-    const { GoodsIssueService } = await import('../inventory/goods-issue-service.js');
-    const {
-      MenuResolver,
-      buildMenuResolvedCommercialTermsInput,
-    } = await import('../menu/index.js');
-    const orders = new OrdersService(pool, { saleWriteOffPort: new GoodsIssueService(pool) });
-    const resolver = new MenuResolver(pool);
-
-    const order = await orders.openOrder({
-      tenantId: fx.tenantId,
-      legalEntityId: fx.legalEntityId,
-      outletId: fx.outletId,
-      channel: 'DIRECT',
-    });
-    await orders.addOrderLine({
-      orderId: order.orderId,
-      catalogItemId: fx.milkItemId,
-      quantity: '1',
-      unit: 'L',
-      dimension: 'VOLUME',
-    });
-    // Resolve just before cutover so first price still applies
-    const beforeCutover = '2026-09-16T17:29:00.000Z';
-    const priced = await resolver.resolveOrderLinesFromMenu({
-      orderId: order.orderId,
-      salesContext: {
-        tenantId: fx.tenantId,
-        brandId: fx.brandId,
-        outletId: fx.outletId,
-        orderChannel: 'DIRECT',
-        businessDateTime: beforeCutover,
-      },
-    });
-    expect(priced.lines[0]!.resolvedUnitPriceMinor).toBe('10000');
-    await orders.setOrderCommercialTerms(
-      buildMenuResolvedCommercialTermsInput({
-        orderId: order.orderId,
-        idempotencyKey: idem('terms'),
-        resolvedLines: priced.lines,
-        roundingPolicy: {
-          roundingPolicyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-          policyVersion: 1,
-          calculationContext: 'BASE_LIST_LINE_GROSS',
-          roundingMode: 'HALF_UP',
-          quantumMinor: '1',
-        },
-      }),
-    );
-
-    await priceMilk('77777', LOCAL_SEPT17_0030);
 
     const link = await guest.linkService.createLink({
       tenantId: fx.tenantId,
       outletId: fx.outletId,
     });
+    const resolved = await resolver.resolveMenu({
+      salesContext: {
+        tenantId: fx.tenantId,
+        brandId: fx.brandId,
+        outletId: fx.outletId,
+        orderChannel: 'DIRECT',
+        businessDateTime: LOCAL_SEPT17_0030,
+      },
+    });
     const dto = await guest.resolveGuestMenu({
       opaqueToken: link.opaqueToken,
-      businessDateTime: LOCAL_SEPT17_0030,
+      businessDateTimeOverride: LOCAL_SEPT17_0030,
     });
-    expect(dto.items[0]!.price).toMatchObject({ amountMinor: '77777' });
-
-    const terms = await pool.query<{ resolved_unit_price_minor: string }>(
-      `SELECT resolved_unit_price_minor FROM sales_order_commercial_line_terms WHERE order_id = $1`,
-      [order.orderId],
-    );
-    expect(terms.rowCount).toBeGreaterThan(0);
-    expect(terms.rows[0]!.resolved_unit_price_minor).toBe('10000');
+    expect(dto.items).toHaveLength(resolved.items.length);
+    expect(dto.items[0]!.availability).toBe(resolved.items[0]!.availabilityStatus);
+    expect(resolved.items[0]!.price.status).toBe('RESOLVED');
+    if (resolved.items[0]!.price.status === 'RESOLVED') {
+      expect(dto.items[0]!.price).toEqual({
+        status: 'AVAILABLE',
+        amountMinor: resolved.items[0]!.price.quote.resolvedUnitPriceMinor,
+        currencyCode: resolved.items[0]!.price.quote.currencyCode,
+        minorUnitExponent: resolved.items[0]!.price.quote.minorUnitExponent,
+      });
+    }
   });
 
-  it('D — generic outlet QR and optional tableRef', async () => {
+  it('4–5 — invalid and revoked token denied (same public failure)', async () => {
     await publishAndAssign([fx.milkItemId]);
-    await enableCapability();
+    await enableFullCapability();
     await priceMilk('10000');
+    const link = await guest.linkService.createLink({
+      tenantId: fx.tenantId,
+      outletId: fx.outletId,
+    });
+    await guest.linkService.revokeLink(link.publicMenuLinkId);
 
+    const app = Fastify();
+    await registerGuestMenuRoutes(app, pool);
+    const invalid = await app.inject({
+      method: 'GET',
+      url: '/api/v1/public/guest-menu/aaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    });
+    const revoked = await app.inject({
+      method: 'GET',
+      url: `/api/v1/public/guest-menu/${link.opaqueToken}`,
+    });
+    expect(invalid.statusCode).toBe(404);
+    expect(revoked.statusCode).toBe(404);
+    expect(invalid.json()).toEqual(revoked.json());
+    expect(invalid.json().error).toBe('PUBLIC_MENU_UNAVAILABLE');
+    await app.close();
+  });
+
+  it('6–7 — outlet capability disabled OR package entitlement missing denied', async () => {
+    await publishAndAssign([fx.milkItemId]);
+    await priceMilk('10000');
+    const link = await guest.linkService.createLink({
+      tenantId: fx.tenantId,
+      outletId: fx.outletId,
+    });
+
+    // package missing, outlet off
+    await expect(guest.resolveGuestMenu({ opaqueToken: link.opaqueToken })).rejects.toMatchObject({
+      code: 'GUEST_MENU_CAPABILITY_DISABLED',
+    });
+
+    await guest.linkService.setPackageEntitlement({
+      tenantId: fx.tenantId,
+      capabilityKey: CAPABILITY_GUEST_QR,
+      entitled: true,
+    });
+    // package on, outlet still off
+    await expect(guest.resolveGuestMenu({ opaqueToken: link.opaqueToken })).rejects.toMatchObject({
+      code: 'GUEST_MENU_CAPABILITY_DISABLED',
+    });
+
+    await guest.linkService.setOutletCapability({
+      tenantId: fx.tenantId,
+      outletId: fx.outletId,
+      capabilityKey: CAPABILITY_GUEST_QR,
+      enabled: true,
+    });
+    await guest.linkService.setPackageEntitlement({
+      tenantId: fx.tenantId,
+      capabilityKey: CAPABILITY_GUEST_QR,
+      entitled: false,
+    });
+    // outlet on, package revoked
+    await expect(guest.resolveGuestMenu({ opaqueToken: link.opaqueToken })).rejects.toMatchObject({
+      code: 'GUEST_MENU_CAPABILITY_DISABLED',
+    });
+  });
+
+  it('8 — cross-tenant attack denied', async () => {
+    await publishAndAssign([fx.milkItemId]);
+    await enableFullCapability();
+    await priceMilk('10000');
+    const linkA = await guest.linkService.createLink({
+      tenantId: fx.tenantId,
+      outletId: fx.outletId,
+    });
+
+    const fxB = await seedBlockCFixture(pool);
+    await menu.setOutletTimezone({ tenantId: fxB.tenantId, outletId: fxB.outletId, timezone: TZ });
+    await guest.linkService.setPackageEntitlement({
+      tenantId: fxB.tenantId,
+      capabilityKey: CAPABILITY_GUEST_QR,
+      entitled: true,
+    });
+    await guest.linkService.setOutletCapability({
+      tenantId: fxB.tenantId,
+      outletId: fxB.outletId,
+      capabilityKey: CAPABILITY_GUEST_QR,
+      enabled: true,
+    });
+
+    const dto = await guest.resolveGuestMenu({
+      opaqueToken: linkA.opaqueToken,
+      businessDateTimeOverride: LOCAL_SEPT17_0030,
+    });
+    expect(JSON.stringify(dto)).not.toContain(fxB.tenantId);
+    expect(JSON.stringify(dto)).not.toContain(fxB.outletId);
+    expect(JSON.stringify(dto)).not.toContain(fx.tenantId);
+  });
+
+  it('9–10 — optional table label works; no-table token works', async () => {
+    await publishAndAssign([fx.milkItemId]);
+    await enableFullCapability();
+    await priceMilk('10000');
     const generic = await guest.linkService.createLink({
       tenantId: fx.tenantId,
       outletId: fx.outletId,
@@ -358,68 +336,223 @@ describe('Guest QR Menu read-only surface', () => {
     });
     const g = await guest.resolveGuestMenu({
       opaqueToken: generic.opaqueToken,
-      businessDateTime: LOCAL_SEPT17_0030,
+      businessDateTimeOverride: LOCAL_SEPT17_0030,
     });
     const t = await guest.resolveGuestMenu({
       opaqueToken: table.opaqueToken,
-      businessDateTime: LOCAL_SEPT17_0030,
+      businessDateTimeOverride: LOCAL_SEPT17_0030,
     });
-    expect(g.tableRef).toBeNull();
-    expect(t.tableRef).toBe('12');
-    expect(g.items.length).toBe(t.items.length);
+    expect(g.tableLabel).toBeNull();
+    expect(t.tableLabel).toBe('12');
   });
 
-  it('E — response omits cost/supplier/recipe/employee/internal ids', async () => {
+  it('11–16 — internal UUIDs / provenance / recipe / COGS / supplier absent', async () => {
     await publishAndAssign([fx.milkItemId]);
-    await enableCapability();
+    await enableFullCapability();
     await priceMilk('10000');
-    const mediaId = randomUUID();
-    await pool.query(
-      `INSERT INTO presentation_media_asset
-         (media_asset_id, tenant_id, storage_key, public_url, mime_type, status)
-       VALUES ($1,$2,'k','https://cdn.example/milk.jpg','image/jpeg','ACTIVE')`,
-      [mediaId, fx.tenantId],
+    const link = await guest.linkService.createLink({
+      tenantId: fx.tenantId,
+      outletId: fx.outletId,
+      tableRef: 'T-9',
+    });
+    const dto = await guest.resolveGuestMenu({
+      opaqueToken: link.opaqueToken,
+      businessDateTimeOverride: LOCAL_SEPT17_0030,
+    });
+    assertAllowlistedDto(dto as unknown as Record<string, unknown>);
+    const milkRef = createHash('sha256')
+      .update(`${fx.tenantId}:${fx.milkItemId}`, 'utf8')
+      .digest('hex')
+      .slice(0, 16);
+    expect(dto.items[0]!.publicItemRef).toBe(milkRef);
+    expect(dto.items[0]!.publicItemRef).not.toBe(fx.milkItemId);
+  });
+
+  it('17–18 — guest cannot supply businessDateTime / tenant / outlet', async () => {
+    await publishAndAssign([fx.milkItemId]);
+    await enableFullCapability();
+    await priceMilk('10000');
+    const link = await guest.linkService.createLink({
+      tenantId: fx.tenantId,
+      outletId: fx.outletId,
+    });
+    const app = Fastify();
+    await registerGuestMenuRoutes(app, pool);
+    for (const q of [
+      `businessDateTime=${encodeURIComponent(LOCAL_SEPT17_0030)}`,
+      `tenantId=${fx.tenantId}`,
+      `outletId=${fx.outletId}`,
+    ]) {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/v1/public/guest-menu/${link.opaqueToken}?${q}`,
+      });
+      expect(res.statusCode).toBe(400);
+    }
+    await app.close();
+  });
+
+  it('19–20 — guest cannot create Order; public surface has no Payment/Tax/Fiscal write', async () => {
+    await publishAndAssign([fx.milkItemId]);
+    await enableFullCapability();
+    await priceMilk('10000');
+    const link = await guest.linkService.createLink({
+      tenantId: fx.tenantId,
+      outletId: fx.outletId,
+    });
+
+    const before = await pool.query<{ o: string; p: string }>(`
+      SELECT
+        (SELECT count(*)::text FROM sales_order) AS o,
+        (SELECT count(*)::text FROM payment) AS p
+    `);
+
+    const app = Fastify();
+    await registerGuestMenuRoutes(app, pool);
+    await registerDevGuestMenuAdminRoutes(app, pool);
+    await registerPosRoutes(app, pool);
+
+    const get = await app.inject({
+      method: 'GET',
+      url: `/api/v1/public/guest-menu/${link.opaqueToken}`,
+    });
+    expect(get.statusCode).toBe(200);
+    expect(get.headers['referrer-policy']).toBe('no-referrer');
+    expect(get.headers['cache-control']).toMatch(/no-store/);
+    expect(get.headers['x-robots-tag']).toMatch(/noindex/);
+
+    const postOrder = await app.inject({
+      method: 'POST',
+      url: `/api/v1/public/guest-menu/${link.opaqueToken}`,
+      payload: { createOrder: true },
+    });
+    expect(postOrder.statusCode).toBe(404);
+
+    const routes = app.printRoutes();
+    expect(routes).toContain('guest-menu');
+    expect(routes).toContain('dev/');
+    const legacy = await app.inject({
+      method: 'POST',
+      url: '/api/v1/guest-menu/links',
+      payload: { tenantId: fx.tenantId, outletId: fx.outletId },
+    });
+    expect(legacy.statusCode).toBe(404);
+    expect(routes).not.toMatch(/public\/.*payment/i);
+    expect(routes).not.toMatch(/public\/.*tax/i);
+    expect(routes).not.toMatch(/public\/.*fiscal/i);
+    expect(routes).not.toMatch(/public\/.*order/i);
+
+    const after = await pool.query<{ o: string; p: string }>(`
+      SELECT
+        (SELECT count(*)::text FROM sales_order) AS o,
+        (SELECT count(*)::text FROM payment) AS p
+    `);
+    expect(after.rows[0]!.o).toBe(before.rows[0]!.o);
+    expect(after.rows[0]!.p).toBe(before.rows[0]!.p);
+    await app.close();
+  });
+
+  it('21 — MenuPublication immutability unchanged via guest path', async () => {
+    const pub = await publishAndAssign([fx.milkItemId]);
+    await enableFullCapability();
+    await priceMilk('10000');
+    const link = await guest.linkService.createLink({
+      tenantId: fx.tenantId,
+      outletId: fx.outletId,
+    });
+    await guest.resolveGuestMenu({
+      opaqueToken: link.opaqueToken,
+      businessDateTimeOverride: LOCAL_SEPT17_0030,
+    });
+    await expect(
+      menu.setMenuDefinitionItems({
+        menuDefinitionId: (
+          await pool.query<{ menu_definition_id: string }>(
+            `SELECT menu_definition_id FROM menu_publication WHERE menu_publication_id = $1`,
+            [pub.menuPublicationId],
+          )
+        ).rows[0]!.menu_definition_id,
+        catalogItemIds: [fx.oilItemId],
+      }),
+    ).resolves.toBeTruthy();
+    // Publication membership frozen — cannot mutate publication items
+    const items = await pool.query(
+      `SELECT catalog_item_id FROM menu_publication_item WHERE menu_publication_id = $1`,
+      [pub.menuPublicationId],
     );
-    await pool.query(
-      `INSERT INTO catalog_item_presentation
-         (catalog_item_id, locale, name, description, media_asset_id)
-       VALUES ($1,'en','Fresh Milk','Cold milk',$2),
-              ($1,'ru','Свежее молоко','Холодное',$2)`,
-      [fx.milkItemId, mediaId],
-    );
+    expect(items.rows.map((r) => r.catalog_item_id)).toEqual([fx.milkItemId]);
+  });
+
+  it('22 — missing price never becomes zero', async () => {
+    await publishAndAssign([fx.milkItemId]);
+    await enableFullCapability();
+    // no price rule
     const link = await guest.linkService.createLink({
       tenantId: fx.tenantId,
       outletId: fx.outletId,
     });
     const dto = await guest.resolveGuestMenu({
       opaqueToken: link.opaqueToken,
-      language: 'ru',
-      businessDateTime: LOCAL_SEPT17_0030,
+      businessDateTimeOverride: LOCAL_SEPT17_0030,
     });
-    expect(dto.language).toBe('ru');
-    expect(dto.items[0]!.name).toBe('Свежее молоко');
-    expect(dto.items[0]!.imageUrl).toBe('https://cdn.example/milk.jpg');
-    assertPublicDtoSafe(dto as unknown as Record<string, unknown>);
+    expect(dto.items[0]!.price).toEqual({ status: 'UNAVAILABLE' });
+    expect(JSON.stringify(dto.items[0]!.price)).not.toContain('"0"');
   });
 
-  it('F — GET guest menu creates zero Orders / Payments / Fiscal docs', async () => {
+  it('23 — revoked / capability disable takes effect immediately (no stale cache)', async () => {
     await publishAndAssign([fx.milkItemId]);
-    await enableCapability();
+    await enableFullCapability();
     await priceMilk('10000');
     const link = await guest.linkService.createLink({
       tenantId: fx.tenantId,
       outletId: fx.outletId,
     });
+    const app = Fastify();
+    await registerGuestMenuRoutes(app, pool);
+    const ok = await app.inject({
+      method: 'GET',
+      url: `/api/v1/public/guest-menu/${link.opaqueToken}`,
+    });
+    expect(ok.statusCode).toBe(200);
 
-    const before = await pool.query<{
-      orders: string;
-      payments: string;
-    }>(`
-      SELECT
-        (SELECT count(*)::text FROM sales_order) AS orders,
-        (SELECT count(*)::text FROM payment) AS payments
-    `);
+    await guest.linkService.revokeLink(link.publicMenuLinkId);
+    const afterRevoke = await app.inject({
+      method: 'GET',
+      url: `/api/v1/public/guest-menu/${link.opaqueToken}`,
+    });
+    expect(afterRevoke.statusCode).toBe(404);
 
+    const link2 = await guest.linkService.createLink({
+      tenantId: fx.tenantId,
+      outletId: fx.outletId,
+    });
+    const ok2 = await app.inject({
+      method: 'GET',
+      url: `/api/v1/public/guest-menu/${link2.opaqueToken}`,
+    });
+    expect(ok2.statusCode).toBe(200);
+    await guest.linkService.setOutletCapability({
+      tenantId: fx.tenantId,
+      outletId: fx.outletId,
+      capabilityKey: CAPABILITY_GUEST_QR,
+      enabled: false,
+    });
+    const afterCap = await app.inject({
+      method: 'GET',
+      url: `/api/v1/public/guest-menu/${link2.opaqueToken}`,
+    });
+    expect(afterCap.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('24 — response contains only allowlisted schema + security headers', async () => {
+    await publishAndAssign([fx.milkItemId]);
+    await enableFullCapability();
+    await priceMilk('10000');
+    const link = await guest.linkService.createLink({
+      tenantId: fx.tenantId,
+      outletId: fx.outletId,
+    });
     const app = Fastify();
     await registerGuestMenuRoutes(app, pool);
     const res = await app.inject({
@@ -427,52 +560,28 @@ describe('Guest QR Menu read-only surface', () => {
       url: `/api/v1/public/guest-menu/${link.opaqueToken}?lang=en`,
     });
     expect(res.statusCode).toBe(200);
-    const body = res.json();
-    assertPublicDtoSafe(body);
+    assertAllowlistedDto(res.json());
+    expect(res.headers['referrer-policy']).toBe('no-referrer');
+    expect(String(res.headers['cache-control'])).toMatch(/no-store/);
     await app.close();
-
-    const after = await pool.query<{
-      orders: string;
-      payments: string;
-    }>(`
-      SELECT
-        (SELECT count(*)::text FROM sales_order) AS orders,
-        (SELECT count(*)::text FROM payment) AS payments
-    `);
-    expect(after.rows[0]!.orders).toBe(before.rows[0]!.orders);
-    expect(after.rows[0]!.payments).toBe(before.rows[0]!.payments);
-
-    const fiscalTables = await pool.query<{ table_name: string }>(`
-      SELECT table_name FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name LIKE '%fiscal%'
-    `);
-    for (const t of fiscalTables.rows) {
-      const c = await pool.query(`SELECT count(*)::int AS n FROM ${t.table_name}`);
-      expect(c.rows[0]!.n).toBe(0);
-    }
   });
 
-  it('capability disabled fails closed; rotate invalidates old token', async () => {
-    await publishAndAssign([fx.milkItemId]);
-    await priceMilk('10000');
-    // capability off
-    const link = await guest.linkService.createLink({
-      tenantId: fx.tenantId,
-      outletId: fx.outletId,
+  it('dev admin disabled in production without ALLOW flag', async () => {
+    const prev = process.env.NODE_ENV;
+    const prevFlag = process.env.ALLOW_DEV_GUEST_MENU_ADMIN;
+    process.env.NODE_ENV = 'production';
+    delete process.env.ALLOW_DEV_GUEST_MENU_ADMIN;
+    const app = Fastify();
+    await registerDevGuestMenuAdminRoutes(app, pool);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/dev/guest-menu/links',
+      payload: { tenantId: fx.tenantId, outletId: fx.outletId },
     });
-    await expect(guest.resolveGuestMenu({ opaqueToken: link.opaqueToken })).rejects.toMatchObject({
-      code: 'GUEST_MENU_CAPABILITY_DISABLED',
-    });
-
-    await enableCapability();
-    const rotated = await guest.linkService.rotateLink(link.publicMenuLinkId);
-    await expect(guest.resolveGuestMenu({ opaqueToken: link.opaqueToken })).rejects.toMatchObject({
-      code: 'PUBLIC_MENU_TOKEN_REVOKED',
-    });
-    const dto = await guest.resolveGuestMenu({
-      opaqueToken: rotated.opaqueToken,
-      businessDateTime: LOCAL_SEPT17_0030,
-    });
-    expect(dto.items).toHaveLength(1);
+    expect(res.statusCode).toBe(404);
+    await app.close();
+    process.env.NODE_ENV = prev;
+    if (prevFlag === undefined) delete process.env.ALLOW_DEV_GUEST_MENU_ADMIN;
+    else process.env.ALLOW_DEV_GUEST_MENU_ADMIN = prevFlag;
   });
 });

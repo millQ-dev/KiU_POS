@@ -24,7 +24,7 @@ Canonical key:
 guest_menu.qr
 ```
 
-Gated by `PackageEntitlement` + `OutletCapabilityConfig`.  
+Gated by **both** `PackageEntitlement` and `OutletCapabilityConfig` for key `guest_menu.qr` (ADR-0008). Fail closed if either is missing/false.  
 **Forbidden:** `if package === CORNER|CAFE|RESTAURANT` domain forks.
 
 ## Module boundary

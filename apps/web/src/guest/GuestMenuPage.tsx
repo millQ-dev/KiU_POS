@@ -66,7 +66,7 @@ export function GuestMenuPage({ opaqueToken }: { opaqueToken: string }) {
         <div>
           <p className="gm-brand">{menu.brand.name}</p>
           <h1 className="gm-outlet">{menu.outlet.name}</h1>
-          {menu.tableRef ? <p className="gm-table">Table {menu.tableRef}</p> : null}
+          {menu.tableLabel ? <p className="gm-table">Table {menu.tableLabel}</p> : null}
         </div>
         <div className="gm-langs" role="group" aria-label="Language">
           {LOCALES.map((l) => (

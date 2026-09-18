@@ -85,8 +85,7 @@ export type GuestMenuDto = {
   readonly language: string;
   readonly outlet: { readonly name: string };
   readonly brand: { readonly name: string };
-  readonly tableRef: string | null;
-  readonly menuPublicationVersion: number;
+  readonly tableLabel: string | null;
   readonly categories: GuestMenuCategoryDto[];
   readonly items: GuestMenuItemDto[];
 };
@@ -107,6 +106,20 @@ type LinkRow = {
 
 export class PublicMenuLinkService {
   constructor(private readonly pool: Pool) {}
+
+  async setPackageEntitlement(input: {
+    tenantId: string;
+    capabilityKey: string;
+    entitled: boolean;
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO package_entitlement (tenant_id, capability_key, entitled, updated_at)
+       VALUES ($1,$2,$3,NOW())
+       ON CONFLICT (tenant_id, capability_key)
+       DO UPDATE SET entitled = EXCLUDED.entitled, updated_at = NOW()`,
+      [input.tenantId, input.capabilityKey, input.entitled],
+    );
+  }
 
   async setOutletCapability(input: {
     tenantId: string;
@@ -281,16 +294,19 @@ export class GuestMenuProjectionService {
   async resolveGuestMenu(input: {
     opaqueToken: string;
     language?: string;
-    businessDateTime?: string;
+    /** Test-only override. Public HTTP must never accept guest-supplied businessDateTime. */
+    businessDateTimeOverride?: string;
   }): Promise<GuestMenuDto> {
     const link = await this.links.resolveLinkByOpaqueToken(input.opaqueToken);
     await this.assertCapability(link.tenant_id, link.outlet_id);
 
     const locale = normalizeLocale(input.language);
+    // Server-authoritative commercial instant (GUEST1.1).
     const businessDateTime =
-      input.businessDateTime ?? new Date().toISOString().replace(/\.\d{3}Z$/, '+00:00');
+      input.businessDateTimeOverride ??
+      new Date().toISOString().replace(/\.\d{3}Z$/, '+00:00');
 
-    // MVP: resolve against existing DIRECT commercial surface (no new channel taxonomy).
+    // Existing accepted commercial surface only — no new orderChannel taxonomy.
     const resolved: ResolvedMenu = await this.menuResolver.resolveMenu({
       salesContext: {
         tenantId: link.tenant_id,
@@ -316,7 +332,9 @@ export class GuestMenuProjectionService {
       [link.brand_id, link.tenant_id],
     );
 
-    const items: GuestMenuItemDto[] = resolved.items.map((item) => {
+    // Explicit field construction — never spread ResolvedMenuItem.
+    const items: GuestMenuItemDto[] = [];
+    for (const item of resolved.items) {
       const p = presentation.get(item.catalogItemId);
       const price: GuestMenuPriceDto =
         item.price.status === 'RESOLVED'
@@ -327,15 +345,15 @@ export class GuestMenuProjectionService {
               minorUnitExponent: item.price.quote.minorUnitExponent,
             }
           : { status: 'UNAVAILABLE' };
-      return {
+      items.push({
         publicItemRef: publicItemRef(link.tenant_id, item.catalogItemId),
         name: p?.name ?? p?.canonicalName ?? 'Item',
         description: p?.description ?? null,
         imageUrl: p?.imageUrl ?? null,
         availability: item.availabilityStatus,
         price,
-      };
-    });
+      });
+    }
 
     const categoryName =
       locale === 'vi' ? 'Thực đơn' : locale === 'ru' ? 'Меню' : 'Menu';
@@ -344,8 +362,7 @@ export class GuestMenuProjectionService {
       language: locale,
       outlet: { name: outlet.rows[0]?.name ?? 'Outlet' },
       brand: { name: brand.rows[0]?.name ?? 'Brand' },
-      tableRef: link.table_ref,
-      menuPublicationVersion: resolved.publicationVersion,
+      tableLabel: link.table_ref,
       categories: [
         {
           publicCategoryRef: 'menu',
@@ -358,12 +375,20 @@ export class GuestMenuProjectionService {
   }
 
   private async assertCapability(tenantId: string, outletId: string): Promise<void> {
-    const res = await this.pool.query<{ enabled: boolean }>(
+    // ADR-0008: PackageEntitlement AND OutletCapabilityConfig — both required; fail closed.
+    const pkg = await this.pool.query<{ entitled: boolean }>(
+      `SELECT entitled FROM package_entitlement
+       WHERE tenant_id = $1 AND capability_key = $2`,
+      [tenantId, CAPABILITY_GUEST_QR],
+    );
+    const outlet = await this.pool.query<{ enabled: boolean }>(
       `SELECT enabled FROM outlet_capability_config
        WHERE tenant_id = $1 AND outlet_id = $2 AND capability_key = $3`,
       [tenantId, outletId, CAPABILITY_GUEST_QR],
     );
-    if (res.rowCount !== 1 || !res.rows[0]!.enabled) {
+    const packageOk = pkg.rowCount === 1 && pkg.rows[0]!.entitled;
+    const outletOk = outlet.rowCount === 1 && outlet.rows[0]!.enabled;
+    if (!packageOk || !outletOk) {
       throw new GuestMenuDomainError(
         'GUEST_MENU_CAPABILITY_DISABLED',
         'Guest QR menu is not enabled for this outlet',

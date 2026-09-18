@@ -26,8 +26,7 @@ export type GuestMenuDto = {
   language: string;
   outlet: { name: string };
   brand: { name: string };
-  tableRef: string | null;
-  menuPublicationVersion: number;
+  tableLabel: string | null;
   categories: GuestMenuCategoryDto[];
   items: GuestMenuItemDto[];
 };
