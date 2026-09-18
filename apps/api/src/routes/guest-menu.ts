@@ -19,7 +19,6 @@ const PUBLIC_UNAVAILABLE = {
 
 function assertRateLimit(key: string): void {
   const now = Date.now();
-  // Evict expired / cap size to limit memory DoS from unique keys.
   if (rateBuckets.size > RATE_MAP_MAX) {
     for (const [k, v] of rateBuckets) {
       if (now >= v.resetAt) rateBuckets.delete(k);
@@ -97,8 +96,13 @@ function rateKeyForToken(req: FastifyRequest, opaqueToken: string): string {
   return `gm:${req.ip || 'unknown'}:${opaqueToken.length}:${tip}`;
 }
 
-function devManagementAllowed(): boolean {
-  return process.env.NODE_ENV !== 'production' || process.env.ALLOW_DEV_GUEST_MENU_ADMIN === '1';
+/**
+ * Dev Guest Menu admin may register only outside production.
+ * PO rule: NODE_ENV === 'production' → routes MUST NOT be registered,
+ * regardless of ANY env override flag (ALLOW_* ignored / deleted).
+ */
+export function isDevGuestMenuAdminRegistrationAllowed(): boolean {
+  return process.env.NODE_ENV !== 'production';
 }
 
 /** Public read-only Guest QR surface. Always registered. */
@@ -136,22 +140,19 @@ export async function registerGuestMenuRoutes(app: FastifyInstance, pool: pg.Poo
 
 /**
  * Development/test-only link + capability management.
- * NOT production authorization. Production requires employee auth (follow-up).
- * Enabled when NODE_ENV !== 'production' or ALLOW_DEV_GUEST_MENU_ADMIN=1.
+ * NOT production authorization. Future production management is a separate authenticated vertical.
+ *
+ * Binding: when NODE_ENV === 'production', this function registers ZERO routes
+ * (ALLOW_DEV_GUEST_MENU_ADMIN and similar flags have no effect).
  */
 export async function registerDevGuestMenuAdminRoutes(app: FastifyInstance, pool: pg.Pool) {
-  const links = new PublicMenuLinkService(pool);
-  const allowed = devManagementAllowed();
-
-  async function guard(reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
-    if (!allowed) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Dev guest-menu admin disabled' });
-    }
-    return null;
+  if (!isDevGuestMenuAdminRegistrationAllowed()) {
+    return;
   }
 
+  const links = new PublicMenuLinkService(pool);
+
   app.post('/api/v1/dev/guest-menu/links', async (req, reply) => {
-    if (await guard(reply)) return;
     try {
       const created = await links.createLink(req.body);
       return reply.code(201).send(created);
@@ -162,7 +163,6 @@ export async function registerDevGuestMenuAdminRoutes(app: FastifyInstance, pool
   });
 
   app.post('/api/v1/dev/guest-menu/capabilities', async (req, reply) => {
-    if (await guard(reply)) return;
     try {
       const body = req.body as {
         tenantId?: string;
@@ -205,7 +205,6 @@ export async function registerDevGuestMenuAdminRoutes(app: FastifyInstance, pool
   app.post<{ Params: { publicMenuLinkId: string } }>(
     '/api/v1/dev/guest-menu/links/:publicMenuLinkId/revoke',
     async (req, reply) => {
-      if (await guard(reply)) return;
       try {
         await links.revokeLink(req.params.publicMenuLinkId);
         return { ok: true, mode: 'DEVELOPMENT_BOOTSTRAP' };
@@ -219,7 +218,6 @@ export async function registerDevGuestMenuAdminRoutes(app: FastifyInstance, pool
   app.post<{ Params: { publicMenuLinkId: string } }>(
     '/api/v1/dev/guest-menu/links/:publicMenuLinkId/rotate',
     async (req, reply) => {
-      if (await guard(reply)) return;
       try {
         const created = await links.rotateLink(req.params.publicMenuLinkId);
         return { ...created, mode: 'DEVELOPMENT_BOOTSTRAP' };

@@ -44,6 +44,7 @@ async function main() {
   await registerGoodsReceiptRoutes(app, pool);
   await registerPosRoutes(app, pool);
   await registerGuestMenuRoutes(app, pool);
+  // Dev admin: never register under NODE_ENV=production (no env override).
   await registerDevGuestMenuAdminRoutes(app, pool);
   await registerDevCashierBootstrapRoutes(app, pool);
 

@@ -566,21 +566,63 @@ describe('GUEST1.1 Guest QR Menu Public Read Projection', () => {
     await app.close();
   });
 
-  it('dev admin disabled in production without ALLOW flag', async () => {
-    const prev = process.env.NODE_ENV;
+  it('production NEVER registers /api/v1/dev/guest-menu/* even with ALLOW_DEV_GUEST_MENU_ADMIN=1', async () => {
+    const prevEnv = process.env.NODE_ENV;
     const prevFlag = process.env.ALLOW_DEV_GUEST_MENU_ADMIN;
     process.env.NODE_ENV = 'production';
-    delete process.env.ALLOW_DEV_GUEST_MENU_ADMIN;
+    process.env.ALLOW_DEV_GUEST_MENU_ADMIN = '1';
+
     const app = Fastify();
+    await registerGuestMenuRoutes(app, pool);
     await registerDevGuestMenuAdminRoutes(app, pool);
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/v1/dev/guest-menu/links',
-      payload: { tenantId: fx.tenantId, outletId: fx.outletId },
+
+    const routes = app.printRoutes();
+    expect(routes).not.toContain('guest-menu/links');
+    expect(routes).not.toContain('guest-menu/capabilities');
+    expect(routes).toContain('public/guest-menu');
+
+    const endpoints = [
+      { method: 'POST' as const, url: '/api/v1/dev/guest-menu/links', payload: { tenantId: fx.tenantId, outletId: fx.outletId } },
+      {
+        method: 'POST' as const,
+        url: '/api/v1/dev/guest-menu/capabilities',
+        payload: {
+          tenantId: fx.tenantId,
+          outletId: fx.outletId,
+          capabilityKey: CAPABILITY_GUEST_QR,
+          enabled: true,
+        },
+      },
+      {
+        method: 'POST' as const,
+        url: `/api/v1/dev/guest-menu/links/${randomUUID()}/revoke`,
+        payload: {},
+      },
+      {
+        method: 'POST' as const,
+        url: `/api/v1/dev/guest-menu/links/${randomUUID()}/rotate`,
+        payload: {},
+      },
+    ];
+    for (const ep of endpoints) {
+      const res = await app.inject({
+        method: ep.method,
+        url: ep.url,
+        payload: ep.payload,
+      });
+      expect(res.statusCode, ep.url).toBe(404);
+    }
+
+    // Public read remains registered/reachable (may 404 on bad token — not 405).
+    const pub = await app.inject({
+      method: 'GET',
+      url: '/api/v1/public/guest-menu/aaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     });
-    expect(res.statusCode).toBe(404);
+    expect(pub.statusCode).toBe(404);
+    expect(pub.json().error).toBe('PUBLIC_MENU_UNAVAILABLE');
+
     await app.close();
-    process.env.NODE_ENV = prev;
+    process.env.NODE_ENV = prevEnv;
     if (prevFlag === undefined) delete process.env.ALLOW_DEV_GUEST_MENU_ADMIN;
     else process.env.ALLOW_DEV_GUEST_MENU_ADMIN = prevFlag;
   });
