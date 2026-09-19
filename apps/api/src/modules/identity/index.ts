@@ -11,6 +11,7 @@ export {
   readSessionToken,
   assertCsrf,
   requireFinancialPrincipal,
+  requireFinancialSession,
   rejectTenantAuthorityInjection,
   type FinancialAuthOptions,
 } from './http-auth.js';

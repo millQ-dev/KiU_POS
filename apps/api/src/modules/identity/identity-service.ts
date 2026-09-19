@@ -516,38 +516,16 @@ export class IdentityService {
   }
 
   /**
-   * POS/financial authorize: tenant-bound AccessGrant for permissionKey.
-   * When outletId is known, accept tenant-wide (outlet NULL) or matching outlet grants.
-   * When outletId is unknown, accept any active grant for the permission in the tenant
-   * (resource must still be loaded under principal.tenantId to prevent cross-tenant IDOR).
+   * POS/financial authorize — identical semantics to assertPermission (ADR-0036).
+   * When outletId is null, only tenant-wide grants (outlet_id IS NULL) authorize.
    */
   async assertPosOperate(
     principal: AuthenticatedPrincipal,
     permissionKey: string,
     outletId: string | null,
+    terminalId: string | null = null,
   ): Promise<void> {
-    const res = await this.pool.query(
-      `SELECT 1 FROM identity_access_grant
-       WHERE tenant_id = $1 AND user_id = $2 AND permission_key = $3
-         AND enabled AND revoked_at IS NULL
-         AND (expires_at IS NULL OR expires_at > NOW())
-         AND (
-           $4::uuid IS NULL
-           OR outlet_id IS NULL
-           OR outlet_id = $4
-         )
-       LIMIT 1`,
-      [principal.tenantId, principal.userId, permissionKey, outletId],
-    );
-    if ((res.rowCount ?? 0) === 0) {
-      await audit(this.pool, {
-        tenantId: principal.tenantId,
-        eventType: 'ACCESS_GRANT_DENIED',
-        actorUserId: principal.userId,
-        payload: { permissionKey, outletId, kind: 'pos.operate' },
-      });
-      throw new IdentityDomainError('FORBIDDEN', 'Permission denied');
-    }
+    await this.assertPermission(principal, permissionKey, outletId, terminalId);
   }
 
   get poolRef(): Pool {

@@ -16,13 +16,21 @@ export const TEST_PIN = '123456';
 export async function provisionPosOperator(
   identity: IdentityService,
   fx: BlockCFixture,
-  opts?: { pin?: string; displayName?: string },
+  opts?: { pin?: string; displayName?: string; outletScoped?: boolean },
 ): Promise<{ userId: string; employeeId: string }> {
+  // Default tenant-wide grant so Payments HTTP (outlet often unknown a priori) authorizes
+  // under Accepted assertPermission semantics. Outlet-scoped grants still work for POS
+  // when outletId is supplied on the request.
   return identity.provisionUserWithPin({
     tenantId: fx.tenantId,
     displayName: opts?.displayName ?? 'SEC0 Cashier',
     pin: opts?.pin ?? TEST_PIN,
-    grants: [{ permissionKey: PERMISSION_POS_OPERATE, outletId: fx.outletId }],
+    grants: [
+      {
+        permissionKey: PERMISSION_POS_OPERATE,
+        outletId: opts?.outletScoped === true ? fx.outletId : null,
+      },
+    ],
   });
 }
 

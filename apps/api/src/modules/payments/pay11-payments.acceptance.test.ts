@@ -189,6 +189,17 @@ describe('PAY1.1 Payments Core Runtime (PostgreSQL)', () => {
     });
     expect(pRetry.paymentId).toBe(p1.paymentId);
 
+    await expect(
+      payments.createPayment({
+        tenderDefinitionId: tender.tenderDefinitionId,
+        createIdempotencyKey: payKey,
+        requestedAmountMinor: '99999',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        settlementCheckId: checkId,
+      }),
+    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+
     await payments.recordVerifiedProviderOutcome({
       paymentId: p1.paymentId,
       providerEventIdentity: `pending-${p1.paymentId}`,
@@ -683,20 +694,7 @@ describe('PAY1.1 Payments Core Runtime (PostgreSQL)', () => {
           }),
         ),
       );
-      const outcomeOk = outcomes.filter((r) => r.status === 'fulfilled');
-      const outcomeFail = outcomes.filter((r) => r.status === 'rejected');
-      expect(outcomeOk.length).toBeGreaterThanOrEqual(1);
-      // Unique (payment_id, provider_event_identity) — losers must not insert a second row.
-      for (const f of outcomeFail) {
-        const err = (f as PromiseRejectedResult).reason as { code?: string };
-        expect(
-          err?.code === 'IDEMPOTENCY_CONFLICT' ||
-            err?.code === 'PROVIDER_REFERENCE_COLLISION' ||
-            err?.code === 'PAYMENT_STATE_MONOTONICITY' ||
-            // Unique violation surfaced as driver error is also acceptable for race loser.
-            true,
-        ).toBe(true);
-      }
+      expect(outcomes.filter((r) => r.status === 'fulfilled').length).toBeGreaterThanOrEqual(1);
       const outcomeRows = await pool.query(
         `SELECT count(*)::int AS c FROM payment_provider_outcome WHERE payment_id = $1`,
         [pay.paymentId],
@@ -704,51 +702,31 @@ describe('PAY1.1 Payments Core Runtime (PostgreSQL)', () => {
       expect(outcomeRows.rows[0]!.c).toBe(1);
       expect((await payments.getPayment(pay.paymentId))!.lifecycleState).toBe('SUCCEEDED');
 
-      // Prove allocate works sequentially after concurrent outcomes, then race over-coverage.
-      await payments.allocatePaymentToCheck({
-        paymentId: pay.paymentId,
-        settlementCheckId: checkId,
-        amountMinor: '4000',
-        allocationIdempotencyKey: `race-seed-${pay.paymentId}`,
-      });
-
-      const allocResults = await Promise.allSettled([
+      // K: concurrent distinct keys that would over-allocate the Payment if both applied.
+      // Under deadlock PG may abort a waiter; durable integrity is the authority.
+      await Promise.allSettled([
         payments.allocatePaymentToCheck({
           paymentId: pay.paymentId,
           settlementCheckId: checkId,
-          amountMinor: '4000',
+          amountMinor: '7000',
           allocationIdempotencyKey: `race-a-${pay.paymentId}`,
         }),
         payments.allocatePaymentToCheck({
           paymentId: pay.paymentId,
           settlementCheckId: checkId,
-          amountMinor: '4000',
+          amountMinor: '7000',
           allocationIdempotencyKey: `race-b-${pay.paymentId}`,
         }),
-        payments.allocatePaymentToCheck({
-          paymentId: pay.paymentId,
-          settlementCheckId: checkId,
-          amountMinor: '4000',
-          allocationIdempotencyKey: `race-c-${pay.paymentId}`,
-        }),
       ]);
-      // Payment has 10000; 4000 already allocated → at most 6000 more (one or one+partial of the racers).
-      const allocOk = allocResults.filter((r) => r.status === 'fulfilled');
-      const allocFail = allocResults.filter((r) => r.status === 'rejected');
-      expect(allocOk.length).toBeGreaterThanOrEqual(1);
-      expect(allocFail.length).toBeGreaterThanOrEqual(1);
-      for (const f of allocFail) {
-        expect((f as PromiseRejectedResult).reason).toMatchObject({
-          code: expect.stringMatching(/ALLOCATION_EXCEEDS_PAYMENT|CHECK_OVERCOVERAGE/),
-        });
-      }
       const allocCount = await pool.query(
-        `SELECT coalesce(sum(amount_minor::numeric),0)::text AS s
+        `SELECT coalesce(sum(amount_minor::numeric),0)::text AS s,
+                count(*)::int AS c
          FROM payment_allocation WHERE payment_id = $1 AND active`,
         [pay.paymentId],
       );
+      expect(allocCount.rows[0]!.c).toBe(1);
+      expect(allocCount.rows[0]!.s).toBe('7000');
       expect(BigInt(allocCount.rows[0]!.s)).toBeLessThanOrEqual(10000n);
-      expect(BigInt(allocCount.rows[0]!.s)).toBeGreaterThanOrEqual(4000n);
     },
     30_000,
   );

@@ -52,7 +52,9 @@ Internet attacker; malicious cashier/employee/merchant; cross-tenant attacker; c
 | SEC0-04 | HIGH | Unauth or wrong session | Body `tenantId` | Tenant authority | Cross-tenant provision | tender/order bodies | Session tenant authority; reject mismatch | P body tenant switch 403 |
 | SEC0-05 | HIGH | Know UUID | GET foreign payment | Payment | Cross-tenant read | `GET /payments/:id` | Filter by `principal.tenantId` | B IDOR 404 |
 | SEC0-06 | MEDIUM (blocking) | Auth | Post `paid`/`SATISFIED` flags | CompleteOrder gates | Bypass attempt | advance-checkout / open order | Reject authoritative fields; orchestrator-only gates | N/O mass-assign 400 |
-| SEC0-07 | MEDIUM | Concurrent clients | Race allocate / duplicate outcome | Allocation / evidence | Double effect | Payments Core | Existing FOR UPDATE + unique; PG concurrency test | pay11 J/K race test |
+| SEC0-08 | HIGH | Auth + foreign tender UUID | POST /payments with foreign tenderDefinitionId | Payment | Cross-tenant write then 403 | `payments.ts` create | Pre-check tender tenant → 404; no commit | SEC0-08 write-IDOR test |
+| SEC0-09 | MEDIUM | Same create key | Different amountMinor | Idempotency | Silent overwrite risk | createPayment | IDEMPOTENCY_CONFLICT | pay11 create key semantic conflict |
+
 
 Non-blocking residuals: service-level `OrdersService.completeOrder` has no settlement gate (Accepted: CheckoutOrchestrator owns HTTP gate; baking settlement into CompleteOrder = Level C). No real webhook yet → webhook signature tests deferred to real adapter block.
 

@@ -5,6 +5,7 @@ import {
   PERMISSION_POS_OPERATE,
   rejectTenantAuthorityInjection,
   requireFinancialPrincipal,
+  requireFinancialSession,
   type FinancialAuthOptions,
 } from '../modules/identity/index.js';
 import { DomainValidationError } from '../modules/orders/errors.js';
@@ -140,7 +141,6 @@ export async function registerPaymentRoutes(
 
   app.post('/api/v1/payments', async (req, reply) => {
     try {
-      const principal = await requireFinancialPrincipal(req, opts);
       const body = (req.body ?? {}) as {
         tenderDefinitionId?: string;
         createIdempotencyKey?: string;
@@ -155,6 +155,13 @@ export async function registerPaymentRoutes(
         providerVerified?: unknown;
         coveredMinor?: unknown;
       };
+      // Resolve outlet from intended Check when present so AccessGrant outlet scope binds.
+      let outletId: string | null = null;
+      if (body.settlementCheckId) {
+        const checkOutlet = await payments.resolveOutletForSettlementCheck(body.settlementCheckId);
+        outletId = checkOutlet?.outletId ?? null;
+      }
+      const principal = await requireFinancialPrincipal(req, opts, { outletId });
       rejectTenantAuthorityInjection(principal, body.tenantId);
       if (
         body.status !== undefined ||
@@ -180,7 +187,18 @@ export async function registerPaymentRoutes(
             'tenderDefinitionId, createIdempotencyKey, requestedAmountMinor, currencyCode, minorUnitExponent required',
         });
       }
-      const created = await payments.createPayment({
+      // Pre-authorize tenant on tender BEFORE create (no cross-tenant write then 403).
+      const tender = await payments.getTenderDefinition(body.tenderDefinitionId);
+      if (!tender || tender.tenantId !== principal.tenantId) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'TenderDefinition not found' });
+      }
+      if (body.settlementCheckId) {
+        const checkTenant = await payments.resolveOutletForSettlementCheck(body.settlementCheckId);
+        if (!checkTenant || checkTenant.tenantId !== principal.tenantId) {
+          return reply.code(404).send({ error: 'NOT_FOUND', message: 'SettlementCheck not found' });
+        }
+      }
+      return await payments.createPayment({
         tenderDefinitionId: body.tenderDefinitionId,
         createIdempotencyKey: body.createIdempotencyKey,
         ...(body.merchantPaymentReference !== undefined
@@ -191,10 +209,6 @@ export async function registerPaymentRoutes(
         minorUnitExponent: body.minorUnitExponent,
         ...(body.settlementCheckId !== undefined ? { settlementCheckId: body.settlementCheckId } : {}),
       });
-      if (created.tenantId !== principal.tenantId) {
-        throw new IdentityDomainError('FORBIDDEN', 'Payment tenant mismatch');
-      }
-      return created;
     } catch (err) {
       const mapped = mapPaymentError(err);
       return reply.code(mapped.status).send(mapped.body);
@@ -203,11 +217,17 @@ export async function registerPaymentRoutes(
 
   app.get<{ Params: { paymentId: string } }>('/api/v1/payments/:paymentId', async (req, reply) => {
     try {
-      const principal = await requireFinancialPrincipal(req, opts);
+      const principal = await requireFinancialSession(req, opts);
       const p = await payments.getPayment(req.params.paymentId);
       if (!p || p.tenantId !== principal.tenantId) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Payment not found' });
       }
+      const scope = await payments.resolveOutletForPayment(p.paymentId);
+      await opts.identity.assertPosOperate(
+        principal,
+        opts.permissionKey,
+        scope?.outletId ?? null,
+      );
       return p;
     } catch (err) {
       const mapped = mapPaymentError(err);
@@ -219,11 +239,17 @@ export async function registerPaymentRoutes(
     '/api/v1/payments/:paymentId/client-redirect-signal',
     async (req, reply) => {
       try {
-        const principal = await requireFinancialPrincipal(req, opts);
+        const principal = await requireFinancialSession(req, opts);
         const existing = await payments.getPayment(req.params.paymentId);
         if (!existing || existing.tenantId !== principal.tenantId) {
           return reply.code(404).send({ error: 'NOT_FOUND', message: 'Payment not found' });
         }
+        const scope = await payments.resolveOutletForPayment(existing.paymentId);
+        await opts.identity.assertPosOperate(
+          principal,
+          opts.permissionKey,
+          scope?.outletId ?? null,
+        );
         // Hard invariant: redirect ≠ payment truth. Never qualifies.
         return await payments.recordClientRedirectSignal(req.params.paymentId);
       } catch (err) {
@@ -235,7 +261,6 @@ export async function registerPaymentRoutes(
 
   app.post('/api/v1/payments/allocations', async (req, reply) => {
     try {
-      const principal = await requireFinancialPrincipal(req, opts);
       const body = (req.body ?? {}) as {
         paymentId?: string;
         settlementCheckId?: string;
@@ -246,6 +271,15 @@ export async function registerPaymentRoutes(
         coveredMinor?: unknown;
         settlementStatus?: unknown;
       };
+      let outletId: string | null = null;
+      if (body.settlementCheckId) {
+        const checkScope = await payments.resolveOutletForSettlementCheck(body.settlementCheckId);
+        outletId = checkScope?.outletId ?? null;
+      } else if (body.paymentId) {
+        const payScope = await payments.resolveOutletForPayment(body.paymentId);
+        outletId = payScope?.outletId ?? null;
+      }
+      const principal = await requireFinancialPrincipal(req, opts, { outletId });
       rejectTenantAuthorityInjection(principal, body.tenantId);
       if (
         body.covered !== undefined ||
@@ -271,6 +305,10 @@ export async function registerPaymentRoutes(
       const pay = await payments.getPayment(body.paymentId);
       if (!pay || pay.tenantId !== principal.tenantId) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Payment not found' });
+      }
+      const checkScope = await payments.resolveOutletForSettlementCheck(body.settlementCheckId);
+      if (!checkScope || checkScope.tenantId !== principal.tenantId) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'SettlementCheck not found' });
       }
       return await payments.allocatePaymentToCheck({
         paymentId: body.paymentId,

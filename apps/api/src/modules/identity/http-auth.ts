@@ -60,20 +60,29 @@ export type FinancialAuthOptions = {
 export async function requireFinancialPrincipal(
   req: FastifyRequest,
   opts: FinancialAuthOptions,
-  scope: { outletId?: string | null } = {},
+  scope: { outletId?: string | null; terminalId?: string | null } = {},
+): Promise<AuthenticatedPrincipal> {
+  const principal = await requireFinancialSession(req, opts);
+  await opts.identity.assertPosOperate(
+    principal,
+    opts.permissionKey,
+    scope.outletId ?? null,
+    scope.terminalId ?? null,
+  );
+  return principal;
+}
+
+/** Session + CSRF only — use when AccessGrant outlet must be asserted after tenant-scoped load. */
+export async function requireFinancialSession(
+  req: FastifyRequest,
+  opts: FinancialAuthOptions,
 ): Promise<AuthenticatedPrincipal> {
   assertCsrf(req, opts.allowedOrigins, opts.isProduction);
   const token = readSessionToken(req);
   if (!token) {
     throw new IdentityDomainError('SESSION_INVALID', 'Invalid session');
   }
-  const principal = await opts.identity.resolveSession(token);
-  await opts.identity.assertPosOperate(
-    principal,
-    opts.permissionKey,
-    scope.outletId ?? null,
-  );
-  return principal;
+  return opts.identity.resolveSession(token);
 }
 
 /** Reject caller attempts to switch tenant via body/query/header. */

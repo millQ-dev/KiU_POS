@@ -261,6 +261,42 @@ describe('SEC-0 auth / tenant / mass-assignment (P, B, N, O)', () => {
     await app.close();
   });
 
+  it('SEC0-08 — Tenant A cannot CREATE Payment via Tenant B tender (no commit)', async () => {
+    const app = await buildApp();
+    const token = await loginPosSession(app, pool, fx);
+    const headers = authInjectHeaders(token);
+    const payments = new PaymentsService(pool);
+    const foreignTender = await payments.createTenderDefinition({
+      tenantId: fxB.tenantId,
+      legalEntityId: fxB.legalEntityId,
+      code: `fx_${randomUUID().slice(0, 6)}`,
+      displayName: 'Foreign Tender',
+    });
+    const before = await pool.query<{ c: string }>(
+      `SELECT count(*)::text AS c FROM payment WHERE tenant_id = $1`,
+      [fxB.tenantId],
+    );
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/payments',
+      headers,
+      payload: {
+        tenderDefinitionId: foreignTender.tenderDefinitionId,
+        createIdempotencyKey: randomUUID(),
+        requestedAmountMinor: '5000',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+      },
+    });
+    expect(res.statusCode).toBe(404);
+    const after = await pool.query<{ c: string }>(
+      `SELECT count(*)::text AS c FROM payment WHERE tenant_id = $1`,
+      [fxB.tenantId],
+    );
+    expect(after.rows[0]!.c).toBe(before.rows[0]!.c);
+    await app.close();
+  });
+
   it('N/O — caller cannot force SATISFIED / paid / providerVerified / fiscalAccepted', async () => {
     const app = await buildApp();
     const token = await loginPosSession(app, pool, fx);
