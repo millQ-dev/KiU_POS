@@ -229,17 +229,45 @@ export class ApprovalRequestService {
     }
 
     if (cmd.loginChallengeId) {
-      const ch = await this.pool.query<{ status: string; user_id: string; tenant_id: string }>(
-        `SELECT status, user_id, tenant_id FROM identity_login_challenge WHERE login_challenge_id = $1`,
-        [cmd.loginChallengeId],
-      );
-      if (
-        ch.rowCount !== 1 ||
-        ch.rows[0]!.tenant_id !== principal.tenantId ||
-        ch.rows[0]!.user_id !== principal.userId ||
-        ch.rows[0]!.status !== 'CONFIRMED'
-      ) {
-        throw new IdentityDomainError('CHALLENGE_INVALID', 'Challenge invalid or expired');
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const ch = await client.query<{
+          status: string;
+          user_id: string;
+          tenant_id: string;
+          outlet_id: string;
+          terminal_id: string;
+        }>(
+          `SELECT status, user_id, tenant_id, outlet_id, terminal_id
+           FROM identity_login_challenge
+           WHERE login_challenge_id = $1
+           FOR UPDATE`,
+          [cmd.loginChallengeId],
+        );
+        const row = ch.rows[0];
+        if (
+          !row ||
+          row.tenant_id !== principal.tenantId ||
+          row.user_id !== principal.userId ||
+          row.outlet_id !== cmd.outletId ||
+          row.terminal_id !== cmd.terminalId ||
+          row.status !== 'CONFIRMED'
+        ) {
+          throw new IdentityDomainError('CHALLENGE_INVALID', 'Challenge invalid or expired');
+        }
+        await client.query(
+          `UPDATE identity_login_challenge
+           SET status = 'CONSUMED', consumed_at = NOW()
+           WHERE login_challenge_id = $1 AND status = 'CONFIRMED'`,
+          [cmd.loginChallengeId],
+        );
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
       }
     }
 

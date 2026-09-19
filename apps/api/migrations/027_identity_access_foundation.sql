@@ -199,7 +199,8 @@ CREATE TABLE identity_approval_request (
     status IN ('PENDING', 'APPROVED', 'REJECTED', 'EXPIRED', 'CANCELLED', 'CONSUMED')
   ),
   CONSTRAINT identity_approval_outlet_tenant_fk
-    FOREIGN KEY (outlet_id, tenant_id) REFERENCES outlet (outlet_id, tenant_id)
+    FOREIGN KEY (outlet_id, tenant_id) REFERENCES outlet (outlet_id, tenant_id),
+  CONSTRAINT identity_approval_challenge_uq UNIQUE (login_challenge_id)
 );
 
 CREATE INDEX identity_approval_pending_idx
