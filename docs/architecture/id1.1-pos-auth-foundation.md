@@ -14,8 +14,9 @@
 
 ## Rate limiting
 
-- In-memory fixed window (single-node). Documented limitation for multi-instance.
-- Durable lockout: `identity_auth_throttle` + per-credential `failed_attempts` (atomic SQL)
+- In-memory fixed window with mutex serialization; never clears entire map (LRU/expiry eviction only). Documented single-node limitation.
+- Durable lockout: `identity_auth_throttle`, `identity_network_throttle` (unknown company), + per-credential `failed_attempts` (atomic SQL)
+- PIN KDF: async scrypt with max 2 concurrent slots (DoS bound)
 
 ## Pepper
 

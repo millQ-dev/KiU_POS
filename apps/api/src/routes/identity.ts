@@ -17,29 +17,46 @@ const PIN_RATE_WINDOW_MS = 60_000;
 const PIN_RATE_MAX = 20;
 const RATE_MAP_MAX = 10_000;
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+let rateMutex: Promise<void> = Promise.resolve();
+
+function withRateMutex<T>(fn: () => T): Promise<T> {
+  const run = rateMutex.then(() => fn());
+  rateMutex = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
 
 /**
- * Single-node in-memory rate limiter.
- * Credential/account lockout remains durable in DB (identity_auth_throttle / pin credential).
- * Multi-instance deployments need a shared limiter as follow-up.
+ * Single-node in-memory rate limiter (mutex-serialized).
+ * Durable lockout remains in DB (identity_auth_throttle / identity_network_throttle).
+ * Multi-instance shared limiter is a documented follow-up.
+ * Never clears the entire map (would reset active budgets).
  */
-function assertRateLimit(key: string, windowMs: number, max: number): void {
-  const now = Date.now();
-  if (rateBuckets.size > RATE_MAP_MAX) {
+async function assertRateLimit(key: string, windowMs: number, max: number): Promise<void> {
+  await withRateMutex(() => {
+    const now = Date.now();
     for (const [k, v] of rateBuckets) {
       if (now >= v.resetAt) rateBuckets.delete(k);
     }
-    if (rateBuckets.size > RATE_MAP_MAX) rateBuckets.clear();
-  }
-  let bucket = rateBuckets.get(key);
-  if (!bucket || now >= bucket.resetAt) {
-    bucket = { count: 0, resetAt: now + windowMs };
-    rateBuckets.set(key, bucket);
-  }
-  bucket.count += 1;
-  if (bucket.count > max) {
-    throw new IdentityDomainError('RATE_LIMITED', 'Too many requests');
-  }
+    if (rateBuckets.size > RATE_MAP_MAX) {
+      const ordered = [...rateBuckets.entries()].sort((a, b) => a[1].resetAt - b[1].resetAt);
+      for (const [k] of ordered) {
+        if (rateBuckets.size <= RATE_MAP_MAX) break;
+        rateBuckets.delete(k);
+      }
+    }
+    let bucket = rateBuckets.get(key);
+    if (!bucket || now >= bucket.resetAt) {
+      bucket = { count: 0, resetAt: now + windowMs };
+      rateBuckets.set(key, bucket);
+    }
+    bucket.count += 1;
+    if (bucket.count > max) {
+      throw new IdentityDomainError('RATE_LIMITED', 'Too many requests');
+    }
+  });
 }
 
 function applyPublicSecurityHeaders(reply: FastifyReply): void {
@@ -155,7 +172,7 @@ export async function registerCompanyIdentityRoutes(app: FastifyInstance, pool: 
     async (req, reply) => {
       try {
         applyPublicSecurityHeaders(reply);
-        assertRateLimit(`company:${networkKey(req)}`, COMPANY_RATE_WINDOW_MS, COMPANY_RATE_MAX);
+        await assertRateLimit(`company:${networkKey(req)}`, COMPANY_RATE_WINDOW_MS, COMPANY_RATE_MAX);
         const body = await company.resolvePublicByCompanyCode({
           companyCode: req.params.companyCode,
         });
@@ -163,7 +180,7 @@ export async function registerCompanyIdentityRoutes(app: FastifyInstance, pool: 
       } catch (err) {
         applyPublicSecurityHeaders(reply);
         if (err instanceof CompanyIdentityError && err.code === 'COMPANY_NOT_FOUND') {
-          assertRateLimit(`company:${networkKey(req)}`, COMPANY_RATE_WINDOW_MS, COMPANY_RATE_MAX);
+          await assertRateLimit(`company:${networkKey(req)}`, COMPANY_RATE_WINDOW_MS, COMPANY_RATE_MAX);
         }
         const mapped = mapError(err);
         return reply.code(mapped.status).send(mapped.body);
@@ -192,10 +209,10 @@ export async function registerIdentityRoutes(
 
   app.post('/api/v1/identity/pin/authenticate', async (req, reply) => {
     try {
-      assertRateLimit(`pin:${networkKey(req)}`, PIN_RATE_WINDOW_MS, PIN_RATE_MAX);
+      await assertRateLimit(`pin:${networkKey(req)}`, PIN_RATE_WINDOW_MS, PIN_RATE_MAX);
       const body = req.body as { companyCode?: string } | null;
       if (body?.companyCode) {
-        assertRateLimit(
+        await assertRateLimit(
           `pin-company:${String(body.companyCode).toUpperCase()}:${networkKey(req)}`,
           PIN_RATE_WINDOW_MS,
           PIN_RATE_MAX,

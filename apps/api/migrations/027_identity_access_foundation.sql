@@ -70,6 +70,15 @@ CREATE TABLE identity_auth_throttle (
   CONSTRAINT identity_auth_throttle_uq UNIQUE (tenant_id, dimension, dim_key)
 );
 
+-- Pre-tenant / unknown-company network throttle (no tenant_id required).
+CREATE TABLE identity_network_throttle (
+  dim_key TEXT PRIMARY KEY,
+  failed_attempts INT NOT NULL DEFAULT 0,
+  locked_until TIMESTAMPTZ NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT identity_network_throttle_failed_nonneg CHECK (failed_attempts >= 0)
+);
+
 CREATE TABLE identity_permission (
   permission_key TEXT PRIMARY KEY,
   description TEXT NOT NULL,

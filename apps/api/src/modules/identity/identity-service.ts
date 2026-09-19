@@ -100,7 +100,7 @@ export class IdentityService {
     }
     const userId = randomUUID();
     const employeeId = randomUUID();
-    const { saltHex, hashHex, kdfVersion } = hashPin(input.pin, this.pepper);
+    const { saltHex, hashHex, kdfVersion } = await hashPin(input.pin, this.pepper);
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -174,6 +174,40 @@ export class IdentityService {
     return { locked, failedAttempts: row.failed_attempts };
   }
 
+  async bumpNetworkThrottle(
+    dimKey: string,
+  ): Promise<{ locked: boolean; failedAttempts: number }> {
+    const res = await this.pool.query<{ failed_attempts: number; locked_until: Date | null }>(
+      `INSERT INTO identity_network_throttle
+         (dim_key, failed_attempts, locked_until, updated_at)
+       VALUES ($1,1,NULL,NOW())
+       ON CONFLICT (dim_key) DO UPDATE
+         SET failed_attempts = identity_network_throttle.failed_attempts + 1,
+             locked_until = CASE
+               WHEN identity_network_throttle.failed_attempts + 1 >= $2
+               THEN NOW() + ($3::text || ' minutes')::interval
+               ELSE identity_network_throttle.locked_until
+             END,
+             updated_at = NOW()
+       RETURNING failed_attempts, locked_until`,
+      [dimKey, PIN_MAX_ATTEMPTS, String(PIN_LOCK_MINUTES)],
+    );
+    const row = res.rows[0]!;
+    return {
+      locked: !!(row.locked_until && row.locked_until > new Date()),
+      failedAttempts: row.failed_attempts,
+    };
+  }
+
+  async isNetworkThrottleLocked(dimKey: string): Promise<boolean> {
+    const res = await this.pool.query<{ locked_until: Date | null }>(
+      `SELECT locked_until FROM identity_network_throttle WHERE dim_key = $1`,
+      [dimKey],
+    );
+    const until = res.rows[0]?.locked_until;
+    return !!(until && until > new Date());
+  }
+
   async isThrottleLocked(
     client: Pool | PoolClient,
     tenantId: string,
@@ -217,12 +251,17 @@ export class IdentityService {
     };
 
     if (!tenantId) {
-      dummyPinWork(this.pepper);
+      const ipKey = sha256Hex(`net|${networkKey}`);
+      if (await this.isNetworkThrottleLocked(ipKey)) {
+        throw new IdentityDomainError('AUTH_FAILED', 'Invalid credentials');
+      }
+      await this.bumpNetworkThrottle(ipKey);
+      await dummyPinWork(this.pepper);
       throw new IdentityDomainError('AUTH_FAILED', 'Invalid credentials');
     }
 
     if (!isValidPinFormat(cmd.pin)) {
-      dummyPinWork(this.pepper);
+      await dummyPinWork(this.pepper);
       await fail(tenantId, 'FORMAT');
     }
 
@@ -266,7 +305,7 @@ export class IdentityService {
       if (cred.rowCount !== 1) {
         await this.bumpThrottle(client, tenantId, 'COMPANY_IP', companyIpKey);
         await this.bumpThrottle(client, tenantId, 'PIN_CANDIDATE', lookup);
-        dummyPinWork(this.pepper);
+        await dummyPinWork(this.pepper);
         await audit(client, {
           tenantId,
           eventType: 'PIN_AUTH_FAILED',
@@ -290,7 +329,7 @@ export class IdentityService {
         throw new IdentityDomainError('AUTH_FAILED', 'Invalid credentials');
       }
 
-      if (!verifyPin(cmd.pin, this.pepper, row.pin_salt, row.pin_hash)) {
+      if (!(await verifyPin(cmd.pin, this.pepper, row.pin_salt, row.pin_hash))) {
         // Integrity mismatch: treat as failure against this credential (atomic).
         const upd = await client.query<{ failed_attempts: number; locked_until: Date | null }>(
           `UPDATE identity_pin_credential

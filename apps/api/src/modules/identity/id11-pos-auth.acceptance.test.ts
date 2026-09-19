@@ -45,6 +45,7 @@ async function truncate() {
       identity_notification_outbox, identity_audit_event,
       identity_approval_request, identity_login_challenge,
       identity_session, identity_access_grant, identity_auth_throttle,
+      identity_network_throttle,
       identity_pin_credential, workforce_employee, identity_user, terminal,
       operational_fact_feed, audit_record,
       order_line_commercial_snapshot, order_commercial_snapshot,
