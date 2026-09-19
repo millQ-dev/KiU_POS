@@ -2,6 +2,15 @@ import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { CheckoutOrchestrator } from '../modules/checkout/checkout-orchestrator.js';
 import { BaseCommercialAcceptanceService } from '../modules/commercial-rounding/base-commercial-acceptance.js';
+import {
+  IdentityDomainError,
+  IdentityService,
+  PERMISSION_POS_OPERATE,
+  rejectTenantAuthorityInjection,
+  requireFinancialPrincipal,
+  type AuthenticatedPrincipal,
+  type FinancialAuthOptions,
+} from '../modules/identity/index.js';
 import { GoodsIssueService } from '../modules/inventory/goods-issue-service.js';
 import { MenuResolver } from '../modules/menu/index.js';
 import { OrdersService } from '../modules/orders/orders-service.js';
@@ -20,7 +29,22 @@ import {
   registerPaymentRoutes,
 } from './payments.js';
 
+export type PosRouteOptions = {
+  pepper: string;
+  allowedOrigins: string[];
+  isProduction: boolean;
+};
+
 function mapError(err: unknown): { status: number; body: Record<string, unknown> } {
+  if (err instanceof IdentityDomainError) {
+    if (err.code === 'SESSION_INVALID' || err.code === 'AUTH_FAILED') {
+      return { status: 401, body: { error: err.code, message: err.message } };
+    }
+    if (err.code === 'FORBIDDEN' || err.code === 'CSRF_REJECTED') {
+      return { status: 403, body: { error: err.code, message: err.message } };
+    }
+    return { status: 400, body: { error: err.code, message: err.message } };
+  }
   if (err instanceof DomainValidationError) {
     return { status: 400, body: { error: err.code, message: err.message } };
   }
@@ -81,7 +105,63 @@ async function enrichOrderLines(pool: pg.Pool, order: Awaited<ReturnType<OrdersS
   };
 }
 
-export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
+async function loadOrderTenantOutlet(
+  pool: pg.Pool,
+  orderId: string,
+): Promise<{ tenantId: string; outletId: string } | null> {
+  const res = await pool.query<{ tenant_id: string; outlet_id: string }>(
+    `SELECT tenant_id, outlet_id FROM sales_order WHERE order_id = $1`,
+    [orderId],
+  );
+  const row = res.rows[0];
+  if (!row) return null;
+  return { tenantId: row.tenant_id, outletId: row.outlet_id };
+}
+
+async function assertOrderAccess(
+  pool: pg.Pool,
+  principal: AuthenticatedPrincipal,
+  orderId: string,
+): Promise<{ tenantId: string; outletId: string }> {
+  const row = await loadOrderTenantOutlet(pool, orderId);
+  if (!row || row.tenantId !== principal.tenantId) {
+    throw new NotFoundError('Order not found');
+  }
+  return row;
+}
+
+async function assertSettlementAccess(
+  pool: pg.Pool,
+  principal: AuthenticatedPrincipal,
+  settlementGroupId: string,
+): Promise<{ tenantId: string; outletId: string | null }> {
+  const res = await pool.query<{ tenant_id: string; outlet_id: string | null }>(
+    `SELECT sg.tenant_id, so.outlet_id
+     FROM settlement_group sg
+     LEFT JOIN sales_order so ON so.order_id = sg.order_id
+     WHERE sg.settlement_group_id = $1`,
+    [settlementGroupId],
+  );
+  const row = res.rows[0];
+  if (!row || row.tenant_id !== principal.tenantId) {
+    throw new NotFoundError('Settlement not found');
+  }
+  return { tenantId: row.tenant_id, outletId: row.outlet_id };
+}
+
+export async function registerPosRoutes(
+  app: FastifyInstance,
+  pool: pg.Pool,
+  routeOpts: PosRouteOptions,
+) {
+  const identity = new IdentityService(pool, routeOpts.pepper);
+  const finAuth: FinancialAuthOptions = {
+    identity,
+    allowedOrigins: routeOpts.allowedOrigins,
+    isProduction: routeOpts.isProduction,
+    permissionKey: PERMISSION_POS_OPERATE,
+  };
+
   const orders = new OrdersService(pool, { saleWriteOffPort: new GoodsIssueService(pool) });
   const surfaceResolver = new PosSurfaceResolver(pool);
   const selection = new PosSelectionService(pool, orders);
@@ -90,7 +170,26 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
 
   app.post('/api/v1/pos/surface/resolve', async (req, reply) => {
     try {
-      return await surfaceResolver.resolvePosSurface(req.body);
+      const body = (req.body ?? {}) as {
+        presentationContext?: { tenantId?: string; outletId?: string };
+        salesContext?: { tenantId?: string; outletId?: string };
+      };
+      const outletId =
+        body.presentationContext?.outletId ?? body.salesContext?.outletId ?? null;
+      const principal = await requireFinancialPrincipal(req, finAuth, { outletId });
+      rejectTenantAuthorityInjection(principal, body.presentationContext?.tenantId);
+      rejectTenantAuthorityInjection(principal, body.salesContext?.tenantId);
+      return await surfaceResolver.resolvePosSurface({
+        ...(req.body as object),
+        presentationContext: {
+          ...(body.presentationContext as object),
+          tenantId: principal.tenantId,
+        },
+        salesContext: {
+          ...(body.salesContext as object),
+          tenantId: principal.tenantId,
+        },
+      });
     } catch (err) {
       const mapped = mapError(err);
       return reply.code(mapped.status).send(mapped.body);
@@ -99,7 +198,30 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
 
   app.post('/api/v1/pos/select-count', async (req, reply) => {
     try {
-      const result = await selection.selectPosCountTap(req.body);
+      const body = (req.body ?? {}) as {
+        presentationContext?: { tenantId?: string; outletId?: string };
+        salesContext?: { tenantId?: string; outletId?: string };
+        orderId?: string;
+      };
+      const outletId =
+        body.presentationContext?.outletId ?? body.salesContext?.outletId ?? null;
+      const principal = await requireFinancialPrincipal(req, finAuth, { outletId });
+      rejectTenantAuthorityInjection(principal, body.presentationContext?.tenantId);
+      rejectTenantAuthorityInjection(principal, body.salesContext?.tenantId);
+      if (body.orderId) {
+        await assertOrderAccess(pool, principal, body.orderId);
+      }
+      const result = await selection.selectPosCountTap({
+        ...(req.body as object),
+        presentationContext: {
+          ...(body.presentationContext as object),
+          tenantId: principal.tenantId,
+        },
+        salesContext: {
+          ...(body.salesContext as object),
+          tenantId: principal.tenantId,
+        },
+      });
       const order = await enrichOrderLines(pool, result.order);
       return { ...result, order };
     } catch (err) {
@@ -110,7 +232,30 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
 
   app.post('/api/v1/pos/select-quantity', async (req, reply) => {
     try {
-      const result = await selection.selectPosQuantityTap(req.body);
+      const body = (req.body ?? {}) as {
+        presentationContext?: { tenantId?: string; outletId?: string };
+        salesContext?: { tenantId?: string; outletId?: string };
+        orderId?: string;
+      };
+      const outletId =
+        body.presentationContext?.outletId ?? body.salesContext?.outletId ?? null;
+      const principal = await requireFinancialPrincipal(req, finAuth, { outletId });
+      rejectTenantAuthorityInjection(principal, body.presentationContext?.tenantId);
+      rejectTenantAuthorityInjection(principal, body.salesContext?.tenantId);
+      if (body.orderId) {
+        await assertOrderAccess(pool, principal, body.orderId);
+      }
+      const result = await selection.selectPosQuantityTap({
+        ...(req.body as object),
+        presentationContext: {
+          ...(body.presentationContext as object),
+          tenantId: principal.tenantId,
+        },
+        salesContext: {
+          ...(body.salesContext as object),
+          tenantId: principal.tenantId,
+        },
+      });
       const order = await enrichOrderLines(pool, result.order);
       return { ...result, order };
     } catch (err) {
@@ -121,7 +266,33 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
 
   app.post('/api/v1/orders', async (req, reply) => {
     try {
-      const order = await orders.openOrder(req.body);
+      const body = (req.body ?? {}) as {
+        tenantId?: string;
+        legalEntityId?: string;
+        outletId?: string;
+        channel?: string;
+        paid?: unknown;
+        settlementSatisfied?: unknown;
+        providerVerified?: unknown;
+      };
+      const principal = await requireFinancialPrincipal(req, finAuth, {
+        outletId: body.outletId ?? null,
+      });
+      rejectTenantAuthorityInjection(principal, body.tenantId);
+      if (
+        body.paid !== undefined ||
+        body.settlementSatisfied !== undefined ||
+        body.providerVerified !== undefined
+      ) {
+        return reply.code(400).send({
+          error: 'VALIDATION',
+          message: 'Authoritative payment/settlement fields are not caller-settable',
+        });
+      }
+      const order = await orders.openOrder({
+        ...(req.body as object),
+        tenantId: principal.tenantId,
+      });
       return reply.code(201).send(await enrichOrderLines(pool, order));
     } catch (err) {
       const mapped = mapError(err);
@@ -131,6 +302,9 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
 
   app.get<{ Params: { orderId: string } }>('/api/v1/orders/:orderId', async (req, reply) => {
     try {
+      const principal = await requireFinancialPrincipal(req, finAuth);
+      const meta = await assertOrderAccess(pool, principal, req.params.orderId);
+      await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
       const order = await orders.getOrder(req.params.orderId);
       return await enrichOrderLines(pool, order);
     } catch (err) {
@@ -143,6 +317,9 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
     '/api/v1/orders/:orderId/lines/:lineId',
     async (req, reply) => {
       try {
+        const principal = await requireFinancialPrincipal(req, finAuth);
+        const meta = await assertOrderAccess(pool, principal, req.params.orderId);
+        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
         const body = (req.body ?? {}) as { quantity?: string; unit?: string; dimension?: string };
         const order = await orders.updateOrderLine({
           orderId: req.params.orderId,
@@ -163,6 +340,9 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
     '/api/v1/orders/:orderId/lines/:lineId',
     async (req, reply) => {
       try {
+        const principal = await requireFinancialPrincipal(req, finAuth);
+        const meta = await assertOrderAccess(pool, principal, req.params.orderId);
+        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
         const order = await orders.removeOrderLine({
           orderId: req.params.orderId,
           orderLineId: req.params.lineId,
@@ -177,6 +357,9 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
 
   app.post<{ Params: { orderId: string } }>('/api/v1/orders/:orderId/cancel', async (req, reply) => {
     try {
+      const principal = await requireFinancialPrincipal(req, finAuth);
+      const meta = await assertOrderAccess(pool, principal, req.params.orderId);
+      await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
       const body = (req.body ?? {}) as { reason?: string; actorId?: string };
       if (!body.reason || body.reason.trim().length === 0) {
         return reply.code(400).send({ error: 'VALIDATION', message: 'reason required' });
@@ -197,6 +380,9 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
     '/api/v1/orders/:orderId/commercial-status',
     async (req, reply) => {
       try {
+        const principal = await requireFinancialPrincipal(req, finAuth);
+        const meta = await assertOrderAccess(pool, principal, req.params.orderId);
+        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
         return await orders.getOpenCommercialStatus(req.params.orderId);
       } catch (err) {
         const mapped = mapError(err);
@@ -210,6 +396,9 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
     '/api/v1/orders/:orderId/resolve-menu-prices',
     async (req, reply) => {
       try {
+        const principal = await requireFinancialPrincipal(req, finAuth);
+        const meta = await assertOrderAccess(pool, principal, req.params.orderId);
+        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
         const body = (req.body ?? {}) as { salesContext?: unknown };
         if (!body.salesContext) {
           return reply
@@ -251,6 +440,9 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
     '/api/v1/orders/:orderId/calculate-and-accept-commercial-terms',
     async (req, reply) => {
       try {
+        const principal = await requireFinancialPrincipal(req, finAuth);
+        const meta = await assertOrderAccess(pool, principal, req.params.orderId);
+        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
         const body = (req.body ?? {}) as {
           salesContext?: unknown;
           idempotencyKey?: string;
@@ -281,6 +473,9 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
     '/api/v1/orders/:orderId/reprice-and-accept-commercial-terms',
     async (req, reply) => {
       try {
+        const principal = await requireFinancialPrincipal(req, finAuth);
+        const meta = await assertOrderAccess(pool, principal, req.params.orderId);
+        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
         const body = (req.body ?? {}) as {
           salesContext?: unknown;
           idempotencyKey?: string;
@@ -317,7 +512,11 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
         externalEffects: paymentsSvc.createExternalEffectProbe(),
       }),
   );
-  await registerPaymentRoutes(app, payments);
+  await registerPaymentRoutes(app, payments, {
+    identity,
+    allowedOrigins: routeOpts.allowedOrigins,
+    isProduction: routeOpts.isProduction,
+  });
   await registerDevPaymentSimulatorRoutes(app, payments);
   const checkout = new CheckoutOrchestrator(pool, orders, settlements);
 
@@ -325,11 +524,22 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
     '/api/v1/orders/:orderId/open-settlement',
     async (req, reply) => {
       try {
+        const principal = await requireFinancialPrincipal(req, finAuth);
+        const meta = await assertOrderAccess(pool, principal, req.params.orderId);
+        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
         const body = (req.body ?? {}) as {
           idempotencyKey?: string;
           actorId?: string;
           deviceId?: string;
+          settlementStatus?: unknown;
+          covered?: unknown;
         };
+        if (body.settlementStatus !== undefined || body.covered !== undefined) {
+          return reply.code(400).send({
+            error: 'VALIDATION',
+            message: 'Authoritative settlement fields are not caller-settable',
+          });
+        }
         if (!body.idempotencyKey) {
           return reply.code(400).send({ error: 'VALIDATION', message: 'idempotencyKey required' });
         }
@@ -350,6 +560,9 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
     '/api/v1/orders/:orderId/settlement',
     async (req, reply) => {
       try {
+        const principal = await requireFinancialPrincipal(req, finAuth);
+        const meta = await assertOrderAccess(pool, principal, req.params.orderId);
+        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
         const live = await settlements.getLiveSettlementForOrder(req.params.orderId);
         if (!live) {
           return { orderId: req.params.orderId, settlement: null };
@@ -366,6 +579,9 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
     '/api/v1/settlements/:settlementGroupId',
     async (req, reply) => {
       try {
+        const principal = await requireFinancialPrincipal(req, finAuth);
+        const meta = await assertSettlementAccess(pool, principal, req.params.settlementGroupId);
+        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
         return await settlements.getSettlement(req.params.settlementGroupId);
       } catch (err) {
         const mapped = mapError(err);
@@ -378,6 +594,9 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
     '/api/v1/settlements/:settlementGroupId/abort',
     async (req, reply) => {
       try {
+        const principal = await requireFinancialPrincipal(req, finAuth);
+        const meta = await assertSettlementAccess(pool, principal, req.params.settlementGroupId);
+        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
         const body = (req.body ?? {}) as { expectedVersion?: number };
         return await settlements.abortSettlement({
           settlementGroupId: req.params.settlementGroupId,
@@ -394,6 +613,24 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
     '/api/v1/settlements/:settlementGroupId/reconcile-coverage',
     async (req, reply) => {
       try {
+        const principal = await requireFinancialPrincipal(req, finAuth);
+        const meta = await assertSettlementAccess(pool, principal, req.params.settlementGroupId);
+        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
+        const body = (req.body ?? {}) as {
+          covered?: unknown;
+          settlementStatus?: unknown;
+          coveredMinor?: unknown;
+        };
+        if (
+          body.covered !== undefined ||
+          body.settlementStatus !== undefined ||
+          body.coveredMinor !== undefined
+        ) {
+          return reply.code(400).send({
+            error: 'VALIDATION',
+            message: 'Authoritative coverage/settlement fields are not caller-settable',
+          });
+        }
         // PAY1.1: real QualifyingPaymentCoverageReader wired via Payments Core.
         return await settlements.reconcileSettlementCoverage(req.params.settlementGroupId);
       } catch (err) {
@@ -407,6 +644,9 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
     '/api/v1/settlements/:settlementGroupId/advance-checkout',
     async (req, reply) => {
       try {
+        const principal = await requireFinancialPrincipal(req, finAuth);
+        const meta = await assertSettlementAccess(pool, principal, req.params.settlementGroupId);
+        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
         const body = (req.body ?? {}) as {
           completeIdempotencyKey?: string;
           businessDate?: string;
@@ -414,7 +654,22 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
           businessTime?: string | null;
           actorId?: string;
           deviceId?: string;
+          paid?: unknown;
+          settlementSatisfied?: unknown;
+          providerVerified?: unknown;
+          fiscalAccepted?: unknown;
         };
+        if (
+          body.paid !== undefined ||
+          body.settlementSatisfied !== undefined ||
+          body.providerVerified !== undefined ||
+          body.fiscalAccepted !== undefined
+        ) {
+          return reply.code(400).send({
+            error: 'VALIDATION',
+            message: 'Authoritative completion gate fields are not caller-settable',
+          });
+        }
         if (!body.completeIdempotencyKey || !body.businessDate || body.businessOrder == null) {
           return reply.code(400).send({
             error: 'VALIDATION',
@@ -441,16 +696,15 @@ export async function registerPosRoutes(app: FastifyInstance, pool: pg.Pool) {
 
 /**
  * Development-only outlet context bootstrap — NOT production authorization.
- * Enabled when NODE_ENV !== 'production' or ALLOW_DEV_CASHIER_BOOTSTRAP=1.
+ * SEC-0: when NODE_ENV === 'production', registers ZERO routes.
+ * ALLOW_DEV_CASHIER_BOOTSTRAP has no effect in production.
  */
 export async function registerDevCashierBootstrapRoutes(app: FastifyInstance, pool: pg.Pool) {
-  const allowed =
-    process.env.NODE_ENV !== 'production' || process.env.ALLOW_DEV_CASHIER_BOOTSTRAP === '1';
+  if (process.env.NODE_ENV === 'production') {
+    return;
+  }
 
-  app.get('/api/v1/dev/cashier-contexts', async (_req, reply) => {
-    if (!allowed) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Dev bootstrap disabled' });
-    }
+  app.get('/api/v1/dev/cashier-contexts', async (_req) => {
     const rows = await pool.query<{
       tenant_id: string;
       tenant_name: string;

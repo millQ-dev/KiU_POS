@@ -1,32 +1,56 @@
 /**
  * P1.2 — thin POS / Orders HTTP transport (delegates P1.1 + Orders services).
+ * SEC-0: financial/POS routes require Identity session + pos.operate AccessGrant.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
+import cookie from '@fastify/cookie';
 import pg from 'pg';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { runMigrations } from '../db/migrate.js';
 import { seedBlockCFixture, type BlockCFixture } from '../test/seed.js';
+import {
+  authInjectHeaders,
+  loginPosSession,
+  provisionPosOperator,
+  TEST_ORIGIN,
+} from '../test/financial-auth-harness.js';
+import { resolvePinPepper } from '../config.js';
+import { IdentityService } from '../modules/identity/index.js';
 import { MenuService } from '../modules/menu/index.js';
 import { LayoutService } from '../modules/pos/index.js';
+import { registerIdentityRoutes } from '../routes/identity.js';
 import { registerPosRoutes } from '../routes/pos.js';
 
 const DATABASE_URL = process.env.DATABASE_URL ?? 'postgresql://millq:millq@localhost:5432/millq_dev';
 const TZ = 'Asia/Ho_Chi_Minh';
 const AT = '2026-09-16T17:30:00.000Z';
+const PEPPER = resolvePinPepper({
+  NODE_ENV: 'test',
+  PORT: 3000,
+  LOG_LEVEL: 'error',
+  DATABASE_URL,
+  CORS_ORIGINS: TEST_ORIGIN,
+} as never);
 
 let pool: pg.Pool;
 let fx: BlockCFixture;
 let menu: MenuService;
 let layout: LayoutService;
+let identity: IdentityService;
 let seq = 0;
 const idem = (p: string) => `${p}-${++seq}-${randomUUID()}`;
 
 async function truncateBusiness() {
   await pool.query(`
     TRUNCATE
+      identity_notification_outbox, identity_audit_event,
+      identity_approval_request, identity_login_challenge,
+      identity_session, identity_access_grant, identity_auth_throttle,
+      identity_network_throttle,
+      identity_pin_credential, workforce_employee, identity_user, terminal,
       operational_fact_feed, audit_record,
       order_line_commercial_snapshot, order_commercial_snapshot,
       sales_order_commercial_line_terms, sales_order_commercial_terms,
@@ -146,11 +170,32 @@ function payload() {
   };
 }
 
+async function buildAuthedApp() {
+  const app = Fastify({ logger: false });
+  await app.register(cookie);
+  await registerPosRoutes(app, pool, {
+    pepper: PEPPER,
+    allowedOrigins: [TEST_ORIGIN],
+    isProduction: false,
+  });
+  await registerIdentityRoutes(app, pool, {
+    pepper: PEPPER,
+    cookieSecure: false,
+    allowedOrigins: [TEST_ORIGIN],
+    isProduction: false,
+  });
+  await app.ready();
+  await provisionPosOperator(identity, fx);
+  const token = await loginPosSession(app, pool, fx);
+  return { app, headers: authInjectHeaders(token) };
+}
+
 beforeAll(async () => {
   await runMigrations(DATABASE_URL);
   pool = new pg.Pool({ connectionString: DATABASE_URL });
   menu = new MenuService(pool);
   layout = new LayoutService(pool);
+  identity = new IdentityService(pool, PEPPER);
 });
 
 afterAll(async () => {
@@ -165,13 +210,12 @@ beforeEach(async () => {
 
 describe('P1.2 POS HTTP transport', () => {
   it('resolves surface via PosSurfaceResolver; COUNT enrichment present', async () => {
-    const app = Fastify();
-    await registerPosRoutes(app, pool);
-    await app.ready();
+    const { app, headers } = await buildAuthedApp();
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/pos/surface/resolve',
       payload: payload(),
+      headers,
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as {
@@ -191,14 +235,13 @@ describe('P1.2 POS HTTP transport', () => {
   });
 
   it('open order + COUNT tap delegates AddOrderLine; no commercial terms', async () => {
-    const app = Fastify();
-    await registerPosRoutes(app, pool);
-    await app.ready();
+    const { app, headers } = await buildAuthedApp();
 
     const surface = await app.inject({
       method: 'POST',
       url: '/api/v1/pos/surface/resolve',
       payload: payload(),
+      headers,
     });
     const eggSlot = (
       surface.json() as { pages: { slots: { layoutPublicationSlotId: string; catalogItemId: string }[] }[] }
@@ -213,6 +256,7 @@ describe('P1.2 POS HTTP transport', () => {
         outletId: fx.outletId,
         channel: 'DIRECT',
       },
+      headers,
     });
     expect(opened.statusCode).toBe(201);
     const order = opened.json() as { orderId: string; status: string; lines: unknown[] };
@@ -227,6 +271,7 @@ describe('P1.2 POS HTTP transport', () => {
         orderId: order.orderId,
         layoutPublicationSlotId: eggSlot.layoutPublicationSlotId,
       },
+      headers,
     });
     expect(selected.statusCode).toBe(200);
     const body = selected.json() as {
@@ -253,6 +298,7 @@ describe('P1.2 POS HTTP transport', () => {
         orderId: order.orderId,
         layoutPublicationSlotId: milkSlot.layoutPublicationSlotId,
       },
+      headers,
     });
     expect(weighted.statusCode).toBe(400);
     expect(weighted.json()).toMatchObject({ error: 'POS_QUANTITY_ENTRY_DEFERRED' });
@@ -268,14 +314,42 @@ describe('P1.2 POS HTTP transport', () => {
     expect(src).toContain('selectPosCountTap');
     expect(src).toContain('orders.openOrder');
   });
+
+  it('unauthenticated financial routes are rejected', async () => {
+    const app = Fastify({ logger: false });
+    await app.register(cookie);
+    await registerPosRoutes(app, pool, {
+      pepper: PEPPER,
+      allowedOrigins: [TEST_ORIGIN],
+      isProduction: false,
+    });
+    await app.ready();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/orders',
+      payload: {
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        outletId: fx.outletId,
+        channel: 'DIRECT',
+      },
+      headers: { origin: TEST_ORIGIN },
+    });
+    expect(res.statusCode).toBe(401);
+    await app.close();
+  });
 });
 
 describe('P1.3 Order Interaction HTTP transport', () => {
-  async function openWithEggLine(app: Awaited<ReturnType<typeof Fastify>>) {
+  async function openWithEggLine(
+    app: Awaited<ReturnType<typeof Fastify>>,
+    headers: Record<string, string>,
+  ) {
     const surface = await app.inject({
       method: 'POST',
       url: '/api/v1/pos/surface/resolve',
       payload: payload(),
+      headers,
     });
     const eggSlot = (
       surface.json() as { pages: { slots: { layoutPublicationSlotId: string; catalogItemId: string }[] }[] }
@@ -292,6 +366,7 @@ describe('P1.3 Order Interaction HTTP transport', () => {
         outletId: fx.outletId,
         channel: 'DIRECT',
       },
+      headers,
     });
     const order = opened.json() as { orderId: string };
     const selected = await app.inject({
@@ -302,6 +377,7 @@ describe('P1.3 Order Interaction HTTP transport', () => {
         orderId: order.orderId,
         layoutPublicationSlotId: eggSlot.layoutPublicationSlotId,
       },
+      headers,
     });
     const body = selected.json() as {
       order: { orderId: string; lines: { orderLineId: string; quantity: string }[] };
@@ -310,14 +386,13 @@ describe('P1.3 Order Interaction HTTP transport', () => {
   }
 
   it('PATCH update / DELETE remove / cancel / commercial-status / resolve-menu-prices', async () => {
-    const app = Fastify();
-    await registerPosRoutes(app, pool);
-    await app.ready();
-    const { orderId, lineId, milkSlot } = await openWithEggLine(app);
+    const { app, headers } = await buildAuthedApp();
+    const { orderId, lineId, milkSlot } = await openWithEggLine(app, headers);
 
     const status0 = await app.inject({
       method: 'GET',
       url: `/api/v1/orders/${orderId}/commercial-status`,
+      headers,
     });
     expect(status0.statusCode).toBe(200);
     expect(status0.json()).toMatchObject({
@@ -334,6 +409,7 @@ describe('P1.3 Order Interaction HTTP transport', () => {
     const statusAccepted = await app.inject({
       method: 'GET',
       url: `/api/v1/orders/${orderId}/commercial-status`,
+      headers,
     });
     expect(statusAccepted.json()).toMatchObject({
       commercialState: 'ACCEPTED',
@@ -344,12 +420,14 @@ describe('P1.3 Order Interaction HTTP transport', () => {
       method: 'PATCH',
       url: `/api/v1/orders/${orderId}/lines/${lineId}`,
       payload: { quantity: '3' },
+      headers,
     });
     expect(patched.statusCode).toBe(200);
     expect((patched.json() as { lines: { quantity: string }[] }).lines[0]!.quantity).toBe('3');
     const statusAfter = await app.inject({
       method: 'GET',
       url: `/api/v1/orders/${orderId}/commercial-status`,
+      headers,
     });
     expect(statusAfter.json()).toMatchObject({
       commercialState: 'NOT_ACCEPTED',
@@ -360,6 +438,7 @@ describe('P1.3 Order Interaction HTTP transport', () => {
       method: 'PATCH',
       url: `/api/v1/orders/${orderId}/lines/${lineId}`,
       payload: { quantity: '1.5' },
+      headers,
     });
     expect(fractional.statusCode).toBe(400);
     expect(fractional.json()).toMatchObject({ error: 'INVALID_QUANTITY' });
@@ -368,6 +447,7 @@ describe('P1.3 Order Interaction HTTP transport', () => {
       method: 'POST',
       url: `/api/v1/orders/${orderId}/resolve-menu-prices`,
       payload: { salesContext: payload().salesContext },
+      headers,
     });
     expect(resolved.statusCode).toBe(200);
     const resolvedBody = resolved.json() as {
@@ -391,6 +471,7 @@ describe('P1.3 Order Interaction HTTP transport', () => {
         layoutPublicationSlotId: milkSlot.layoutPublicationSlotId,
         quantity: '0.5',
       },
+      headers,
     });
     expect(weighted.statusCode).toBe(200);
     const wBody = weighted.json() as {
@@ -403,6 +484,7 @@ describe('P1.3 Order Interaction HTTP transport', () => {
     const removed = await app.inject({
       method: 'DELETE',
       url: `/api/v1/orders/${orderId}/lines/${lineId}`,
+      headers,
     });
     expect(removed.statusCode).toBe(200);
     expect(
@@ -415,6 +497,7 @@ describe('P1.3 Order Interaction HTTP transport', () => {
       method: 'POST',
       url: `/api/v1/orders/${orderId}/cancel`,
       payload: { reason: 'cashier_cancel' },
+      headers,
     });
     expect(cancelled.statusCode).toBe(200);
     expect((cancelled.json() as { status: string }).status).toBe('CANCELLED');
@@ -423,6 +506,7 @@ describe('P1.3 Order Interaction HTTP transport', () => {
       method: 'PATCH',
       url: `/api/v1/orders/${orderId}/lines/${lineId}`,
       payload: { quantity: '2' },
+      headers,
     });
     expect(mutateClosed.statusCode).toBe(409);
 
@@ -430,13 +514,12 @@ describe('P1.3 Order Interaction HTTP transport', () => {
   });
 
   it('rejects cross-tenant / nonexistent line and does not derive gross', async () => {
-    const app = Fastify();
-    await registerPosRoutes(app, pool);
-    await app.ready();
-    const { orderId } = await openWithEggLine(app);
+    const { app, headers } = await buildAuthedApp();
+    const { orderId } = await openWithEggLine(app, headers);
     const bogus = await app.inject({
       method: 'DELETE',
       url: `/api/v1/orders/${orderId}/lines/${randomUUID()}`,
+      headers,
     });
     expect(bogus.statusCode).toBe(404);
 

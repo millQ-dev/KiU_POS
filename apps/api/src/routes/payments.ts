@@ -1,11 +1,31 @@
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
+import {
+  IdentityDomainError,
+  PERMISSION_POS_OPERATE,
+  rejectTenantAuthorityInjection,
+  requireFinancialPrincipal,
+  type FinancialAuthOptions,
+} from '../modules/identity/index.js';
 import { DomainValidationError } from '../modules/orders/errors.js';
 import { PaymentsService } from '../modules/payments/payments-service.js';
 import type { NormalizedProviderOutcome } from '../modules/payments/payment-lifecycle.js';
 import type { SettlementService } from '../modules/settlement/settlement-service.js';
 
+export type PaymentRouteAuth = Omit<FinancialAuthOptions, 'permissionKey'> & {
+  permissionKey?: string;
+};
+
 function mapPaymentError(err: unknown): { status: number; body: Record<string, unknown> } {
+  if (err instanceof IdentityDomainError) {
+    if (err.code === 'SESSION_INVALID' || err.code === 'AUTH_FAILED') {
+      return { status: 401, body: { error: err.code, message: err.message } };
+    }
+    if (err.code === 'FORBIDDEN' || err.code === 'CSRF_REJECTED') {
+      return { status: 403, body: { error: err.code, message: err.message } };
+    }
+    return { status: 400, body: { error: err.code, message: err.message } };
+  }
   if (err instanceof DomainValidationError) {
     const conflict = new Set([
       'IDEMPOTENCY_CONFLICT',
@@ -34,6 +54,15 @@ function mapPaymentError(err: unknown): { status: number; body: Record<string, u
   throw err;
 }
 
+function authOpts(auth: PaymentRouteAuth): FinancialAuthOptions {
+  return {
+    identity: auth.identity,
+    allowedOrigins: auth.allowedOrigins,
+    isProduction: auth.isProduction,
+    permissionKey: auth.permissionKey ?? PERMISSION_POS_OPERATE,
+  };
+}
+
 export function createWiredPaymentsAndSettlement(
   pool: pg.Pool,
   settlementsFactory: (payments: PaymentsService) => SettlementService,
@@ -51,9 +80,13 @@ export function createWiredPaymentsAndSettlement(
 export async function registerPaymentRoutes(
   app: FastifyInstance,
   payments: PaymentsService,
+  auth: PaymentRouteAuth,
 ): Promise<void> {
+  const opts = authOpts(auth);
+
   app.post('/api/v1/payments/tenders', async (req, reply) => {
     try {
+      const principal = await requireFinancialPrincipal(req, opts);
       const body = (req.body ?? {}) as {
         tenantId?: string;
         legalEntityId?: string;
@@ -65,15 +98,28 @@ export async function registerPaymentRoutes(
         instrumentFamily?: string | null;
         presentationCapability?: string | null;
         externalConfigRef?: string | null;
+        status?: unknown;
+        providerVerified?: unknown;
       };
-      if (!body.tenantId || !body.legalEntityId || !body.code || !body.displayName) {
+      // Authoritative tenant from Session — reject mismatch; never trust body as authority.
+      rejectTenantAuthorityInjection(principal, body.tenantId);
+      if (
+        body.status !== undefined ||
+        body.providerVerified !== undefined
+      ) {
         return reply.code(400).send({
           error: 'VALIDATION',
-          message: 'tenantId, legalEntityId, code, displayName required',
+          message: 'Authoritative fields are not caller-settable',
+        });
+      }
+      if (!body.legalEntityId || !body.code || !body.displayName) {
+        return reply.code(400).send({
+          error: 'VALIDATION',
+          message: 'legalEntityId, code, displayName required',
         });
       }
       return await payments.createTenderDefinition({
-        tenantId: body.tenantId,
+        tenantId: principal.tenantId,
         legalEntityId: body.legalEntityId,
         code: body.code,
         displayName: body.displayName,
@@ -94,6 +140,7 @@ export async function registerPaymentRoutes(
 
   app.post('/api/v1/payments', async (req, reply) => {
     try {
+      const principal = await requireFinancialPrincipal(req, opts);
       const body = (req.body ?? {}) as {
         tenderDefinitionId?: string;
         createIdempotencyKey?: string;
@@ -102,7 +149,24 @@ export async function registerPaymentRoutes(
         currencyCode?: string;
         minorUnitExponent?: number;
         settlementCheckId?: string;
+        tenantId?: string;
+        status?: unknown;
+        lifecycleState?: unknown;
+        providerVerified?: unknown;
+        coveredMinor?: unknown;
       };
+      rejectTenantAuthorityInjection(principal, body.tenantId);
+      if (
+        body.status !== undefined ||
+        body.lifecycleState !== undefined ||
+        body.providerVerified !== undefined ||
+        body.coveredMinor !== undefined
+      ) {
+        return reply.code(400).send({
+          error: 'VALIDATION',
+          message: 'Authoritative fields are not caller-settable',
+        });
+      }
       if (
         !body.tenderDefinitionId ||
         !body.createIdempotencyKey ||
@@ -116,7 +180,7 @@ export async function registerPaymentRoutes(
             'tenderDefinitionId, createIdempotencyKey, requestedAmountMinor, currencyCode, minorUnitExponent required',
         });
       }
-      return await payments.createPayment({
+      const created = await payments.createPayment({
         tenderDefinitionId: body.tenderDefinitionId,
         createIdempotencyKey: body.createIdempotencyKey,
         ...(body.merchantPaymentReference !== undefined
@@ -127,6 +191,10 @@ export async function registerPaymentRoutes(
         minorUnitExponent: body.minorUnitExponent,
         ...(body.settlementCheckId !== undefined ? { settlementCheckId: body.settlementCheckId } : {}),
       });
+      if (created.tenantId !== principal.tenantId) {
+        throw new IdentityDomainError('FORBIDDEN', 'Payment tenant mismatch');
+      }
+      return created;
     } catch (err) {
       const mapped = mapPaymentError(err);
       return reply.code(mapped.status).send(mapped.body);
@@ -135,8 +203,11 @@ export async function registerPaymentRoutes(
 
   app.get<{ Params: { paymentId: string } }>('/api/v1/payments/:paymentId', async (req, reply) => {
     try {
+      const principal = await requireFinancialPrincipal(req, opts);
       const p = await payments.getPayment(req.params.paymentId);
-      if (!p) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Payment not found' });
+      if (!p || p.tenantId !== principal.tenantId) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Payment not found' });
+      }
       return p;
     } catch (err) {
       const mapped = mapPaymentError(err);
@@ -148,6 +219,11 @@ export async function registerPaymentRoutes(
     '/api/v1/payments/:paymentId/client-redirect-signal',
     async (req, reply) => {
       try {
+        const principal = await requireFinancialPrincipal(req, opts);
+        const existing = await payments.getPayment(req.params.paymentId);
+        if (!existing || existing.tenantId !== principal.tenantId) {
+          return reply.code(404).send({ error: 'NOT_FOUND', message: 'Payment not found' });
+        }
         // Hard invariant: redirect ≠ payment truth. Never qualifies.
         return await payments.recordClientRedirectSignal(req.params.paymentId);
       } catch (err) {
@@ -159,12 +235,28 @@ export async function registerPaymentRoutes(
 
   app.post('/api/v1/payments/allocations', async (req, reply) => {
     try {
+      const principal = await requireFinancialPrincipal(req, opts);
       const body = (req.body ?? {}) as {
         paymentId?: string;
         settlementCheckId?: string;
         amountMinor?: string;
         allocationIdempotencyKey?: string;
+        tenantId?: string;
+        covered?: unknown;
+        coveredMinor?: unknown;
+        settlementStatus?: unknown;
       };
+      rejectTenantAuthorityInjection(principal, body.tenantId);
+      if (
+        body.covered !== undefined ||
+        body.coveredMinor !== undefined ||
+        body.settlementStatus !== undefined
+      ) {
+        return reply.code(400).send({
+          error: 'VALIDATION',
+          message: 'Authoritative coverage/settlement fields are not caller-settable',
+        });
+      }
       if (
         !body.paymentId ||
         !body.settlementCheckId ||
@@ -175,6 +267,10 @@ export async function registerPaymentRoutes(
           error: 'VALIDATION',
           message: 'paymentId, settlementCheckId, amountMinor, allocationIdempotencyKey required',
         });
+      }
+      const pay = await payments.getPayment(body.paymentId);
+      if (!pay || pay.tenantId !== principal.tenantId) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Payment not found' });
       }
       return await payments.allocatePaymentToCheck({
         paymentId: body.paymentId,
@@ -192,20 +288,19 @@ export async function registerPaymentRoutes(
 /**
  * DEV/TEST Payment Simulator — visibly non-production.
  * Uses the SAME Payments Core commands. No direct Settlement/Order mutation.
+ *
+ * PO / SEC-0: when NODE_ENV === 'production', registers ZERO routes.
+ * ALLOW_DEV_* overrides have no effect.
  */
 export async function registerDevPaymentSimulatorRoutes(
   app: FastifyInstance,
   payments: PaymentsService,
 ): Promise<void> {
-  const allowed = process.env.NODE_ENV !== 'production';
+  if (process.env.NODE_ENV === 'production') {
+    return;
+  }
 
   app.post('/api/v1/dev/payment-simulator/outcome', async (req, reply) => {
-    if (!allowed) {
-      return reply.code(404).send({
-        error: 'NOT_FOUND',
-        message: 'DEV PAYMENT SIMULATOR is unavailable in production',
-      });
-    }
     try {
       const body = (req.body ?? {}) as {
         paymentId?: string;

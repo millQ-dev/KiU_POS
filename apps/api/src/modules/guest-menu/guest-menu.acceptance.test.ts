@@ -410,7 +410,11 @@ describe('GUEST1.1 Guest QR Menu Public Read Projection', () => {
     const app = Fastify();
     await registerGuestMenuRoutes(app, pool);
     await registerDevGuestMenuAdminRoutes(app, pool);
-    await registerPosRoutes(app, pool);
+    await registerPosRoutes(app, pool, {
+      pepper: 'millq-dev-test-pin-pepper-not-for-production-use!!',
+      allowedOrigins: ['http://localhost:5173'],
+      isProduction: false,
+    });
 
     const get = await app.inject({
       method: 'GET',
