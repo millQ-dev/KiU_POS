@@ -8,6 +8,7 @@ import {
   PERMISSION_POS_OPERATE,
   rejectTenantAuthorityInjection,
   requireFinancialPrincipal,
+  requireFinancialSession,
   type AuthenticatedPrincipal,
   type FinancialAuthOptions,
 } from '../modules/identity/index.js';
@@ -147,6 +148,38 @@ async function assertSettlementAccess(
     throw new NotFoundError('Settlement not found');
   }
   return { tenantId: row.tenant_id, outletId: row.outlet_id };
+}
+
+async function requireOrderPrincipal(
+  req: Parameters<typeof requireFinancialSession>[0],
+  finAuth: FinancialAuthOptions,
+  pool: pg.Pool,
+  orderId: string,
+): Promise<{ principal: AuthenticatedPrincipal; outletId: string }> {
+  const principal = await requireFinancialSession(req, finAuth);
+  const meta = await assertOrderAccess(pool, principal, orderId);
+  await finAuth.identity.assertPosOperate(
+    principal,
+    finAuth.permissionKey,
+    meta.outletId,
+  );
+  return { principal, outletId: meta.outletId };
+}
+
+async function requireSettlementPrincipal(
+  req: Parameters<typeof requireFinancialSession>[0],
+  finAuth: FinancialAuthOptions,
+  pool: pg.Pool,
+  settlementGroupId: string,
+): Promise<{ principal: AuthenticatedPrincipal; outletId: string | null }> {
+  const principal = await requireFinancialSession(req, finAuth);
+  const meta = await assertSettlementAccess(pool, principal, settlementGroupId);
+  await finAuth.identity.assertPosOperate(
+    principal,
+    finAuth.permissionKey,
+    meta.outletId,
+  );
+  return { principal, outletId: meta.outletId };
 }
 
 export async function registerPosRoutes(
@@ -302,9 +335,7 @@ export async function registerPosRoutes(
 
   app.get<{ Params: { orderId: string } }>('/api/v1/orders/:orderId', async (req, reply) => {
     try {
-      const principal = await requireFinancialPrincipal(req, finAuth);
-      const meta = await assertOrderAccess(pool, principal, req.params.orderId);
-      await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
+      await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
       const order = await orders.getOrder(req.params.orderId);
       return await enrichOrderLines(pool, order);
     } catch (err) {
@@ -317,9 +348,7 @@ export async function registerPosRoutes(
     '/api/v1/orders/:orderId/lines/:lineId',
     async (req, reply) => {
       try {
-        const principal = await requireFinancialPrincipal(req, finAuth);
-        const meta = await assertOrderAccess(pool, principal, req.params.orderId);
-        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
+        await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
         const body = (req.body ?? {}) as { quantity?: string; unit?: string; dimension?: string };
         const order = await orders.updateOrderLine({
           orderId: req.params.orderId,
@@ -340,9 +369,7 @@ export async function registerPosRoutes(
     '/api/v1/orders/:orderId/lines/:lineId',
     async (req, reply) => {
       try {
-        const principal = await requireFinancialPrincipal(req, finAuth);
-        const meta = await assertOrderAccess(pool, principal, req.params.orderId);
-        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
+        await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
         const order = await orders.removeOrderLine({
           orderId: req.params.orderId,
           orderLineId: req.params.lineId,
@@ -357,9 +384,7 @@ export async function registerPosRoutes(
 
   app.post<{ Params: { orderId: string } }>('/api/v1/orders/:orderId/cancel', async (req, reply) => {
     try {
-      const principal = await requireFinancialPrincipal(req, finAuth);
-      const meta = await assertOrderAccess(pool, principal, req.params.orderId);
-      await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
+      await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
       const body = (req.body ?? {}) as { reason?: string; actorId?: string };
       if (!body.reason || body.reason.trim().length === 0) {
         return reply.code(400).send({ error: 'VALIDATION', message: 'reason required' });
@@ -380,9 +405,7 @@ export async function registerPosRoutes(
     '/api/v1/orders/:orderId/commercial-status',
     async (req, reply) => {
       try {
-        const principal = await requireFinancialPrincipal(req, finAuth);
-        const meta = await assertOrderAccess(pool, principal, req.params.orderId);
-        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
+        await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
         return await orders.getOpenCommercialStatus(req.params.orderId);
       } catch (err) {
         const mapped = mapError(err);
@@ -396,9 +419,7 @@ export async function registerPosRoutes(
     '/api/v1/orders/:orderId/resolve-menu-prices',
     async (req, reply) => {
       try {
-        const principal = await requireFinancialPrincipal(req, finAuth);
-        const meta = await assertOrderAccess(pool, principal, req.params.orderId);
-        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
+        await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
         const body = (req.body ?? {}) as { salesContext?: unknown };
         if (!body.salesContext) {
           return reply
@@ -440,9 +461,7 @@ export async function registerPosRoutes(
     '/api/v1/orders/:orderId/calculate-and-accept-commercial-terms',
     async (req, reply) => {
       try {
-        const principal = await requireFinancialPrincipal(req, finAuth);
-        const meta = await assertOrderAccess(pool, principal, req.params.orderId);
-        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
+        await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
         const body = (req.body ?? {}) as {
           salesContext?: unknown;
           idempotencyKey?: string;
@@ -473,9 +492,7 @@ export async function registerPosRoutes(
     '/api/v1/orders/:orderId/reprice-and-accept-commercial-terms',
     async (req, reply) => {
       try {
-        const principal = await requireFinancialPrincipal(req, finAuth);
-        const meta = await assertOrderAccess(pool, principal, req.params.orderId);
-        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
+        await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
         const body = (req.body ?? {}) as {
           salesContext?: unknown;
           idempotencyKey?: string;
@@ -524,9 +541,7 @@ export async function registerPosRoutes(
     '/api/v1/orders/:orderId/open-settlement',
     async (req, reply) => {
       try {
-        const principal = await requireFinancialPrincipal(req, finAuth);
-        const meta = await assertOrderAccess(pool, principal, req.params.orderId);
-        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
+        await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
         const body = (req.body ?? {}) as {
           idempotencyKey?: string;
           actorId?: string;
@@ -560,9 +575,7 @@ export async function registerPosRoutes(
     '/api/v1/orders/:orderId/settlement',
     async (req, reply) => {
       try {
-        const principal = await requireFinancialPrincipal(req, finAuth);
-        const meta = await assertOrderAccess(pool, principal, req.params.orderId);
-        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
+        await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
         const live = await settlements.getLiveSettlementForOrder(req.params.orderId);
         if (!live) {
           return { orderId: req.params.orderId, settlement: null };
@@ -579,9 +592,7 @@ export async function registerPosRoutes(
     '/api/v1/settlements/:settlementGroupId',
     async (req, reply) => {
       try {
-        const principal = await requireFinancialPrincipal(req, finAuth);
-        const meta = await assertSettlementAccess(pool, principal, req.params.settlementGroupId);
-        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
+        await requireSettlementPrincipal(req, finAuth, pool, req.params.settlementGroupId);
         return await settlements.getSettlement(req.params.settlementGroupId);
       } catch (err) {
         const mapped = mapError(err);
@@ -594,9 +605,7 @@ export async function registerPosRoutes(
     '/api/v1/settlements/:settlementGroupId/abort',
     async (req, reply) => {
       try {
-        const principal = await requireFinancialPrincipal(req, finAuth);
-        const meta = await assertSettlementAccess(pool, principal, req.params.settlementGroupId);
-        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
+        await requireSettlementPrincipal(req, finAuth, pool, req.params.settlementGroupId);
         const body = (req.body ?? {}) as { expectedVersion?: number };
         return await settlements.abortSettlement({
           settlementGroupId: req.params.settlementGroupId,
@@ -613,9 +622,7 @@ export async function registerPosRoutes(
     '/api/v1/settlements/:settlementGroupId/reconcile-coverage',
     async (req, reply) => {
       try {
-        const principal = await requireFinancialPrincipal(req, finAuth);
-        const meta = await assertSettlementAccess(pool, principal, req.params.settlementGroupId);
-        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
+        await requireSettlementPrincipal(req, finAuth, pool, req.params.settlementGroupId);
         const body = (req.body ?? {}) as {
           covered?: unknown;
           settlementStatus?: unknown;
@@ -644,9 +651,7 @@ export async function registerPosRoutes(
     '/api/v1/settlements/:settlementGroupId/advance-checkout',
     async (req, reply) => {
       try {
-        const principal = await requireFinancialPrincipal(req, finAuth);
-        const meta = await assertSettlementAccess(pool, principal, req.params.settlementGroupId);
-        await requireFinancialPrincipal(req, finAuth, { outletId: meta.outletId });
+        await requireSettlementPrincipal(req, finAuth, pool, req.params.settlementGroupId);
         const body = (req.body ?? {}) as {
           completeIdempotencyKey?: string;
           businessDate?: string;
