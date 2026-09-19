@@ -53,7 +53,10 @@ export async function seedBlockCFixture(pool: pg.Pool): Promise<BlockCFixture> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query(`INSERT INTO tenant (tenant_id, name) VALUES ($1, 'MillQ Demo')`, [ids.tenantId]);
+    await client.query(
+      `INSERT INTO tenant (tenant_id, name, company_code) VALUES ($1, 'MillQ Demo', $2)`,
+      [ids.tenantId, ids.tenantId.replace(/-/g, '').toUpperCase()],
+    );
     await client.query(
       `INSERT INTO legal_entity (legal_entity_id, tenant_id, name, jurisdiction_code)
        VALUES ($1,$2,'LE A','VN'), ($3,$2,'LE B','VN')`,
