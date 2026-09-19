@@ -515,6 +515,19 @@ export class IdentityService {
     }
   }
 
+  /**
+   * POS/financial authorize — identical semantics to assertPermission (ADR-0036).
+   * When outletId is null, only tenant-wide grants (outlet_id IS NULL) authorize.
+   */
+  async assertPosOperate(
+    principal: AuthenticatedPrincipal,
+    permissionKey: string,
+    outletId: string | null,
+    terminalId: string | null = null,
+  ): Promise<void> {
+    await this.assertPermission(principal, permissionKey, outletId, terminalId);
+  }
+
   get poolRef(): Pool {
     return this.pool;
   }

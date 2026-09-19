@@ -241,6 +241,39 @@ export class PaymentsService {
     return res.rows[0] ? mapTender(res.rows[0]) : null;
   }
 
+  /** Tenant + optional outlet for a SettlementCheck (via SettlementGroup → Order). */
+  async resolveOutletForSettlementCheck(
+    settlementCheckId: string,
+  ): Promise<{ tenantId: string; outletId: string | null } | null> {
+    const res = await this.pool.query<{ tenant_id: string; outlet_id: string | null }>(
+      `SELECT sc.tenant_id, so.outlet_id
+       FROM settlement_check sc
+       INNER JOIN settlement_group sg ON sg.settlement_group_id = sc.settlement_group_id
+       LEFT JOIN sales_order so ON so.order_id = sg.order_id
+       WHERE sc.settlement_check_id = $1`,
+      [settlementCheckId],
+    );
+    const row = res.rows[0];
+    if (!row) return null;
+    return { tenantId: row.tenant_id, outletId: row.outlet_id };
+  }
+
+  async resolveOutletForPayment(
+    paymentId: string,
+  ): Promise<{ tenantId: string; outletId: string | null } | null> {
+    const res = await this.pool.query<{ tenant_id: string; outlet_id: string | null }>(
+      `SELECT p.tenant_id, so.outlet_id
+       FROM payment p
+       LEFT JOIN settlement_group sg ON sg.settlement_group_id = p.intended_settlement_group_id
+       LEFT JOIN sales_order so ON so.order_id = sg.order_id
+       WHERE p.payment_id = $1`,
+      [paymentId],
+    );
+    const row = res.rows[0];
+    if (!row) return null;
+    return { tenantId: row.tenant_id, outletId: row.outlet_id };
+  }
+
   async setTenderEnabled(tenderDefinitionId: string, enabled: boolean): Promise<TenderDefinitionRow> {
     const res = await this.pool.query<TenderDb>(
       `UPDATE tender_definition SET enabled = $2 WHERE tender_definition_id = $1 RETURNING *`,

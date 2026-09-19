@@ -20,6 +20,8 @@ export class CompanyIdentityError extends Error {
 
 export const PERMISSION_CASH_SHIFT_OPEN = 'cash_shift.open' as const;
 export const PERMISSION_CASH_SHIFT_OPEN_APPROVE = 'cash_shift.open.approve' as const;
+/** POS / financial HTTP operations (Orders, Payments, Settlement) — SEC-0 / ADR-0036. */
+export const PERMISSION_POS_OPERATE = 'pos.operate' as const;
 
 export const PIN_MAX_ATTEMPTS = 5;
 export const PIN_LOCK_MINUTES = 15;

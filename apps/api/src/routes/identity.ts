@@ -8,6 +8,8 @@ import {
   LoginChallengeService,
   OutboxNotificationPort,
   SESSION_COOKIE_NAME,
+  assertCsrf,
+  readSessionToken,
 } from '../modules/identity/index.js';
 import { CompanyIdentityService } from '../modules/organization/index.js';
 
@@ -70,13 +72,6 @@ function networkKey(req: FastifyRequest): string {
   return req.ip || 'unknown';
 }
 
-function readSessionToken(req: FastifyRequest): string | null {
-  const cookies = (req as FastifyRequest & { cookies?: Record<string, string> }).cookies;
-  const fromCookie = cookies?.[SESSION_COOKIE_NAME];
-  if (typeof fromCookie === 'string' && fromCookie.length >= 20) return fromCookie;
-  return null;
-}
-
 function setSessionCookie(
   reply: FastifyReply,
   token: string,
@@ -98,38 +93,6 @@ function clearSessionCookie(reply: FastifyReply, secure: boolean): void {
     secure,
     sameSite: 'lax',
   });
-}
-
-/**
- * CSRF strategy (cookie session):
- * - Session cookie: HttpOnly + SameSite=Lax + Path=/ (+ Secure in production)
- * - State-changing authenticated routes require Origin (or Referer) matching
- *   an allowed origin when Origin is present; missing both is rejected in production.
- */
-function assertCsrf(req: FastifyRequest, allowedOrigins: string[], isProd: boolean): void {
-  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
-  const origin = req.headers.origin;
-  const referer = req.headers.referer;
-  if (typeof origin === 'string' && origin.length > 0) {
-    if (!allowedOrigins.includes(origin)) {
-      throw new IdentityDomainError('CSRF_REJECTED', 'Invalid origin');
-    }
-    return;
-  }
-  if (typeof referer === 'string' && referer.length > 0) {
-    try {
-      const refOrigin = new URL(referer).origin;
-      if (!allowedOrigins.includes(refOrigin)) {
-        throw new IdentityDomainError('CSRF_REJECTED', 'Invalid origin');
-      }
-      return;
-    } catch {
-      throw new IdentityDomainError('CSRF_REJECTED', 'Invalid origin');
-    }
-  }
-  if (isProd) {
-    throw new IdentityDomainError('CSRF_REJECTED', 'Invalid origin');
-  }
 }
 
 function mapError(err: unknown): { status: number; body: Record<string, unknown> } {

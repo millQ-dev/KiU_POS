@@ -29,8 +29,10 @@ async function main() {
         paths: [
           'req.params.opaqueToken',
           'req.headers.cookie',
+          'req.headers.authorization',
           'req.body.pin',
           'req.body.qrToken',
+          'req.body.sessionToken',
         ],
         censor: '[REDACTED]',
       },
@@ -68,7 +70,11 @@ async function main() {
 
   await registerHealthRoutes(app, pool);
   await registerGoodsReceiptRoutes(app, pool);
-  await registerPosRoutes(app, pool);
+  await registerPosRoutes(app, pool, {
+    pepper,
+    allowedOrigins,
+    isProduction: env.NODE_ENV === 'production',
+  });
   await registerGuestMenuRoutes(app, pool);
   await registerCompanyIdentityRoutes(app, pool);
   await registerIdentityRoutes(app, pool, {

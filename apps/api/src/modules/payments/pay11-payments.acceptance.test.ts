@@ -189,6 +189,17 @@ describe('PAY1.1 Payments Core Runtime (PostgreSQL)', () => {
     });
     expect(pRetry.paymentId).toBe(p1.paymentId);
 
+    await expect(
+      payments.createPayment({
+        tenderDefinitionId: tender.tenderDefinitionId,
+        createIdempotencyKey: payKey,
+        requestedAmountMinor: '99999',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        settlementCheckId: checkId,
+      }),
+    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+
     await payments.recordVerifiedProviderOutcome({
       paymentId: p1.paymentId,
       providerEventIdentity: `pending-${p1.paymentId}`,
@@ -649,4 +660,74 @@ describe('PAY1.1 Payments Core Runtime (PostgreSQL)', () => {
     );
     expect(tenderCols.rowCount).toBe(4);
   });
+
+  it(
+    'SEC-0 J/K — concurrent duplicate success + concurrent allocations are race-safe (PG)',
+    async () => {
+      await ensureEggStock();
+      const o = await openAcceptedOrder('10000');
+      const s = await openSettlementFor(o.orderId);
+      const checkId = s.checks[0]!.settlementCheckId;
+      const tender = await digitalTender(`race_${randomUUID().slice(0, 8)}`);
+      const pay = await payments.createPayment({
+        tenderDefinitionId: tender.tenderDefinitionId,
+        createIdempotencyKey: randomUUID(),
+        requestedAmountMinor: '10000',
+        currencyCode: 'VND',
+        minorUnitExponent: 0,
+        settlementCheckId: checkId,
+      });
+
+      const eventId = `race-evt-${pay.paymentId}`;
+      const outcomes = await Promise.allSettled(
+        Array.from({ length: 8 }, () =>
+          payments.recordVerifiedProviderOutcome({
+            paymentId: pay.paymentId,
+            providerEventIdentity: eventId,
+            rawProviderStatus: 'SUCCESS',
+            normalizedOutcome: 'SUCCEEDED',
+            verificationStatus: 'VERIFIED',
+            reconciliationOrigin: 'CALLBACK',
+            evidenceAmountMinor: '10000',
+            evidenceCurrencyCode: 'VND',
+            providerTransactionReference: `race_tx_${pay.paymentId.slice(0, 8)}`,
+          }),
+        ),
+      );
+      expect(outcomes.filter((r) => r.status === 'fulfilled').length).toBeGreaterThanOrEqual(1);
+      const outcomeRows = await pool.query(
+        `SELECT count(*)::int AS c FROM payment_provider_outcome WHERE payment_id = $1`,
+        [pay.paymentId],
+      );
+      expect(outcomeRows.rows[0]!.c).toBe(1);
+      expect((await payments.getPayment(pay.paymentId))!.lifecycleState).toBe('SUCCEEDED');
+
+      // K: concurrent distinct keys that would over-allocate the Payment if both applied.
+      // Under deadlock PG may abort a waiter; durable integrity is the authority.
+      await Promise.allSettled([
+        payments.allocatePaymentToCheck({
+          paymentId: pay.paymentId,
+          settlementCheckId: checkId,
+          amountMinor: '7000',
+          allocationIdempotencyKey: `race-a-${pay.paymentId}`,
+        }),
+        payments.allocatePaymentToCheck({
+          paymentId: pay.paymentId,
+          settlementCheckId: checkId,
+          amountMinor: '7000',
+          allocationIdempotencyKey: `race-b-${pay.paymentId}`,
+        }),
+      ]);
+      const allocCount = await pool.query(
+        `SELECT coalesce(sum(amount_minor::numeric),0)::text AS s,
+                count(*)::int AS c
+         FROM payment_allocation WHERE payment_id = $1 AND active`,
+        [pay.paymentId],
+      );
+      expect(allocCount.rows[0]!.c).toBe(1);
+      expect(allocCount.rows[0]!.s).toBe('7000');
+      expect(BigInt(allocCount.rows[0]!.s)).toBeLessThanOrEqual(10000n);
+    },
+    30_000,
+  );
 });
