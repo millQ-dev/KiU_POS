@@ -13,6 +13,7 @@ import { registerGoodsReceiptRoutes } from './routes/goods-receipts.js';
 import { registerGuestMenuRoutes, registerDevGuestMenuAdminRoutes } from './routes/guest-menu.js';
 import { registerDevCashierBootstrapRoutes, registerPosRoutes } from './routes/pos.js';
 import { registerCompanyIdentityRoutes, registerIdentityRoutes } from './routes/identity.js';
+import { registerCashRoutes } from './routes/cash.js';
 
 async function main() {
   const env = loadEnv();
@@ -80,6 +81,11 @@ async function main() {
   await registerIdentityRoutes(app, pool, {
     pepper,
     cookieSecure,
+    allowedOrigins,
+    isProduction: env.NODE_ENV === 'production',
+  });
+  await registerCashRoutes(app, pool, {
+    pepper,
     allowedOrigins,
     isProduction: env.NODE_ENV === 'production',
   });

@@ -2,10 +2,11 @@ import { useState } from 'react';
 import type { CashierContext } from './api/types.js';
 import { CashierShell } from './cashier/CashierShell.js';
 import { DevContextBootstrap } from './cashier/DevContextBootstrap.js';
+import { PinAuthScreen } from './cashier/PinAuthScreen.js';
 import {
-  AuthenticatedIdentityHome,
-  PinAuthScreen,
-} from './cashier/PinAuthScreen.js';
+  CashierReadyShell,
+  OpeningCashScreen,
+} from './cashier/OpeningCashScreen.js';
 import {
   clearCompanyRealm,
   CompanyIdentificationScreen,
@@ -41,6 +42,18 @@ type AuthUser = {
   displayName: string;
 };
 
+type OpenShift = {
+  cashShiftId: string;
+  terminalId: string;
+  outletId: string;
+  status: string;
+  openingAmountMinor: string;
+  currencyCode: string;
+  minorUnitExponent: number;
+  authMode: string;
+  openedAt: string;
+};
+
 export function App() {
   const guestToken = guestTokenFromPath();
   if (guestToken) {
@@ -55,6 +68,7 @@ export function App() {
     preferDev ? null : readCompanyRealm(),
   );
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [openShift, setOpenShift] = useState<OpenShift | null>(null);
 
   if (preferDev) {
     if (!devContext) {
@@ -84,6 +98,7 @@ export function App() {
         onResolved={(r) => {
           setRealm(r);
           setAuthUser(null);
+          setOpenShift(null);
         }}
       />
     );
@@ -93,22 +108,42 @@ export function App() {
     return (
       <PinAuthScreen
         realm={realm}
-        onAuthenticated={setAuthUser}
+        onAuthenticated={(u) => {
+          setAuthUser(u);
+          setOpenShift(null);
+        }}
         onChangeCompany={() => {
           clearCompanyRealm();
           setRealm(null);
           setAuthUser(null);
+          setOpenShift(null);
+        }}
+      />
+    );
+  }
+
+  if (!openShift) {
+    return (
+      <OpeningCashScreen
+        user={authUser}
+        realm={realm}
+        onOpened={setOpenShift}
+        onLogout={() => {
+          setAuthUser(null);
+          setOpenShift(null);
         }}
       />
     );
   }
 
   return (
-    <AuthenticatedIdentityHome
+    <CashierReadyShell
       user={authUser}
       realm={realm}
+      shift={openShift}
       onLogout={() => {
         setAuthUser(null);
+        setOpenShift(null);
       }}
     />
   );
