@@ -42,6 +42,7 @@ let terminalId: string;
 async function truncate() {
   await pool.query(`
     TRUNCATE
+      cash_shift,
       identity_notification_outbox, identity_audit_event,
       identity_approval_request, identity_login_challenge,
       identity_session, identity_access_grant, identity_auth_throttle,
@@ -364,10 +365,10 @@ describe('LoginChallenge + Approval (no CashShift)', () => {
     const decided = await approvals.decide(bossP, req.approvalRequestId, { decision: 'APPROVE' });
     expect(decided.status).toBe('APPROVED');
 
-    const cash = await pool.query(
-      `SELECT 1 FROM information_schema.tables WHERE table_name = 'cash_shift'`,
-    );
-    expect(cash.rowCount).toBe(0);
+    // ID1.1 created ApprovalRequest evidence only — CASH1.1 owns CashShift writes.
+    // Table may exist after CASH1.1 migration; Identity path must not insert rows.
+    const cashRows = await pool.query(`SELECT count(*)::int AS c FROM cash_shift`);
+    expect(cashRows.rows[0]!.c).toBe(0);
   });
 });
 

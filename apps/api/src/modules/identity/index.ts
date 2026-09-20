@@ -24,6 +24,6 @@ export {
   sha256Hex,
   generateOpaqueToken,
 } from './crypto.js';
-export { IdentityService, type AuthenticatedPrincipal, type PinAuthResult } from './identity-service.js';
+export { IdentityService, type AuthenticatedPrincipal, type PinAuthResult, audit } from './identity-service.js';
 export { LoginChallengeService, ApprovalRequestService } from './login-challenge-service.js';
 export { OutboxNotificationPort, type NotificationPort } from './notification-port.js';

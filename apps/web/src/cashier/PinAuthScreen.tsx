@@ -15,7 +15,7 @@ type Props = {
 
 /**
  * PIN entry — session is established via HttpOnly cookie (not JS-readable bearer).
- * Does not open CashierShell / CashShift.
+ * CashShift open is handled by OpeningCashScreen (CASH1.1).
  */
 export function PinAuthScreen({ realm, onAuthenticated, onChangeCompany }: Props) {
   const [pin, setPin] = useState('');
@@ -85,39 +85,8 @@ export function PinAuthScreen({ realm, onAuthenticated, onChangeCompany }: Props
           Sign in
         </button>
       </form>
-      <button type="button" onClick={onChangeCompany}>
+        <button type="button" onClick={onChangeCompany}>
         Change company
-      </button>
-    </main>
-  );
-}
-
-type AuthedProps = {
-  user: AuthUser;
-  realm: CompanyRealm;
-  onLogout: () => void;
-};
-
-/** Post-auth placeholder — Identity truth only; no CashShift / privileged POS. */
-export function AuthenticatedIdentityHome({ user, realm, onLogout }: AuthedProps) {
-  async function logout() {
-    await fetch('/api/v1/identity/session/logout', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { origin: window.location.origin },
-    });
-    onLogout();
-  }
-
-  return (
-    <main className="authed-identity-home">
-      <h1>Signed in</h1>
-      <p>
-        {user.displayName} · {realm.displayName}
-      </p>
-      <p>CashShift open is not part of ID1.1.</p>
-      <button type="button" onClick={() => void logout()}>
-        Sign out
       </button>
     </main>
   );
