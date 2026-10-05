@@ -9,15 +9,17 @@ The product consists of two deliberately separated capabilities:
 
 ## Hosting
 
-**Cursor Origin is the source of truth.** GitHub `millQ-dev/MillQ` is a backup mirror only.
+**Cursor Origin is the source of truth.** GitHub is a backup mirror only.
 
 - Canonical remote: `https://origin.cursor.com/millqdev/MillQ.git`
 - Browse: [cursor.com/codebase](https://cursor.com/codebase)
+- Backup mirrors observed (reconcile sole target): `millQ-dev/KiU_POS` and historically `millQ-dev/MillQ`
 - Open PRs on Origin; Implementation Agent arms merge-when-ready; independent agent review; ruleset merges for Level A/B
 - Do not merge work on GitHub; do not dual-write
 - After cutover only the backup identity writes GitHub `main` and release/protected tags
 
 Details: [`docs/processes/origin-github-hosting.md`](docs/processes/origin-github-hosting.md), [`docs/processes/autonomous-development.md`](docs/processes/autonomous-development.md), and [ADR-0004](docs/decisions/ADR-0004-origin-source-of-truth.md).
+See live checkpoint: [`docs/processes/current-state.md`](docs/processes/current-state.md).
 
 ## Repository structure
 
@@ -52,10 +54,11 @@ pnpm dev
 ```
 
 - API health: http://localhost:3000/health
-- Web KiU cashier shell: http://localhost:5173
-- First load uses **development outlet bootstrap** (`GET /api/v1/dev/cashier-contexts`) — not production authorization. Seed local DB (acceptance fixtures or manual) so outlets exist, then select an outlet.
+- Web: http://localhost:5173
+- **Production auth path (CASH1.1):** Company ID → PIN → Opening cash → CashShift OPEN → cashier-ready stub (POS shell not mounted yet).
+- **Dev POS shell:** `?devCashier=1` uses `GET /api/v1/dev/cashier-contexts` (not production authorization). Requires seeded outlet/menu/layout.
 
-Cashier flow (P1.2): load ResolvedPosSurface → pages / Quick Access → New Order → tap ACTIVE **COUNT** item → `selectPosCountTap` → basket updates. MASS/VOLUME quantity entry is deferred (P1.3). No pay / commercial accept / tables.
+Dev cashier flow: ResolvedPosSurface → pages / Quick Access → New Order → COUNT / MASS / VOLUME selection → commercial accept → open settlement. Payments UI incomplete; CompleteOrder fail-closed without Fiscalization. Tables not implemented (ADR-0017 architecture only).
 
 ## Commands
 
@@ -76,6 +79,6 @@ Cashier flow (P1.2): load ResolvedPosSurface → pages / Quick Access → New Or
 
 ## Status
 
-Foundation Operational Core (Origin merge candidate): Accepted ADR-0001…0003, **ADR-0006**, **ADR-0007**; typed operational facts; CostValue yield math; fact feed guardrail. Full POS and Block C are not started. Block B domain-boundary ADRs remain Proposed on a separate draft (note: Origin hosting ADR-0004 is Accepted and is a different decision).
+**State freeze @ Origin main `4e47cb0` (CASH1.1).** Operational Core kernel verticals through CashShift Open, Identity, Settlement, Payments core, Menu/POS, Guest QR read, and economics read models are on main — maturity is **PARTIAL / SERVICE ONLY** for most surfaces; not a turnkey cafe product. Floor/Table, Tax runtime, Fiscalization, Owner/Accountant UI, and onboarding APIs are **not started**. See [`docs/processes/current-state.md`](docs/processes/current-state.md).
 
-**CI:** Origin CI not attached yet. Current merge gates are local checks + independent Origin review + Origin ruleset. GitHub Actions workflow may exist as dormant/backup-compatible definition and is **not** a merge gate.
+**CI:** Origin CI not attached yet. Merge gates: local checks + independent Origin review + Origin push ruleset. GitHub Actions may exist as dormant/backup-compatible definition and is **not** a merge gate.
