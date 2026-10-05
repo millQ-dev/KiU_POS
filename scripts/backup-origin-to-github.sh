@@ -23,7 +23,7 @@
 set -euo pipefail
 
 ORIGIN_URL="${ORIGIN_URL:-}"
-GITHUB_URL="${GITHUB_URL:-https://github.com/millQ-dev/MillQ.git}"
+GITHUB_URL="${GITHUB_URL:-https://github.com/millQ-dev/KiU_POS.git}"
 GITHUB_API_URL="${GITHUB_API_URL:-https://api.github.com}"
 WORKDIR="${WORKDIR:-}"
 

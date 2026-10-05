@@ -13,7 +13,7 @@ The product consists of two deliberately separated capabilities:
 
 - Canonical remote: `https://origin.cursor.com/millqdev/MillQ.git`
 - Browse: [cursor.com/codebase](https://cursor.com/codebase)
-- Backup mirrors observed (reconcile sole target): `millQ-dev/KiU_POS` and historically `millQ-dev/MillQ`
+- Sole GitHub backup: [`millQ-dev/KiU_POS`](https://github.com/millQ-dev/KiU_POS) (`https://github.com/millQ-dev/KiU_POS.git`). Legacy path `millQ-dev/MillQ` is a GitHub rename redirect to the same repository — not a second mirror.
 - Open PRs on Origin; Implementation Agent arms merge-when-ready; independent agent review; ruleset merges for Level A/B
 - Do not merge work on GitHub; do not dual-write
 - After cutover only the backup identity writes GitHub `main` and release/protected tags

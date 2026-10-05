@@ -1,8 +1,9 @@
 # MillQ Current State
 
-**Checkpoint:** STATE FREEZE / PRE-RESTAURANT AUDIT — post CASH1.1
+**Checkpoint:** STATE FREEZE accepted → next **C0 Cafe Operability Gate** (R1.1 frozen, not started)
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)
-**Backup mirrors observed equal @ freeze:** GitHub `millQ-dev/KiU_POS` **and** `millQ-dev/MillQ` (naming drift — reconcile which is the sole backup target)
+**GitHub backup (sole):** `https://github.com/millQ-dev/KiU_POS.git`  
+  (`millQ-dev/MillQ` is a **legacy rename redirect** to the same GitHub repository ID — not a second mirror)
 **Origin main:** `4e47cb0f419f47c16288e9cccb3ad875526b65ce`
 **Updated:** 2026-10-05
 
@@ -10,50 +11,33 @@
 
 | Item | State |
 | --- | --- |
-| Origin ↔ GitHub equality | **EQUAL** @ `4e47cb0` (no divergence at freeze) |
-| Migration head | **029** `029_cash_shift_open.sql` (001→029 clean + idempotent PASS) |
-| CASH1.1 CashShift Open | **MERGED** Origin PR#69 → `4e47cb0` |
-| SEC-0 financial HTTP hardening | **MERGED** (ancestor of CASH1.1) |
+| Origin ↔ GitHub KiU_POS equality | **EQUAL** @ `4e47cb0` |
+| Migration head | **029** `029_cash_shift_open.sql` |
+| CASH1.1 CashShift Open | **MERGED** Origin PR#69 |
+| SEC-0 financial HTTP hardening | **MERGED** (GR HTTP auth gap remains — C0.1) |
 | ID1.1 Identity / PIN / Session / AccessGrant | **MERGED** |
-| PAY1.1 / S1.1 / C1.1 / GUEST1.1 / POS / Menu | **MERGED** (kernel + HTTP partial; see matrix) |
-| ADR-0033 Tax/VAT Architecture | **ACCEPTED** — TAX1.1 runtime **NOT STARTED** |
-| ADR-0034 Tax calculation / payable composition | **OPEN** Origin PR#62 (Proposed / not Accepted on main) |
-| ADR-0035 Employee Engagement docs | **OPEN** Origin PR#63 (docs lag Guest QR runtime) |
-| Fiscalization runtime (FISC1.1) | **NOT STARTED** — production checkout **fail-closed** |
-| Floor/Table runtime (R1.1) | **NOT STARTED** — ADR-0017 Accepted architecture only |
-| Origin CI | **Not attached** as merge gate (local checks + Origin ruleset) |
+| PAY1.1 / S1.1 / C1.1 / GUEST1.1 / POS / Menu | **MERGED** (kernel PARTIAL) |
+| ADR-0033 Tax/VAT Architecture | **ACCEPTED** — TAX1.1 **NOT STARTED** |
+| ADR-0034 Tax calculation / payable | **OPEN** Origin PR#62 — Proposed / BLOCKED (not on main) |
+| Fiscalization (FISC1.1) | **NOT STARTED** — production `FiscalCheckoutGate` = **UNAVAILABLE** (fail-closed) |
+| Floor/Table (R1.1) | **FROZEN / NOT STARTED** |
+| Origin CI | **Not attached** |
 
 ## Health @ freeze (`4e47cb0`)
 
 | Check | Result |
 | --- | --- |
-| `pnpm install --frozen-lockfile` | PASS |
-| `pnpm typecheck` | PASS |
-| `pnpm lint` | PASS |
-| `pnpm build` | PASS |
-| `pnpm test` | PASS — domain 79 · contracts 9 · api 321 · web 26 (**435** total) |
-| Clean migrate 001→029 | PASS |
-| Migrate re-run | PASS / idempotent |
-| Golden Restaurant | PASS (17) — CompleteOrder requires injected fiscal gate in tests |
-| SEC-0 adversarial | PASS (11) |
+| tests | **435** PASS (domain 79 · contracts 9 · api 321 · web 26) |
+| typecheck / lint / build | PASS |
+| migrate 001→029 + re-run | PASS |
 
-## Harsh maturity (summary)
+## Harsh maturity (unchanged)
 
-Nothing is end-to-end **production-ready** for an unattended cafe open.
+Production cashier dies at `CashierReadyShell` after CashShift OPEN. Full POS requires `?devCashier=1`. CompleteOrder fail-closed without fiscal gate. Master data largely seed/SQL. Reporting SERVICE ONLY.
 
-Closest runnable: Identity PIN + CashShift **Open** + Guest QR **read** + Orders/Settlement/Payments **core**.
+## Next
 
-Production cashier path after CashShift open is a **stub** (`CashierReadyShell`). Full POS UI requires `?devCashier=1`. CompleteOrder is **BLOCKED** without Fiscalization (default fiscal gate `UNAVAILABLE`). Reporting economics exist as **services only** (no HTTP). Master data creation is largely **SQL/seed/service**.
-
-## Product / package rule (unchanged)
-
-One POS engine. `PackageEntitlement` + `OutletCapabilityConfig`. No `if CORNER/CAFE/RESTAURANT` business forks. `Order ≠ Table` (ADR-0017 / ADR-0031).
-
-## Next (decision required — do not auto-start)
-
-1. PO accepts this State Freeze report.
-2. Reconcile sole GitHub backup repo name (`KiU_POS` vs `MillQ`).
-3. Decide launch order: **R1.1 Floor/Table Foundation** vs cafe-operability glue (prod CashierShell wiring + fiscal/tax path) vs reporting HTTP.
-4. Do **not** start R1.1 until PO launch packet.
-
-Full audit report lives in the agent conversation / ChatGPT handoff for this freeze — not duplicated here as architecture.
+1. Merge docs PR #70 after independent review (this checkpoint).
+2. Backup Origin → GitHub **KiU_POS** only; verify SHA equality.
+3. Execute **C0 Cafe Operability** in small blocks — start **C0.1 Goods Receipt auth** (security hotfix).
+4. **Do not** start R1.1. **Do not** silently set fiscal gate to `NOT_REQUIRED`.
