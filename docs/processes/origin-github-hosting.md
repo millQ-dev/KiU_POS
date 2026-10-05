@@ -1,6 +1,6 @@
 # Origin hosting and GitHub backup
 
-This process implements [ADR-0004](../decisions/ADR-0004-origin-source-of-truth.md). Cursor Origin is the **only** source of truth. GitHub `millQ-dev/MillQ` is a backup mirror of Origin, not a workplace.
+This process implements [ADR-0004](../decisions/ADR-0004-origin-source-of-truth.md). Cursor Origin is the **only** source of truth. GitHub [`millQ-dev/KiU_POS`](https://github.com/millQ-dev/KiU_POS) is the sole backup mirror of Origin, not a workplace. Legacy URL `github.com/millQ-dev/MillQ` is a GitHub rename redirect to the same repository ID — do not treat it as a second mirror.
 
 Agent autonomy, review, and auto-merge live in [`autonomous-development.md`](autonomous-development.md).
 
@@ -32,8 +32,10 @@ Browse: `https://cursor.com/codebase/{owner}/MillQ`
 Backup only (name this remote `github`):
 
 ```text
-https://github.com/millQ-dev/MillQ.git
+https://github.com/millQ-dev/KiU_POS.git
 ```
+
+Legacy redirect (same repo): `https://github.com/millQ-dev/MillQ.git` — prefer `KiU_POS` in all new docs and automation.
 
 Replace `{owner}` with the claimed Origin codebase name. Confirm it in the Code dropdown at `cursor.com/codebase`.
 
@@ -61,7 +63,7 @@ Also push **Origin tags** so GitHub reflects those tags.
 
 ### Backup identity and authentication
 
-The writer is the GitHub App **MillQ Origin Backup**, installed only on `millQ-dev/MillQ`. It is the intended ruleset bypass identity. [`scripts/backup-origin-to-github.sh`](../../scripts/backup-origin-to-github.sh) authenticates as follows:
+The writer is the GitHub App **MillQ Origin Backup**, installed on `millQ-dev/KiU_POS` (legacy install path may still show `millQ-dev/MillQ` after rename). It is the intended ruleset bypass identity. [`scripts/backup-origin-to-github.sh`](../../scripts/backup-origin-to-github.sh) authenticates as follows:
 
 1. Read `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY` from the automation environment.
 2. Sign a short-lived GitHub App JWT with the private key.
@@ -93,7 +95,7 @@ A GitHub branch ruleset that blocks routine writes would also reject the backup 
 
 Do **not** copy these bypasses onto Origin `main`. Origin remains PR-only with independent review and no implementer bypass.
 
-Repo-level rulesets on `millQ-dev/MillQ` were empty when last checked from this environment. Creating or confirming the two rulesets above is an owner/platform operation.
+Repo-level rulesets on `millQ-dev/KiU_POS` were empty when last checked from this environment. Creating or confirming the two rulesets above is an owner/platform operation.
 
 A local `git remote set-url --push github no_push` on developer clones is an extra guard. It does not replace the GitHub rulesets.
 
@@ -111,7 +113,7 @@ Until that automation exists, Origin `main` and GitHub `main` can drift. That is
 
 ## Cutover checklist
 
-This is an **owner/platform operation**. A Cloud Agent cloned from `github.com/millQ-dev/MillQ` cannot Detach Origin, attach Cloud Agents to Origin, or prove backup automation.
+This is an **owner/platform operation**. A Cloud Agent cloned from `github.com/millQ-dev/KiU_POS` (or the legacy `MillQ` redirect) cannot Detach Origin, attach Cloud Agents to Origin, or prove backup automation.
 
 Do not mark cutover complete until every step below has actually been done.
 
