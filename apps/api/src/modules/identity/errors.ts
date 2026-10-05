@@ -22,6 +22,9 @@ export const PERMISSION_CASH_SHIFT_OPEN = 'cash_shift.open' as const;
 export const PERMISSION_CASH_SHIFT_OPEN_APPROVE = 'cash_shift.open.approve' as const;
 /** POS / financial HTTP operations (Orders, Payments, Settlement) — SEC-0 / ADR-0036. */
 export const PERMISSION_POS_OPERATE = 'pos.operate' as const;
+/** Procurement Goods Receipt operational HTTP contour — C0.1 (tenant-wide grant). */
+export const PERMISSION_PROCUREMENT_GOODS_RECEIPT_MANAGE =
+  'procurement.goods_receipt.manage' as const;
 
 export const PIN_MAX_ATTEMPTS = 5;
 export const PIN_LOCK_MINUTES = 15;
