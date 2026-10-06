@@ -204,9 +204,9 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 | --- | --- |
 | **Owns** | TaxClassification, TaxPolicy (versioned/effective-dated), TaxClassificationAssignment validation, tax calculation, TaxLineSnapshot / TaxOrderSnapshot, tax RoundingPolicy **context usage**, tax configuration audit provenance |
 | **Does not own** | CatalogItem identity; Menu/POS presentation; Promotions funding proposals; Settlement payable SoT; FiscalDocument; Revenue Basis SoT; Vietnam rate table as code |
-| **Key concepts** | PricingTaxMode `TAX_INCLUSIVE` \| `TAX_EXCLUSIVE`; TaxRoundingStrategy (policy-driven, e.g. `LINE_ROUND_THEN_SUM` first supported — not universal default); TaxTreatment (STANDARD/REDUCED/ZERO_RATE/EXEMPT/NOT_SUBJECT/UNKNOWN/MISSING — not collapsed to numeric zero); TaxableBase ≠ Customer Payable ≠ Revenue Basis; TaxClassificationAssignment scoped by Tenant/LegalEntity/jurisdiction/effective interval (Catalog identity ≠ Tax config); ADR-0033 **Accepted** |
-| **Commands in** | (future TAX1.1) ResolveTaxPolicy, CalculateTax, AcceptTaxSnapshot — not launched by ADR alone |
-| **Facts out** | (future) TaxSnapshotAccepted, TaxSnapshotInvalidated |
+| **Key concepts** | PricingTaxMode `TAX_INCLUSIVE` \| `TAX_EXCLUSIVE` (explicit TaxPolicy config — never inferred from price); TaxRoundingStrategy (policy-driven, e.g. `LINE_ROUND_THEN_SUM` first supported — not universal default); TaxTreatment (STANDARD/REDUCED/ZERO_RATE/EXEMPT/NOT_SUBJECT/UNKNOWN/MISSING — not collapsed to numeric zero); TaxableBase ≠ Customer Payable ≠ Revenue Basis; TaxClassificationAssignment scoped by Tenant/LegalEntity/jurisdiction/effective interval (Catalog identity ≠ Tax config); ADR-0033 **Accepted**; ADR-0034 **Accepted** (narrow: thirdPartyFunding=0 / platformSubsidy=0; third-party **UNSUPPORTED**); ADR-0037 C0 counter-service/prepay sequence |
+| **Commands in** | (TAX1.1 after C0.2A) ResolveTaxPolicy, CalculateTax, AcceptTaxSnapshot |
+| **Facts out** | (TAX1.1) TaxSnapshotAccepted, TaxSnapshotInvalidated |
 | **Depends on** | Organization (LegalEntity), JurisdictionProfile (ADR-0012), Catalog (assignment refs), Orders commercial/funding facts, ADR-0030 commercial gross |
 
 ### Fiscalization
@@ -215,7 +215,7 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 | --- | --- |
 | **Owns** | FiscalPolicy, FiscalSeries, FiscalDocument, FiscalSubmission, correction chains, provider adapter **interface**, fiscal reconciliation |
 | **Does not own** | LegalEntity master data beyond fiscal binding; Order/Payment SoT; Tax calculation / TaxOrderSnapshot SoT; legal production clearance |
-| **Key concepts** | Architecture boundary now (Accepted ADR-0014); Order ≠ FiscalDocument; immutable docs + correction chains; offline queue statuses; LEGAL GATE G2 for go-live; provider impl later; consumes frozen Tax facts (ADR-0033) |
+| **Key concepts** | Architecture boundary now (Accepted ADR-0014); Order ≠ FiscalDocument; immutable docs + correction chains; KiU Fiscal Core → provider adapter → immutable evidence; `SATISFIED` = mode-neutral evidence under FiscalPolicy (ADR-0037); Vietnam restaurant → `NOT_REQUIRED` forbidden; C0 online-only; offline / ACK evidence profile OPEN for FISC1.1; LEGAL GATE G2 for go-live; consumes frozen Tax facts (ADR-0033) — never invents VAT |
 | **Commands in** | SubmitFiscal, RecordFiscalCorrection |
 | **Facts out** | FiscalSubmitted, FiscalCorrected |
 | **Depends on** | Organization (LegalEntity), JurisdictionProfile, Tax (frozen TaxOrderSnapshot when required), Payments/Orders settlement outcomes |
