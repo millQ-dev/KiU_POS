@@ -70,7 +70,11 @@ async function main() {
   await app.register(cookie);
 
   await registerHealthRoutes(app, pool);
-  await registerGoodsReceiptRoutes(app, pool);
+  await registerGoodsReceiptRoutes(app, pool, {
+    pepper,
+    allowedOrigins,
+    isProduction: env.NODE_ENV === 'production',
+  });
   await registerPosRoutes(app, pool, {
     pepper,
     allowedOrigins,

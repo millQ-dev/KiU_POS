@@ -485,13 +485,80 @@ describe('Block C Goods Receipt vertical (PostgreSQL)', () => {
   });
 
   it('HTTP API posts milk receipt end-to-end', async () => {
+    const { resolvePinPepper } = await import('../../config.js');
+    const {
+      IdentityService,
+      PERMISSION_PROCUREMENT_GOODS_RECEIPT_MANAGE,
+      SESSION_COOKIE_NAME,
+    } = await import('../identity/index.js');
+    const { registerCompanyIdentityRoutes, registerIdentityRoutes } = await import(
+      '../../routes/identity.js'
+    );
+    const cookie = (await import('@fastify/cookie')).default;
+    const pepper = resolvePinPepper({
+      NODE_ENV: 'test',
+      PORT: 3000,
+      LOG_LEVEL: 'error',
+      DATABASE_URL,
+      CORS_ORIGINS: 'http://localhost:5173',
+    } as never);
+    const identity = new IdentityService(pool, pepper);
+    await identity.provisionUserWithPin({
+      tenantId: fx.tenantId,
+      displayName: 'BlockC HTTP',
+      pin: '123456',
+      grants: [
+        {
+          permissionKey: PERMISSION_PROCUREMENT_GOODS_RECEIPT_MANAGE,
+          outletId: null,
+          terminalId: null,
+        },
+      ],
+    });
+    const company = await pool.query<{ company_code: string }>(
+      `SELECT company_code FROM tenant WHERE tenant_id = $1`,
+      [fx.tenantId],
+    );
+
     const app = Fastify();
-    await registerGoodsReceiptRoutes(app, pool);
+    await app.register(cookie);
+    await registerCompanyIdentityRoutes(app, pool);
+    await registerIdentityRoutes(app, pool, {
+      pepper,
+      cookieSecure: false,
+      allowedOrigins: ['http://localhost:5173'],
+      isProduction: false,
+    });
+    await registerGoodsReceiptRoutes(app, pool, {
+      pepper,
+      allowedOrigins: ['http://localhost:5173'],
+      isProduction: false,
+    });
     await app.ready();
+
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/v1/identity/pin/authenticate',
+      payload: {
+        companyCode: company.rows[0]!.company_code,
+        pin: '123456',
+        channel: 'TERMINAL',
+      },
+      headers: { origin: 'http://localhost:5173' },
+    });
+    expect(login.statusCode).toBe(200);
+    const setCookie = login.headers['set-cookie'];
+    const cookieStr = Array.isArray(setCookie) ? setCookie.join(';') : String(setCookie ?? '');
+    const match = cookieStr.match(new RegExp(`${SESSION_COOKIE_NAME}=([^;]+)`));
+    const headers = {
+      cookie: `${SESSION_COOKIE_NAME}=${match![1]!}`,
+      origin: 'http://localhost:5173',
+    };
 
     const create = await app.inject({
       method: 'POST',
       url: '/api/v1/goods-receipts',
+      headers,
       payload: draftBase({ supplierDocumentNumber: 'API-1' }),
     });
     expect(create.statusCode).toBe(201);
@@ -500,6 +567,7 @@ describe('Block C Goods Receipt vertical (PostgreSQL)', () => {
     const post = await app.inject({
       method: 'POST',
       url: `/api/v1/goods-receipts/${body.goodsReceiptId}/post`,
+      headers,
       payload: { idempotencyKey: 'api-post-1', actorId: fx.actorId },
     });
     expect(post.statusCode).toBe(200);
@@ -508,6 +576,7 @@ describe('Block C Goods Receipt vertical (PostgreSQL)', () => {
     const quote = await app.inject({
       method: 'GET',
       url: `/api/v1/costing/quote?legalEntityId=${fx.legalEntityId}&warehouseId=${fx.warehouseId}&catalogItemId=${fx.milkItemId}`,
+      headers,
     });
     expect(quote.statusCode).toBe(200);
     expect(quote.json()).toMatchObject({

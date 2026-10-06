@@ -480,6 +480,40 @@ export class GoodsReceiptService {
     return { status: 'created' as const, receipt: await this.get(id), reverseDocumentId: reverseId };
   }
 
+  /**
+   * C0.1 HTTP boundary: ensure inventory read targets belong to authenticated tenant.
+   * Fail closed — do not return zero balances for foreign UUIDs.
+   */
+  async assertInventoryReadScope(
+    tenantId: string,
+    legalEntityId: string,
+    warehouseId: string,
+    catalogItemId: string,
+  ): Promise<void> {
+    const le = await this.pool.query(
+      `SELECT tenant_id FROM legal_entity WHERE legal_entity_id = $1`,
+      [legalEntityId],
+    );
+    if (!le.rowCount || (le.rows[0] as { tenant_id: string }).tenant_id !== tenantId) {
+      throw new NotFoundError('Inventory scope not found');
+    }
+    try {
+      await this.validateBoundary(legalEntityId, warehouseId, tenantId);
+    } catch (e) {
+      if (e instanceof DomainValidationError) {
+        throw new NotFoundError('Inventory scope not found');
+      }
+      throw e;
+    }
+    const item = await this.pool.query(
+      `SELECT tenant_id FROM catalog_item WHERE catalog_item_id = $1`,
+      [catalogItemId],
+    );
+    if (!item.rowCount || (item.rows[0] as { tenant_id: string }).tenant_id !== tenantId) {
+      throw new NotFoundError('Inventory scope not found');
+    }
+  }
+
   async getBalance(
     legalEntityId: string,
     warehouseId: string,
