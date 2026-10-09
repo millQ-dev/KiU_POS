@@ -126,3 +126,21 @@ export {
   type CheckCoverageResult,
   type PayableComponent,
 } from './settlement-coverage.js';
+export {
+  TAX_CALCULATION_ALGORITHM_V1,
+  calculateTaxLine,
+  calculateTaxOrder,
+  aggregateTaxLineResults,
+  resolveGuestMerchandiseCharge,
+  resolveTaxableBaseX,
+  type PricingTaxMode,
+  type TaxTreatment,
+  type TaxableBaseRuleId,
+  type TaxRoundingMode,
+  type TaxRoundingContext,
+  type TaxRoundingPolicySnapshot,
+  type TaxLineCalcInput,
+  type TaxPolicyCalcDims,
+  type TaxLineCalcResult,
+  type TaxOrderCalcResult,
+} from './tax-calculation.js';

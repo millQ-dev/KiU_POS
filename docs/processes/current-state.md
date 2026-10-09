@@ -1,25 +1,23 @@
 # MillQ Current State
 
-**Checkpoint:** C0.2A Tax/Fiscal Level C docs — next **TAX1.1** (after this checkpoint merges)
+**Checkpoint:** C0.2A **MERGED** — **TAX1.1** implementation PR (do not merge until strategic review)
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)
 **GitHub backup (sole):** `https://github.com/millQ-dev/KiU_POS.git`  
   (`millQ-dev/MillQ` = legacy rename redirect to the same repository ID)
-**Origin main:** `5687c1fd10618a79972b0fa6f7d727b5fcc12056` (pre–C0.2A; update on merge)
+**Origin main:** `90838c8b82500b6eba7f521e632d3f56af0be25a`
 **Updated:** 2026-10-06
 
 ## Runtime / CI / backup
 
 | Item | State |
 | --- | --- |
-| Origin ↔ GitHub KiU_POS equality | **EQUAL** @ `5687c1f` (post–PR#72 backup) |
-| Migration head | **030** `030_procurement_goods_receipt_permission.sql` |
+| Origin ↔ GitHub KiU_POS equality | **EQUAL** @ `90838c8` (post–C0.2A backup) |
+| Migration head | **031** `031_tax_domain_foundation.sql` (TAX1.1 branch; main still 030 until merge) |
 | C0.1 GR financial HTTP auth | **MERGED** Origin PR#71 |
-| C0.2 Level C Tax/Fiscal packet | **ACCEPT WITH DELTAS** (PO / Architecture 2026-10-06) |
-| C0.2A docs (ADR-0034 narrow + ADR-0037) | **IN PROGRESS** this PR |
-| ADR-0033 Tax/VAT Architecture | **ACCEPTED** |
-| ADR-0034 Tax calculation / payable | **ACCEPTED** (narrow: `thirdPartyFunding=0`, `platformSubsidy=0`) |
-| ADR-0037 C0 counter-service Tax/Fiscal LC | **ACCEPTED** (this docs block) |
-| TAX1.1 Tax runtime | **NEXT** after C0.2A merge — Fiscal gate remains UNAVAILABLE |
+| C0.2 Level C Tax/Fiscal packet | **ACCEPT WITH DELTAS** |
+| C0.2A docs (ADR-0034 narrow + ADR-0037) | **MERGED** Origin PR#73 |
+| ADR-0033 / ADR-0034 / ADR-0037 | **ACCEPTED** |
+| TAX1.1 Tax runtime | **PR #74 OPEN — DO NOT MERGE** (assignment-chain head; strategic review) |
 | Fiscalization (FISC1.1) | **NOT STARTED** — production `FiscalCheckoutGate` = **UNAVAILABLE** |
 | Floor/Table (R1.1) | **FROZEN / NOT STARTED** |
 | C0 Cafe Operability | **IN PROGRESS** — slice = **COUNTER-SERVICE / PREPAY CAFE** |
@@ -33,7 +31,6 @@
 
 ## Next
 
-1. Merge C0.2A after independent Architecture **APPROVE**; Origin→GitHub backup; verify equality.
-2. Launch **TAX1.1** — minimal Vietnam direct-sale Tax runtime (do **not** wait for FISC ACK/outage decisions).
-3. Do **not** start FISC1.1 / CashierShell / CASH tender / R1.1 until explicit launch.
-4. Do **not** set Vietnam restaurant → `NOT_REQUIRED` fiscal bypass.
+1. Strategic review of TAX1.1 PR — **do not merge** until Accept.
+2. Do **not** start FISC1.1 / CashierShell / CASH tender / R1.1 until explicit launch.
+3. Do **not** set Vietnam restaurant → `NOT_REQUIRED` fiscal bypass.

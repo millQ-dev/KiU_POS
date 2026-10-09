@@ -211,6 +211,97 @@ export class SettlementService {
         );
       }
 
+      if (commercial.lines.length === 0 && commercial.merchandiseGrossMinor !== '0') {
+        throw new DomainValidationError(
+          'SETTLEMENT_PAYABLE_UNAVAILABLE',
+          'Merchandise gross unavailable for Settlement',
+        );
+      }
+
+      const merchandiseGross: PayableComponent = {
+        presence: 'PRESENT',
+        amountMinor: commercial.merchandiseGrossMinor,
+      };
+      const absent = presentOrAbsent(null);
+
+      // TAX1.1: tax applicability is explicit — NULL/undecided fails closed (never silent ABSENT).
+      const leTax = await client.query<{ tax_required: boolean | null }>(
+        `SELECT tax_required FROM legal_entity WHERE legal_entity_id = $1`,
+        [order.legal_entity_id],
+      );
+      const taxApplicability = leTax.rows[0]?.tax_required;
+      if (taxApplicability === null || taxApplicability === undefined) {
+        throw new DomainValidationError(
+          'SETTLEMENT_TAX_APPLICABILITY_UNDECIDED',
+          'LegalEntity.tax_required must be set explicitly before OpenSettlement; missing Tax config must not imply ABSENT',
+        );
+      }
+      const taxRequired = taxApplicability === true;
+
+      let tax: PayableComponent = absent;
+      let customerPayableMinor = commercial.merchandiseGrossMinor;
+      let taxOrderSnapshotId: string | null = null;
+      let taxProvenance: Record<string, unknown> = { mvpAbsentExtras: true };
+
+      if (taxRequired) {
+        const taxSnap = await client.query<{
+          tax_order_snapshot_id: string;
+          vat_total_minor: string | null;
+          customer_payable_minor: string;
+          pricing_tax_mode: string | null;
+          tax_policy_version_id: string | null;
+          algorithm_id: string;
+          tax_treatment: string | null;
+          semantic_fingerprint: string;
+        }>(
+          `SELECT tax_order_snapshot_id, vat_total_minor, customer_payable_minor,
+                  pricing_tax_mode, tax_policy_version_id, algorithm_id,
+                  tax_treatment, semantic_fingerprint
+           FROM tax_order_snapshot
+           WHERE order_id = $1 AND commercial_fingerprint = $2`,
+          [orderId, commercial.head.semantic_fingerprint],
+        );
+        if (taxSnap.rowCount !== 1) {
+          throw new DomainValidationError(
+            'SETTLEMENT_TAX_SNAPSHOT_REQUIRED',
+            'Accepted TaxOrderSnapshot required before OpenSettlement when tax_required',
+          );
+        }
+        const ts = taxSnap.rows[0]!;
+        taxOrderSnapshotId = ts.tax_order_snapshot_id;
+        if (ts.tax_treatment === 'EXEMPT' || ts.tax_treatment === 'NOT_SUBJECT_TO_TAX') {
+          // ADR-0034: non-rate treatments do not persist fabricated VAT amount.
+          tax = absent;
+        } else if (ts.vat_total_minor == null) {
+          throw new DomainValidationError(
+            'SETTLEMENT_TAX_SNAPSHOT_INVALID',
+            'Rateful Tax snapshot missing vat_total_minor',
+          );
+        } else {
+          tax = { presence: 'PRESENT', amountMinor: ts.vat_total_minor };
+        }
+        customerPayableMinor = ts.customer_payable_minor;
+        // ADR-0034 §11: INCLUDED / ADDITIVE; MIXED when heterogeneous line PricingTaxModes.
+        const taxPresentation =
+          ts.pricing_tax_mode === 'TAX_EXCLUSIVE' && tax.presence === 'PRESENT'
+            ? 'ADDITIVE'
+            : ts.pricing_tax_mode === 'TAX_INCLUSIVE'
+              ? 'INCLUDED'
+              : ts.pricing_tax_mode == null && tax.presence === 'PRESENT'
+                ? 'MIXED'
+                : 'NONE';
+        taxProvenance = {
+          taxOrderSnapshotId: ts.tax_order_snapshot_id,
+          taxPolicyVersionId: ts.tax_policy_version_id,
+          pricingTaxMode: ts.pricing_tax_mode,
+          taxPresentation,
+          algorithmId: ts.algorithm_id,
+          taxSemanticFingerprint: ts.semantic_fingerprint,
+          taxRequired: true,
+          resolvePath: 'TAX_CLASSIFICATION_ASSIGNMENT_V1',
+        };
+      }
+
       const openSemantic = createHash('sha256')
         .update(
           JSON.stringify({
@@ -219,7 +310,9 @@ export class SettlementService {
             currencyCode: commercial.head.currency_code,
             minorUnitExponent: commercial.head.minor_unit_exponent,
             merchandiseGrossMinor: commercial.merchandiseGrossMinor,
-            customerPayableMinor: commercial.customerPayableMinor,
+            customerPayableMinor,
+            taxOrderSnapshotId,
+            tax: tax,
           }),
         )
         .digest('hex');
@@ -241,7 +334,7 @@ export class SettlementService {
         if (row.open_semantic_fingerprint !== openSemantic) {
           throw new IdempotencyConflictError(
             idempotencyKey,
-            'OpenSettlement idempotency key reused with different commercial semantics',
+            'OpenSettlement idempotency key reused with different commercial/tax semantics',
           );
         }
         await client.query('COMMIT');
@@ -261,26 +354,11 @@ export class SettlementService {
         );
       }
 
-      if (commercial.lines.length === 0 && commercial.merchandiseGrossMinor !== '0') {
-        throw new DomainValidationError(
-          'SETTLEMENT_PAYABLE_UNAVAILABLE',
-          'Merchandise gross unavailable for Settlement',
-        );
-      }
-
-      const merchandiseGross: PayableComponent = {
-        presence: 'PRESENT',
-        amountMinor: commercial.merchandiseGrossMinor,
-      };
-      const absent = presentOrAbsent(null);
-      // MVP: unsupported components ABSENT; customerPayable = merchandiseGross numerically
-      const customerPayableMinor = commercial.merchandiseGrossMinor;
-
       const snapFp = payableSnapshotFingerprint({
         commercialFingerprint: commercial.head.semantic_fingerprint,
         merchandiseGrossMinor: commercial.merchandiseGrossMinor,
         customerBorneDiscountOrReduction: absent,
-        tax: absent,
+        tax,
         serviceCharges: absent,
         tips: absent,
         otherExplicitCustomerFacingCharges: absent,
@@ -311,7 +389,7 @@ export class SettlementService {
           commercial.head.semantic_fingerprint,
           commercial.merchandiseGrossMinor,
           componentToDb(absent),
-          componentToDb(absent),
+          componentToDb(tax),
           componentToDb(absent),
           componentToDb(absent),
           componentToDb(absent),
@@ -320,7 +398,8 @@ export class SettlementService {
           JSON.stringify({
             source: 'S1.1_OPEN_SETTLEMENT',
             merchandiseGrossPresence: merchandiseGross.presence,
-            mvpAbsentExtras: true,
+            taxOrderSnapshotId,
+            ...taxProvenance,
           }),
         ],
       );

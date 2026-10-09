@@ -58,8 +58,8 @@ export async function seedBlockCFixture(pool: pg.Pool): Promise<BlockCFixture> {
       [ids.tenantId, ids.tenantId.replace(/-/g, '').toUpperCase()],
     );
     await client.query(
-      `INSERT INTO legal_entity (legal_entity_id, tenant_id, name, jurisdiction_code)
-       VALUES ($1,$2,'LE A','VN'), ($3,$2,'LE B','VN')`,
+      `INSERT INTO legal_entity (legal_entity_id, tenant_id, name, jurisdiction_code, tax_required)
+       VALUES ($1,$2,'LE A','VN', FALSE), ($3,$2,'LE B','VN', FALSE)`,
       [ids.legalEntityId, ids.tenantId, ids.otherLegalEntityId],
     );
     await client.query(`INSERT INTO brand (brand_id, tenant_id, name) VALUES ($1,$2,'Brand')`, [
