@@ -81,7 +81,16 @@ export function SettlementCheckoutPanel({
             ))}
           </ul>
           {live.state === 'COLLECTING' && live.customerPayableMinor !== '0' ? (
-            <p className="pos-settlement__waiting">Waiting for payment collection capability</p>
+            <p className="pos-settlement__waiting" role="status">
+              Payment blocked: no tender configured — waiting for payment collection capability. No
+              fake payment success.
+            </p>
+          ) : null}
+          {live.state === 'COLLECTING' ? (
+            <p className="pos-settlement__fiscal" role="status">
+              Fiscal blocked: FiscalCheckoutGate UNAVAILABLE — CompleteOrder remains fail-closed. No
+              fiscal success fabrication.
+            </p>
           ) : null}
           {live.state === 'SATISFIED' && live.customerPayableMinor === '0' ? (
             <p className="pos-settlement__zero">Zero payable — no fake Payment required</p>

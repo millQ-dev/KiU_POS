@@ -1,25 +1,35 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CashierContext } from './api/types.js';
-import { CashierShell } from './cashier/CashierShell.js';
-import { DevContextBootstrap } from './cashier/DevContextBootstrap.js';
-import { PinAuthScreen } from './cashier/PinAuthScreen.js';
 import {
-  CashierReadyShell,
-  OpeningCashScreen,
-} from './cashier/OpeningCashScreen.js';
+  fetchCurrentSession,
+  logoutSession,
+  type OpenCashShift,
+  type SessionUser,
+} from './api/sessionClient.js';
+import {
+  buildProductionCashierContext,
+  type TerminalTopology,
+} from './cashier/buildCashierContext.js';
+import { CashierShell } from './cashier/CashierShell.js';
 import {
   clearCompanyRealm,
   CompanyIdentificationScreen,
   readCompanyRealm,
   type CompanyRealm,
 } from './cashier/CompanyIdentificationScreen.js';
+import { DevContextBootstrap } from './cashier/DevContextBootstrap.js';
+import {
+  DEV_CASHIER_STORAGE_KEY,
+  isDevCashierPathEnabled,
+} from './cashier/devCashierGate.js';
+import { OpeningCashScreen } from './cashier/OpeningCashScreen.js';
+import { PinAuthScreen } from './cashier/PinAuthScreen.js';
 import { GuestMenuPage } from './guest/GuestMenuPage.js';
 
-const DEV_STORAGE_KEY = 'millq.dev.cashierContext.v1';
-
 function readDevStored(): CashierContext | null {
+  if (!isDevCashierPathEnabled()) return null;
   try {
-    const raw = sessionStorage.getItem(DEV_STORAGE_KEY);
+    const raw = sessionStorage.getItem(DEV_CASHIER_STORAGE_KEY);
     if (!raw) return null;
     return JSON.parse(raw) as CashierContext;
   } catch {
@@ -32,50 +42,97 @@ function guestTokenFromPath(): string | null {
   return m?.[1] ?? null;
 }
 
-function useDevCashierPath(): boolean {
-  return new URLSearchParams(window.location.search).get('devCashier') === '1';
-}
+type SessionPhase = 'idle' | 'resolving' | 'ready';
 
-type AuthUser = {
-  userId: string;
-  employeeId: string | null;
-  displayName: string;
-};
-
-type OpenShift = {
-  cashShiftId: string;
-  terminalId: string;
-  outletId: string;
-  status: string;
-  openingAmountMinor: string;
-  currencyCode: string;
-  minorUnitExponent: number;
-  authMode: string;
-  openedAt: string;
-};
-
+/**
+ * CASHIER-1 production front door:
+ * Company ID → PIN Session → Terminal → OPEN CashShift → server-derived CashierContext → CashierShell
+ */
 export function App() {
   const guestToken = guestTokenFromPath();
-  if (guestToken) {
-    return <GuestMenuPage opaqueToken={guestToken} />;
-  }
+  const preferDev = isDevCashierPathEnabled();
 
-  const preferDev = useDevCashierPath();
   const [devContext, setDevContext] = useState<CashierContext | null>(() =>
     preferDev ? readDevStored() : null,
   );
   const [realm, setRealm] = useState<CompanyRealm | null>(() =>
     preferDev ? null : readCompanyRealm(),
   );
-  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
-  const [openShift, setOpenShift] = useState<OpenShift | null>(null);
+  const [authUser, setAuthUser] = useState<SessionUser | null>(null);
+  const [sessionPhase, setSessionPhase] = useState<SessionPhase>('idle');
+  const [cashierContext, setCashierContext] = useState<CashierContext | null>(null);
+  const [contextError, setContextError] = useState<string | null>(null);
+  /** Bumps to cancel in-flight session resume and force a fresh resolve when needed. */
+  const [sessionEpoch, setSessionEpoch] = useState(0);
+  const bootstrapGen = useRef(0);
 
+  const clearLocalAuth = useCallback(() => {
+    bootstrapGen.current += 1;
+    setAuthUser(null);
+    setCashierContext(null);
+    setContextError(null);
+  }, []);
+
+  // Session resume after Company realm is known (production only).
+  useEffect(() => {
+    if (preferDev || guestToken || !realm) {
+      setSessionPhase('idle');
+      return;
+    }
+    const gen = ++bootstrapGen.current;
+    setSessionPhase('resolving');
+    void (async () => {
+      const user = await fetchCurrentSession();
+      if (bootstrapGen.current !== gen) return;
+      setAuthUser(user);
+      setSessionPhase('ready');
+    })();
+  }, [realm, sessionEpoch, preferDev, guestToken]);
+
+  const enterShell = useCallback(
+    (shift: OpenCashShift, terminal: TerminalTopology, company: CompanyRealm) => {
+      try {
+        const ctx = buildProductionCashierContext({
+          realmDisplayName: company.displayName,
+          shift,
+          terminal,
+        });
+        setContextError(null);
+        setCashierContext(ctx);
+      } catch {
+        setCashierContext(null);
+        setContextError('Cash shift / terminal topology mismatch — cannot enter cashier');
+      }
+    },
+    [],
+  );
+
+  async function handleLogout() {
+    await logoutSession();
+    clearLocalAuth();
+    // Force session effect to re-resolve (will 401 → PIN) while keeping Company realm.
+    setSessionEpoch((n) => n + 1);
+  }
+
+  async function handleChangeCompany() {
+    await logoutSession();
+    clearLocalAuth();
+    clearCompanyRealm();
+    setRealm(null);
+    setSessionPhase('idle');
+  }
+
+  if (guestToken) {
+    return <GuestMenuPage opaqueToken={guestToken} />;
+  }
+
+  // DEV-only path — impossible when import.meta.env.DEV is false.
   if (preferDev) {
     if (!devContext) {
       return (
         <DevContextBootstrap
           onSelect={(ctx) => {
-            sessionStorage.setItem(DEV_STORAGE_KEY, JSON.stringify(ctx));
+            sessionStorage.setItem(DEV_CASHIER_STORAGE_KEY, JSON.stringify(ctx));
             setDevContext(ctx);
           }}
         />
@@ -83,9 +140,10 @@ export function App() {
     }
     return (
       <CashierShell
+        mode="dev"
         context={devContext}
         onChangeContext={() => {
-          sessionStorage.removeItem(DEV_STORAGE_KEY);
+          sessionStorage.removeItem(DEV_CASHIER_STORAGE_KEY);
           setDevContext(null);
         }}
       />
@@ -96,11 +154,24 @@ export function App() {
     return (
       <CompanyIdentificationScreen
         onResolved={(r) => {
-          setRealm(r);
-          setAuthUser(null);
-          setOpenShift(null);
+          // Always revoke prior Session before binding a new Company realm (shared terminal safety).
+          void (async () => {
+            await logoutSession();
+            clearLocalAuth();
+            setRealm(r);
+            setSessionEpoch((n) => n + 1);
+          })();
         }}
       />
+    );
+  }
+
+  if (sessionPhase === 'resolving' || sessionPhase === 'idle') {
+    return (
+      <main className="session-resolving">
+        <h1>{realm.displayName}</h1>
+        <p role="status">Checking session…</p>
+      </main>
     );
   }
 
@@ -110,41 +181,43 @@ export function App() {
         realm={realm}
         onAuthenticated={(u) => {
           setAuthUser(u);
-          setOpenShift(null);
+          setCashierContext(null);
+          setContextError(null);
         }}
         onChangeCompany={() => {
-          clearCompanyRealm();
-          setRealm(null);
-          setAuthUser(null);
-          setOpenShift(null);
+          void handleChangeCompany();
         }}
       />
     );
   }
 
-  if (!openShift) {
+  if (cashierContext) {
     return (
-      <OpeningCashScreen
-        user={authUser}
-        realm={realm}
-        onOpened={setOpenShift}
-        onLogout={() => {
-          setAuthUser(null);
-          setOpenShift(null);
+      <CashierShell
+        mode="production"
+        context={cashierContext}
+        onSignOut={() => {
+          void handleLogout();
         }}
       />
     );
   }
 
   return (
-    <CashierReadyShell
-      user={authUser}
-      realm={realm}
-      shift={openShift}
-      onLogout={() => {
-        setAuthUser(null);
-        setOpenShift(null);
-      }}
-    />
+    <>
+      {contextError ? (
+        <p role="alert" className="cashier-context-error">
+          {contextError}
+        </p>
+      ) : null}
+      <OpeningCashScreen
+        user={authUser}
+        realm={realm}
+        onOpened={(shift, terminal) => enterShell(shift, terminal, realm)}
+        onLogout={() => {
+          void handleLogout();
+        }}
+      />
+    </>
   );
 }

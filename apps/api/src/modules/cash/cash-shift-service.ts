@@ -94,30 +94,51 @@ export class CashShiftService {
     return res.rows[0] ? mapRow(res.rows[0]) : null;
   }
 
-  async listTerminalsForOpen(
-    principal: AuthenticatedPrincipal,
-  ): Promise<Array<{ outletId: string; outletName: string; terminalId: string; terminalCode: string; terminalName: string }>> {
-    const hasPos = await this.identity.hasPermission(
-      this.pool,
-      principal.tenantId,
-      principal.userId,
-      PERMISSION_POS_OPERATE,
-      null,
-      null,
-    );
-    if (!hasPos) {
-      // Also allow outlet-scoped pos.operate via broader query below using grants join.
-    }
+  /**
+   * Authorized terminals with server-derived Organization topology for CashierContext.
+   * brandId / legalEntityId come from Outlet → Brand / LegalEntity — never from the caller.
+   */
+  async listTerminalsForOpen(principal: AuthenticatedPrincipal): Promise<
+    Array<{
+      outletId: string;
+      outletName: string;
+      terminalId: string;
+      terminalCode: string;
+      terminalName: string;
+      brandId: string;
+      brandName: string;
+      legalEntityId: string;
+      legalEntityName: string;
+    }>
+  > {
     const res = await this.pool.query<{
       outlet_id: string;
       outlet_name: string;
       terminal_id: string;
       code: string;
       name: string;
+      brand_id: string;
+      brand_name: string;
+      legal_entity_id: string;
+      legal_entity_name: string;
     }>(
-      `SELECT DISTINCT o.outlet_id, o.name AS outlet_name, t.terminal_id, t.code, t.name
+      `SELECT DISTINCT
+          o.outlet_id,
+          o.name AS outlet_name,
+          t.terminal_id,
+          t.code,
+          t.name,
+          b.brand_id,
+          b.name AS brand_name,
+          le.legal_entity_id,
+          le.name AS legal_entity_name
        FROM terminal t
-       INNER JOIN outlet o ON o.outlet_id = t.outlet_id AND o.tenant_id = t.tenant_id
+       INNER JOIN outlet o
+         ON o.outlet_id = t.outlet_id AND o.tenant_id = t.tenant_id
+       INNER JOIN brand b
+         ON b.brand_id = o.brand_id AND b.tenant_id = o.tenant_id
+       INNER JOIN legal_entity le
+         ON le.legal_entity_id = o.legal_entity_id AND le.tenant_id = o.tenant_id
        INNER JOIN identity_access_grant g
          ON g.tenant_id = t.tenant_id
         AND g.user_id = $2
@@ -136,6 +157,10 @@ export class CashShiftService {
       terminalId: r.terminal_id,
       terminalCode: r.code,
       terminalName: r.name,
+      brandId: r.brand_id,
+      brandName: r.brand_name,
+      legalEntityId: r.legal_entity_id,
+      legalEntityName: r.legal_entity_name,
     }));
   }
 

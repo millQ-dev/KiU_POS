@@ -18,8 +18,15 @@ async function parseJson(res: Response): Promise<unknown> {
   }
 }
 
+/**
+ * Shared POS/financial client: Session cookie only (credentials include).
+ * Browser supplies Origin/Referer for CSRF — do not invent caller-controlled Origin.
+ */
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const init: RequestInit = { method };
+  const init: RequestInit = {
+    method,
+    credentials: 'include',
+  };
   if (body !== undefined) {
     init.headers = { 'Content-Type': 'application/json' };
     init.body = JSON.stringify(body);

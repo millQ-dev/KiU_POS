@@ -27,12 +27,12 @@ export function PinAuthScreen({ realm, onAuthenticated, onChangeCompany }: Props
     setError(null);
     setBusy(true);
     try {
+      // Browser supplies Origin/Referer for CSRF — do not set a caller-controlled Origin header.
       const res = await fetch('/api/v1/identity/pin/authenticate', {
         method: 'POST',
         credentials: 'include',
         headers: {
           'content-type': 'application/json',
-          origin: window.location.origin,
         },
         body: JSON.stringify({
           companyCode: realm.companyCode,

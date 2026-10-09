@@ -41,10 +41,42 @@ function salesPayload(ctx: CashierContext) {
 
 type Props = {
   context: CashierContext;
-  onChangeContext: () => void;
+  /** `production` hides DEV bootstrap controls; default `dev` preserves prior tests. */
+  mode?: 'dev' | 'production';
+  onChangeContext?: () => void;
+  onSignOut?: () => void;
 };
 
-export function CashierShell({ context, onChangeContext }: Props) {
+function feedbackForApiError(err: ApiError): string {
+  switch (err.code) {
+    case 'SETTLEMENT_TAX_APPLICABILITY_UNDECIDED':
+      return 'Tax blocked: LegalEntity tax applicability undecided — cannot open checkout';
+    case 'SETTLEMENT_TAX_SNAPSHOT_REQUIRED':
+      return 'Tax blocked: accepted Tax snapshot required before checkout';
+    case 'SETTLEMENT_TAX_SNAPSHOT_INVALID':
+      return 'Tax blocked: Tax snapshot invalid for settlement';
+    case 'TAX_CLASSIFICATION_REQUIRED':
+    case 'TAX_CLASSIFICATION_AMBIGUOUS':
+      return `Tax blocked: ${err.code}`;
+    case 'FISCAL_CHECKOUT_UNAVAILABLE':
+    case 'FISCAL_GATE_UNAVAILABLE':
+      return 'Fiscal blocked: FiscalCheckoutGate UNAVAILABLE — cannot complete checkout';
+    case 'NO_TENDER':
+    case 'TENDER_UNAVAILABLE':
+    case 'PAYMENT_UNAVAILABLE':
+      return 'Payment blocked: no tender configured — cannot collect payment';
+    default:
+      return `${err.code}: ${err.message}`;
+  }
+}
+
+export function CashierShell({
+  context,
+  mode = 'dev',
+  onChangeContext,
+  onSignOut,
+}: Props) {
+  const production = mode === 'production';
   const [surface, setSurface] = useState<ResolvedPosSurface | null>(null);
   const [surfaceLoading, setSurfaceLoading] = useState(true);
   const [surfaceError, setSurfaceError] = useState<{ code: string; message: string } | null>(null);
@@ -185,9 +217,12 @@ export function CashierShell({ context, onChangeContext }: Props) {
   };
 
   const handleMutationError = async (err: unknown, orderId: string | undefined) => {
-    const code = err instanceof ApiError ? err.code : 'NETWORK';
-    const message = err instanceof Error ? err.message : 'Mutation failed';
-    setFeedback(`${code}: ${message}`);
+    if (err instanceof ApiError) {
+      setFeedback(feedbackForApiError(err));
+    } else {
+      const message = err instanceof Error ? err.message : 'Mutation failed';
+      setFeedback(`NETWORK: ${message}`);
+    }
     if (!orderId) return;
     try {
       await reloadAuthoritativeOrder(orderId, selectedLineId);
@@ -411,17 +446,34 @@ export function CashierShell({ context, onChangeContext }: Props) {
         <div className="pos-shell__brand">
           <span className="pos-shell__kiu">KiU</span>
           <span className="pos-shell__outlet">{context.outletName}</span>
-          <span className="pos-shell__dev" title="Development context bootstrap — not production auth">
-            DEV context
-          </span>
+          {!production ? (
+            <span
+              className="pos-shell__dev"
+              title="Development context bootstrap — not production auth"
+            >
+              DEV context
+            </span>
+          ) : null}
         </div>
         <div className="pos-shell__actions">
-          <button type="button" className="pos-shell__btn" onClick={() => void loadSurface()} disabled={surfaceLoading}>
+          <button
+            type="button"
+            className="pos-shell__btn"
+            onClick={() => void loadSurface()}
+            disabled={surfaceLoading}
+          >
             Refresh surface
           </button>
-          <button type="button" className="pos-shell__btn" onClick={onChangeContext}>
-            Change context
-          </button>
+          {!production && onChangeContext ? (
+            <button type="button" className="pos-shell__btn" onClick={onChangeContext}>
+              Change context
+            </button>
+          ) : null}
+          {production && onSignOut ? (
+            <button type="button" className="pos-shell__btn" onClick={onSignOut}>
+              Sign out
+            </button>
+          ) : null}
         </div>
       </header>
 
