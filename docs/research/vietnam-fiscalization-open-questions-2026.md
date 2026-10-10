@@ -42,8 +42,9 @@
 | ADR-4 | Numbering: forbid local sequence if provider/CQT owns? | **Accepted** — never manufacture authority-issued number; separate KiU FiscalDocumentId vs provider/authority number |
 | ADR-5 | FiscalCheckoutGate state vocabulary freeze? | **Accepted** — preserve existing vocabulary; mode-neutral `SATISFIED`; separate document/attempt/outcome/gate lifecycles |
 | ADR-6 | Default FiscalPolicy for payment-OK / fiscal-pending CompleteOrder? | **Accepted** — C0 online-only: Payment may record; fiscal unsatisfied; CompleteOrder blocked; no ALLOW_COMPLETE_WITH_FISCAL_PENDING |
+| ADR-7 | Which runtime clock is C0 PAYMENT COLLECTION EVENT / fiscal business time? | **Accepted** 2026-10-11 (PO ACCEPT WITH DELTAS) — Payments `PaymentCollectionEvent.collected_at` from affirmed `provider_occurred_at` (collection only); no `received_at` / `satisfied_at` fallback; FISC1.1 = 1 Payment + 1 Check; CASH separate |
 
-See `docs/decisions/ADR-0014-vietnam-fiscalization-boundary.md` Accepted Delta D1–D31 and `docs/processes/review-packets/2026-10-09-adr-0014-fiscalization-delta.md`.
+See `docs/decisions/ADR-0014-vietnam-fiscalization-boundary.md` Accepted Delta D1–D31 + Chronology Delta D32–D38 and `docs/processes/review-packets/2026-10-11-adr-0014-payment-collection-event.md`.
 
 ---
 

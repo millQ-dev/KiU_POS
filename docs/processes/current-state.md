@@ -4,7 +4,7 @@
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)  
 **GitHub backup (sole):** `https://github.com/millQ-dev/KiU_POS.git`  
   (`millQ-dev/MillQ` = legacy rename redirect to the same repository ID)  
-**Updated:** 2026-10-10
+**Updated:** 2026-10-11
 
 ## Runtime / CI / backup
 
@@ -15,7 +15,8 @@
 | ADR-0033 / ADR-0034 / ADR-0037 | **ACCEPTED** |
 | CASHIER-1 Production Front Door | **MERGED** Origin PR#76 |
 | Fiscalization (FISC1.1) | **NOT STARTED** — production `FiscalCheckoutGate` = **UNAVAILABLE** |
-| ADR-0014 Fiscalization delta | **ACCEPTED** 2026-10-10 (PO ACCEPT; docs-only; does **not** start FISC1.1) |
+| ADR-0014 Fiscalization delta | **ACCEPTED** 2026-10-10 |
+| ADR-0014 / ADR-0013 Chronology Delta | **ACCEPTED** 2026-10-11 (PO ACCEPT WITH DELTAS — D + strict A; docs-only; does **not** start FISC1.1) |
 | Floor/Table (R1.1) | **FROZEN / NOT STARTED** |
 | C0 Cafe Operability | **IN PROGRESS** — slice = **COUNTER-SERVICE / PREPAY CAFE** |
 
@@ -45,8 +46,9 @@
 
 | Item | State |
 | --- | --- |
-| ADR-0014 delta | **ACCEPTED** 2026-10-10 (PO ACCEPT; no additional PO deltas) |
-| FISC1.1 | **NOT STARTED** — wait for ChatGPT independent GitHub main equality verification, then explicit FISC1.1 launch |
+| ADR-0014 delta | **ACCEPTED** 2026-10-10 |
+| Payment collection chronology | **ACCEPTED** 2026-10-11 — `PaymentCollectionEvent.collected_at` ← affirmed `provider_occurred_at` (collection only); no `received_at` / `satisfied_at` fallback; FISC1.1 = 1 Payment + 1 fully covered Check; CASH separate later |
+| FISC1.1 | **NOT STARTED** — after this Chronology docs merge + backup + ChatGPT SHA equality + explicit FISC1.1 Level B launch |
 | Production FiscalCheckoutGate | **UNAVAILABLE** (fail-closed) |
 | LEGAL GATE G2 | **REQUIRED** for Vietnam fiscal production go-live (not granted by this Accept) |
 
@@ -59,9 +61,9 @@
 
 ## Next
 
-1. **FISC1.1** only after ChatGPT independent Origin/GitHub main equality verification **and** explicit FISC1.1 launch
-2. Do **not** create fiscal migrations / FiscalPolicy runtime / FiscalDocument / provider adapter / webhook-polling from this Accept alone
-3. Do **not** start DeviceIdentity / Quick Lock / CashShift Close / CASH tender / R1.1
+1. Merge Chronology docs PR → Origin backup → ChatGPT independent SHA equality
+2. Then explicit **FISC1.1** Level B (migration `032`, Fiscal Core, `PaymentCollectionEvent` runtime) — no real provider / no G2
+3. Do **not** start DeviceIdentity / Quick Lock / CashShift Close / CASH tender / R1.1 / multi-payment fiscalization
 
 Preserve:
 

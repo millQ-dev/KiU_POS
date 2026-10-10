@@ -1,13 +1,14 @@
 # ADR-0014: Vietnam Fiscalization Architecture Boundary
 
-- **Status:** Accepted (Architecture v1.3) — **Delta for FISC1.1 readiness Accepted**
+- **Status:** Accepted (Architecture v1.3) — **FISC1.1 readiness Delta Accepted** + **Payment Collection Chronology Delta Accepted**
 - **Date:** 2026-09-04
 - **Accepted (boundary):** 2026-09-12 (PO ACCEPT WITH DELTAS)
 - **Delta drafted:** 2026-10-09 (docs only)
 - **Accepted (Delta):** 2026-10-10 (PO decision: **ACCEPT** — no additional PO deltas)
+- **Accepted (Chronology Delta):** 2026-10-11 (PO decision: **ACCEPT WITH DELTAS** — D + strict A; docs only)
 - **Decision owners:** Product Owner and System Architect
-- **Related:** Architecture v1.3; ADR-0012, ADR-0013, ADR-0016, ADR-0018; ADR-0032; ADR-0033, ADR-0034, ADR-0037 (Accepted); Tax runtime TAX1.1 (canonical closed); domain-module-map Fiscalization
-- **After this Delta Accept:** narrow **FISC1.1 Core** may be launched only by a separate explicit FISC1.1 implementation authorization (see §D29). This Accept does **not** start FISC1.1 runtime, select a provider, grant Vietnam legal production clearance (LEGAL GATE G2), enable offline fiscal production, DeviceIdentity, CASH tender, or R1.1.
+- **Related:** Architecture v1.3; ADR-0012, ADR-0013, ADR-0016, ADR-0018; ADR-0032; ADR-0033, ADR-0034, ADR-0037 (Accepted); Tax runtime TAX1.1 (canonical closed); domain-module-map Fiscalization / Payments
+- **After Chronology Delta Accept:** binds C0 fiscal business-time SoT for a later explicit FISC1.1 launch (see §D29 / §§D32–D38). This Accept does **not** start FISC1.1 runtime, select a provider, grant LEGAL GATE G2, enable offline fiscal production, DeviceIdentity, CASH tender, multi-payment/split fiscalization, or R1.1.
 
 ## Context
 
@@ -19,7 +20,7 @@ Vietnam e-invoice / fiscal compliance is a market P0. Treating fiscalization as 
 
 This Delta **refines** ADR-0014. It does **not** reopen ADR-0033 / ADR-0034 / ADR-0037. It does **not** implement runtime. **FISC1.1 remains NOT STARTED** until an explicit implementation launch after this docs merge.
 
-**Document structure:** The next section is the **historically Accepted Decision** (2026-09-12), preserved for honesty. The following section is the **Accepted Delta** (PO ACCEPT 2026-10-10) — D1–D31.
+**Document structure:** The next section is the **historically Accepted Decision** (2026-09-12), preserved for honesty. Then the **Accepted Delta** (PO ACCEPT 2026-10-10) — D1–D31. Then the **Accepted Chronology Delta** (PO ACCEPT WITH DELTAS 2026-10-11) — D32–D38, binding D13’s PAYMENT COLLECTION EVENT to Payments-owned evidence.
 
 ---
 
@@ -333,6 +334,8 @@ fiscal business time ≠ DB created_at
 
 Do **not** generalize to restaurant dine-in, post-pay table service, deposit flows, or unfrozen split-settlement edges. Those remain future Level C / legal work.
 
+**Field binding for FISC1.1:** see **Accepted Chronology Delta** §§D32–D38 (PO ACCEPT WITH DELTAS 2026-10-11). D13 remains the product trigger; D32+ define which Payments evidence is authoritative.
+
 ### D14. Payment collected + fiscal failure
 
 For C0:
@@ -565,3 +568,102 @@ This Delta **implements architecturally** the Fiscal side of ADR-0037 Accepted r
 - Recalculate Tax inside Fiscalization — rejected.
 - Hard-code MTT as only regime — rejected.
 - Vietnam restaurant → `NOT_REQUIRED` — rejected (ADR-0037).
+
+---
+
+## Accepted Chronology Delta (PO ACCEPT WITH DELTAS 2026-10-11)
+
+**Status of §§D32–D38:** **Accepted** (PO decision: **ACCEPT WITH DELTAS**). Docs only. Does **not** implement FISC1.1 runtime, `PaymentCollectionEvent` tables, provider adapters, CASH tender, or LEGAL GATE G2.
+
+**Problem closed:** D13 / ADR-0037 LC-08 named PAYMENT COLLECTION EVENT but did not bind a trustworthy clock. Runtime candidates (`provider_occurred_at`, `received_at`, `satisfied_at`, `payment.created_at`, DB `NOW()`) have different meanings. FISC1.1 must not invent chronology via technical default.
+
+### D32. Payments-owned immutable `PaymentCollectionEvent`
+
+Payments owns an immutable **`PaymentCollectionEvent`** (conceptual SoT; runtime in FISC1.1 / Payments follow-on — not this docs PR).
+
+Minimum facts:
+
+- authoritative **`collected_at`** (fiscal business time for C0 issuance);
+- immutable reference to the Payment evidence that proved actual **collection** (not authorization-only, not operation-create);
+- tenant / LegalEntity / Payment / SettlementCheck binding required for FISC1.1 C0.
+
+Fiscalization **consumes** `PaymentCollectionEvent`; it does **not** invent Payment truth, does **not** overwrite `collected_at`, and does **not** treat provider fiscal ACK time as collection time.
+
+Fiscal document **issuance / submission / provider response** times are separate clocks and must not replace `collected_at`.
+
+### D33. Strict source for electronic provider tenders (D + strict A)
+
+For C0 electronic provider tenders in FISC1.1:
+
+```text
+PaymentCollectionEvent.collected_at
+  = payment_provider_outcome.provider_occurred_at
+    of the VERIFIED SUCCEEDED outcome that proves ACTUAL PAYMENT COLLECTION
+```
+
+Adapter / evidence contract must affirm that `provider_occurred_at` is **collection** time, not authorization time and not provider operation-create time. If the adapter cannot affirm collection semantics → **do not** create `PaymentCollectionEvent` → fiscalization fail closed.
+
+### D34. Forbidden clocks (no fallback)
+
+Do **not** use as fiscal `collected_at` / PAYMENT COLLECTION EVENT time:
+
+| Forbidden | Why |
+| --- | --- |
+| `payment_provider_outcome.received_at` | MillQ ingest / “when KiU learned” — not when money was collected |
+| `settlement_group.satisfied_at` | Settlement coverage-complete orchestration time — not collection |
+| `payment.created_at` | Request create; already forbidden by D13 / LC-08 |
+| `payment.updated_at` / bare DB `NOW()` at SUCCESS write | Technical state-transition clock |
+| Fiscal submission / provider ACK / document issue wall clock | Delivery/issuance ≠ collection |
+
+**No fallback chain** to `received_at` or `satisfied_at`. Missing trustworthy collection time ⇒ **fail closed** (D35).
+
+### D35. Missing trustworthy collection time — fail closed
+
+If no immutable `PaymentCollectionEvent` with trustworthy `collected_at` exists for the fiscally required C0 intent:
+
+- do **not** create / issue FiscalDocument;
+- FiscalCheckoutGate must **not** become `SATISFIED`;
+- CompleteOrder remains blocked;
+- do **not** fabricate `collected_at` from ingest or Settlement clocks.
+
+### D36. FISC1.1 C0 shape — one Payment, one Check
+
+FISC1.1 supports only:
+
+```text
+exactly one Payment
++ exactly one SettlementCheck
++ that Check fully covered by that Payment’s qualifying VERIFIED SUCCESS allocation
++ PaymentCollectionEvent present for that Payment
+```
+
+Multi-payment, split Checks, partial coverage, or ambiguous collection evidence ⇒ **explicit blocked fiscal state** (not `NOT_REQUIRED`, not silent `SATISFIED`). Out of FISC1.1 scope; future Level C.
+
+### D37. CASH tender is not provider-time
+
+`provider_occurred_at` / electronic-provider collection evidence is **not** a universal rule for CASH.
+
+CASH requires a **separate** Accepted confirmed cash-receipt / drawer collection event before CASH may drive fiscal `collected_at`. Until that event exists and is Accepted:
+
+- CASH tender fiscalization remains **out of FISC1.1**;
+- do not pretend card/provider chronology applies to cash.
+
+### D38. Relationship to D13 / ADR-0013 / FISC1.1 launch
+
+- D13 product trigger unchanged: PAYMENT COLLECTION EVENT.
+- ADR-0013 records Payments ownership of `PaymentCollectionEvent` (companion delta).
+- This Chronology Delta **enables** FISC1.1 design to bind fiscal business time honestly; it does **not** by itself launch FISC1.1, create migration `032`, or select a provider.
+
+### Accepted Chronology Delta consequences
+
+- Historical financial fact for C0 invoice time = Payments `PaymentCollectionEvent.collected_at` from affirmed collection evidence.
+- KiU learning lag (`received_at`) and Settlement satisfaction lag (`satisfied_at`) stay observable but non-authoritative for fiscal business time.
+- Split / multi-tender / CASH fiscalization remain blocked until further Accepted Level C.
+
+### Accepted Chronology Delta alternatives considered
+
+- Fallback `provider_occurred_at` → `received_at` → fail closed — **rejected** by PO (ingest ≠ collection).
+- Use `settlement_group.satisfied_at` as fiscal business time — **rejected** (coverage orchestration ≠ collection).
+- Use `payment.created_at` / DB `NOW()` — **rejected** (D13 / LC-08).
+- Universalize provider collection time to CASH — **rejected** (needs own cash-receipt event).
+- Support multi-payment/split in FISC1.1 — **rejected** (explicit blocked; later Level C).

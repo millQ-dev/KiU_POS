@@ -136,9 +136,9 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 
 | | |
 | --- | --- |
-| **Owns** | Payment/refund transactions; TenderDefinition registry; PaymentAllocation |
-| **Does not own** | Order lines, cash drawer sessions, merchant/customer fund custody (forbidden — ADR-0013) |
-| **Key concepts** | TenderDefinition, Payment, PaymentAllocation, non-custody boundary (ADR-0013 **Accepted**: no wallet/internal balance; tips as allocation only; gift cards / marketplace settlement out of scope) |
+| **Owns** | Payment/refund transactions; TenderDefinition registry; PaymentAllocation; immutable **PaymentCollectionEvent** (authoritative `collected_at` for actual collection — ADR-0013 / ADR-0014 Chronology Delta) |
+| **Does not own** | Order lines, cash drawer sessions, merchant/customer fund custody (forbidden — ADR-0013); FiscalDocument / FiscalCheckoutGate |
+| **Key concepts** | TenderDefinition, Payment, PaymentAllocation, PaymentCollectionEvent; non-custody boundary (ADR-0013 **Accepted**: no wallet/internal balance; tips as allocation only; gift cards / marketplace settlement out of scope); `collected_at` ≠ `received_at` ≠ Settlement `satisfied_at`; CASH collection event separate / not started |
 | **Commands in** | RecordPayment, RecordRefund, AllocatePayment |
 | **Facts out** | PaymentRecorded |
 | **Depends on** | Orders (settlement), Organization |
@@ -215,10 +215,10 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 | --- | --- |
 | **Owns** | FiscalPolicy, FiscalSeries, FiscalDocument, FiscalSubmission, correction chains, provider adapter **interface**, fiscal reconciliation |
 | **Does not own** | LegalEntity master data beyond fiscal binding; Order/Payment SoT; Tax calculation / TaxOrderSnapshot SoT; legal production clearance |
-| **Key concepts** | Architecture boundary now (Accepted ADR-0014); Order ≠ FiscalDocument; immutable docs + correction chains; KiU Fiscal Core → provider adapter → immutable evidence; `SATISFIED` = mode-neutral evidence under FiscalPolicy (ADR-0037); Vietnam restaurant → `NOT_REQUIRED` forbidden; C0 online-only; offline / ACK evidence profile OPEN for FISC1.1; LEGAL GATE G2 for go-live; consumes frozen Tax facts (ADR-0033) — never invents VAT |
+| **Key concepts** | Architecture boundary now (Accepted ADR-0014); Order ≠ FiscalDocument; immutable docs + correction chains; KiU Fiscal Core → provider adapter → immutable evidence; `SATISFIED` = mode-neutral evidence under FiscalPolicy (ADR-0037); Vietnam restaurant → `NOT_REQUIRED` forbidden; C0 online-only; C0 fiscal business time consumes Payments `PaymentCollectionEvent` (Chronology Delta 2026-10-11); offline / ACK evidence profile OPEN for FISC1.1; LEGAL GATE G2 for go-live; consumes frozen Tax facts (ADR-0033) — never invents VAT |
 | **Commands in** | SubmitFiscal, RecordFiscalCorrection |
 | **Facts out** | FiscalSubmitted, FiscalCorrected |
-| **Depends on** | Organization (LegalEntity), JurisdictionProfile, Tax (frozen TaxOrderSnapshot when required), Payments/Orders settlement outcomes |
+| **Depends on** | Organization (LegalEntity), JurisdictionProfile, Tax (frozen TaxOrderSnapshot when required), Payments (`PaymentCollectionEvent` + settlement outcomes) |
 
 ### Floor / Table Engine
 
