@@ -34,14 +34,16 @@
 
 ## C. ADR-0014 delta candidates (after Tax)
 
-| ID | Question |
-| --- | --- |
-| ADR-1 | First-class FiscalDocumentMode enum: CÓ_MÃ / KHÔNG_MÃ / MÁY_TÍNH_TIỀN? |
-| ADR-2 | InvoiceType: GTGT vs BÁN_HÀNG ownership? |
-| ADR-3 | Terminal / cash-register identity ownership under LegalEntity + Outlet? |
-| ADR-4 | Numbering: forbid local sequence if provider/CQT owns? |
-| ADR-5 | FiscalCheckoutGate state vocabulary freeze? |
-| ADR-6 | Default FiscalPolicy for payment-OK / fiscal-pending CompleteOrder? |
+| ID | Question | 2026-10-09 status |
+| --- | --- | --- |
+| ADR-1 | First-class FiscalDocumentMode enum: CÓ_MÃ / KHÔNG_MÃ / MÁY_TÍNH_TIỀN? | **Accepted** in ADR-0014 Delta (2026-10-10) as provider-neutral `CODED_E_INVOICE` / `NON_CODED_E_INVOICE` / `CASH_REGISTER_E_INVOICE` (VN labels docs-only) |
+| ADR-2 | InvoiceType: GTGT vs BÁN_HÀNG ownership? | **Accepted** — Fiscalization owns type/profile via FiscalPolicy; exact VN mapping = LEGAL / ONBOARDING CONFIGURATION where unverified |
+| ADR-3 | Terminal / cash-register identity ownership under LegalEntity + Outlet? | **Accepted** — Organization owns Terminal; Fiscalization owns binding/reference; DeviceIdentity deferred |
+| ADR-4 | Numbering: forbid local sequence if provider/CQT owns? | **Accepted** — never manufacture authority-issued number; separate KiU FiscalDocumentId vs provider/authority number |
+| ADR-5 | FiscalCheckoutGate state vocabulary freeze? | **Accepted** — preserve existing vocabulary; mode-neutral `SATISFIED`; separate document/attempt/outcome/gate lifecycles |
+| ADR-6 | Default FiscalPolicy for payment-OK / fiscal-pending CompleteOrder? | **Accepted** — C0 online-only: Payment may record; fiscal unsatisfied; CompleteOrder blocked; no ALLOW_COMPLETE_WITH_FISCAL_PENDING |
+
+See `docs/decisions/ADR-0014-vietnam-fiscalization-boundary.md` Accepted Delta D1–D31 and `docs/processes/review-packets/2026-10-09-adr-0014-fiscalization-delta.md`.
 
 ---
 

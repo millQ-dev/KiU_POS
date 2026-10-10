@@ -4,18 +4,18 @@
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)  
 **GitHub backup (sole):** `https://github.com/millQ-dev/KiU_POS.git`  
   (`millQ-dev/MillQ` = legacy rename redirect to the same repository ID)  
-**Updated:** 2026-10-09
+**Updated:** 2026-10-10
 
 ## Runtime / CI / backup
 
 | Item | State |
 | --- | --- |
-| Migration head | **031** `031_tax_domain_foundation.sql` on main (no new migration in CASHIER-1) |
+| Migration head | **031** `031_tax_domain_foundation.sql` on main (no new migration in this docs block) |
 | TAX1.1 Tax runtime | **MERGED** Origin PR#74 — canonical closed |
 | ADR-0033 / ADR-0034 / ADR-0037 | **ACCEPTED** |
 | CASHIER-1 Production Front Door | **MERGED** Origin PR#76 |
 | Fiscalization (FISC1.1) | **NOT STARTED** — production `FiscalCheckoutGate` = **UNAVAILABLE** |
-| ADR-0014 Fiscalization delta | **NEXT LEVEL C DOCS WORK / NOT STARTED** |
+| ADR-0014 Fiscalization delta | **ACCEPTED** 2026-10-10 (PO ACCEPT; docs-only; does **not** start FISC1.1) |
 | Floor/Table (R1.1) | **FROZEN / NOT STARTED** |
 | C0 Cafe Operability | **IN PROGRESS** — slice = **COUNTER-SERVICE / PREPAY CAFE** |
 
@@ -45,9 +45,10 @@
 
 | Item | State |
 | --- | --- |
-| ADR-0014 delta | **NEXT LEVEL C DOCS WORK / NOT STARTED** |
-| FISC1.1 | **NOT STARTED** |
+| ADR-0014 delta | **ACCEPTED** 2026-10-10 (PO ACCEPT; no additional PO deltas) |
+| FISC1.1 | **NOT STARTED** — wait for ChatGPT independent GitHub main equality verification, then explicit FISC1.1 launch |
 | Production FiscalCheckoutGate | **UNAVAILABLE** (fail-closed) |
+| LEGAL GATE G2 | **REQUIRED** for Vietnam fiscal production go-live (not granted by this Accept) |
 
 ## Legal baseline (product reference)
 
@@ -58,8 +59,8 @@
 
 ## Next
 
-1. **ADR-0014 Fiscalization delta** — docs-only Level C (may be drafted in parallel)
-2. **FISC1.1** remains **NOT STARTED**
+1. **FISC1.1** only after ChatGPT independent Origin/GitHub main equality verification **and** explicit FISC1.1 launch
+2. Do **not** create fiscal migrations / FiscalPolicy runtime / FiscalDocument / provider adapter / webhook-polling from this Accept alone
 3. Do **not** start DeviceIdentity / Quick Lock / CashShift Close / CASH tender / R1.1
 
 Preserve:
