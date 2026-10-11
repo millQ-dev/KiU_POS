@@ -24,7 +24,7 @@ Legend:
 | --- | --- |
 | **Owns** | Tenant; LegalEntity; Brand; Outlet; TerminalGroup; Terminal; Region; Warehouse identity; PackageEntitlement; OutletCapabilityConfig; structural assignments |
 | **Does not own** | Menu content, inventory balances, orders, fiscal submissions |
-| **Key concepts** | Tenant, Outlet (`tenantId`, `brandId`, `legalEntityId`, `regionId?`), operational inheritance spine Brand→Outlet→TerminalGroup→Terminal |
+| **Key concepts** | Tenant, Outlet (`tenantId`, `brandId`, `legalEntityId`, `regionId?`), operational inheritance spine Brand→Outlet→TerminalGroup→Terminal. **ADR-0039 Accepted** (merge pending): CreateBusinessBootstrap atomically creates Tenant + LegalEntity + Brand #1 + Outlet #1 + LegalEntityBankAccount[1..N] + owner membership — Tax/bank belong to LegalEntity; `outlet.brand_id` NOT NULL honored |
 | **Commands in** | RegisterTenant, CreateOutlet, AssignBrand, PlaceTerminal, SetOutletCapability |
 | **Facts out** | OutletConfigured, CapabilityChanged, StructureAssignmentActivated |
 | **Depends on** | Jurisdiction (profile refs) |
@@ -37,7 +37,7 @@ LegalEntity is fiscal/legal — **not** part of menu inheritance.
 | --- | --- |
 | **Owns** | Users, credentials, roles, permissions, ordinary tenant access grants, sessions/devices; ProfessionalProfile / ClientAccessGrant path (ADR-0022) |
 | **Does not own** | Workforce HR records beyond access; ProfessionalOrganization commercial billing |
-| **Key concepts** | User, Role, Permission, AccessGrant, Session, AuthorizationPolicy, VisibilityPolicy; ProfessionalProfile; ClientAccessGrant (independent per client; no inheritance) |
+| **Key concepts** | User, Role, Permission, AccessGrant, Session, AuthorizationPolicy, VisibilityPolicy; ProfessionalProfile; ClientAccessGrant (independent per client; no inheritance). **ADR-0039 Accepted** (merge pending): GlobalAccount (0..N TenantMemberships + optional ADR-0022 grants) **coexists with** tenant-scoped POS `identity_user`/PIN; OfficePartialAuth → OfficeSession after 2FA; OFFICE ≠ TERMINAL/MOBILE; owner CreateBusinessBootstrap |
 | **Commands in** | Authenticate, GrantAccess, GrantProfessionalClientAccess, RevokeProfessionalClientAccess, AuthorizeDangerousOperation |
 | **Facts out** | AccessGranted, ProfessionalClientAccessGranted/Revoked, DangerousOperationAuthorized (AUDIT) |
 | **Depends on** | Organization (scope targets) |
@@ -138,7 +138,7 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 | --- | --- |
 | **Owns** | Payment/refund transactions; TenderDefinition registry; PaymentAllocation; immutable **PaymentCollectionEvent** (authoritative `collected_at` for actual collection — ADR-0013 / ADR-0014 Chronology Delta) |
 | **Does not own** | Order lines, cash drawer sessions, merchant/customer fund custody (forbidden — ADR-0013); FiscalDocument / FiscalCheckoutGate |
-| **Key concepts** | TenderDefinition, Payment, PaymentAllocation, PaymentCollectionEvent; non-custody boundary (ADR-0013 **Accepted**: no wallet/internal balance; tips as allocation only; gift cards / marketplace settlement out of scope); `collected_at` ≠ `received_at` ≠ Settlement `satisfied_at`; **ADR-0038 Accepted** (merge pending): CASH via `ReceiveCash` XOR CARD provider collection; one Payment / one Check |
+| **Key concepts** | TenderDefinition, Payment, PaymentAllocation, PaymentCollectionEvent; non-custody boundary (ADR-0013 **Accepted**: no wallet/internal balance; tips as allocation only; gift cards / marketplace settlement out of scope); `collected_at` ≠ `received_at` ≠ Settlement `satisfied_at`; **ADR-0038 Accepted** (canonical closed on Origin main): CASH via `ReceiveCash` XOR CARD provider collection; one Payment / one Check |
 | **Commands in** | RecordPayment, RecordRefund, AllocatePayment |
 | **Facts out** | PaymentRecorded |
 | **Depends on** | Orders (settlement), Organization |
