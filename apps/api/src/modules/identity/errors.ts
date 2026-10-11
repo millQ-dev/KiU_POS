@@ -22,6 +22,11 @@ export const PERMISSION_CASH_SHIFT_OPEN = 'cash_shift.open' as const;
 export const PERMISSION_CASH_SHIFT_OPEN_APPROVE = 'cash_shift.open.approve' as const;
 /** POS / financial HTTP operations (Orders, Payments, Settlement) — SEC-0 / ADR-0036. */
 export const PERMISSION_POS_OPERATE = 'pos.operate' as const;
+/**
+ * Dedicated ReceiveCash tender acceptance (ADR-0038 A3/A4).
+ * Provisional key binding of Accepted dedicated-permission rule; manager role alone ≠ cash accept.
+ */
+export const PERMISSION_PAYMENTS_RECEIVE_CASH = 'payments.receive_cash' as const;
 /** Procurement Goods Receipt operational HTTP contour — C0.1 (tenant-wide grant). */
 export const PERMISSION_PROCUREMENT_GOODS_RECEIPT_MANAGE =
   'procurement.goods_receipt.manage' as const;

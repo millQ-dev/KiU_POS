@@ -23,6 +23,8 @@ import {
   PosSurfaceResolver,
   PublishedImmutableError,
 } from '../modules/pos/index.js';
+import { FiscalService } from '../modules/fiscalization/index.js';
+import { ReceiveCashService } from '../modules/payments/receive-cash-service.js';
 import { SettlementService } from '../modules/settlement/settlement-service.js';
 import {
   createWiredPaymentsAndSettlement,
@@ -520,20 +522,39 @@ export async function registerPosRoutes(
     },
   );
 
-  // --- S1.1 Settlement + PAY1.1 Payments Core (wired coverage / external-effect) ---
+  // --- S1.1 Settlement + PAY1.1 Payments + FISC1.1 FiscalCheckoutGate ---
+  // Production adapter is unavailable until a provider is configured (fail closed; no fake SATISFIED).
+  const fiscal = new FiscalService(pool);
   const { payments, settlements } = createWiredPaymentsAndSettlement(
     pool,
-    (paymentsSvc) =>
-      new SettlementService(pool, {
+    (paymentsSvc) => {
+      const paymentEffects = paymentsSvc.createExternalEffectProbe();
+      return new SettlementService(pool, {
         coverageReader: paymentsSvc.createCoverageReader(),
-        externalEffects: paymentsSvc.createExternalEffectProbe(),
-      }),
+        externalEffects: {
+          hasQualifyingPaymentExternalEffect: (gid) =>
+            paymentEffects.hasQualifyingPaymentExternalEffect(gid),
+          hasFiscalExternalEffect: (gid) => fiscal.hasFiscalExternalEffect(gid),
+        },
+        fiscalGate: fiscal.createCheckoutGate(),
+      });
+    },
   );
-  await registerPaymentRoutes(app, payments, {
-    identity,
-    allowedOrigins: routeOpts.allowedOrigins,
-    isProduction: routeOpts.isProduction,
+  const receiveCash = new ReceiveCashService(pool, {
+    onCoverageChanged: async (gid) => {
+      await settlements.reconcileSettlementCoverage(gid);
+    },
   });
+  await registerPaymentRoutes(
+    app,
+    payments,
+    {
+      identity,
+      allowedOrigins: routeOpts.allowedOrigins,
+      isProduction: routeOpts.isProduction,
+    },
+    receiveCash,
+  );
   await registerDevPaymentSimulatorRoutes(app, payments);
   const checkout = new CheckoutOrchestrator(pool, orders, settlements);
 
@@ -570,6 +591,39 @@ export async function registerPosRoutes(
       }
     },
   );
+
+  /** FISC1.1 issue — consumes PaymentCollectionEvent + TaxOrderSnapshot; never invents SATISFIED. */
+  app.post('/api/v1/fiscal/documents/issue', async (req, reply) => {
+    try {
+      const body = (req.body ?? {}) as {
+        settlementGroupId?: string;
+        issueIdempotencyKey?: string;
+        fiscalStatus?: unknown;
+        satisfied?: unknown;
+      };
+      if (body.fiscalStatus !== undefined || body.satisfied !== undefined) {
+        return reply.code(400).send({
+          error: 'VALIDATION',
+          message: 'Client cannot set FiscalCheckoutGate / SATISFIED',
+        });
+      }
+      if (!body.settlementGroupId || !body.issueIdempotencyKey) {
+        return reply.code(400).send({
+          error: 'VALIDATION',
+          message: 'settlementGroupId and issueIdempotencyKey required',
+        });
+      }
+      const settlement = await settlements.getSettlement(body.settlementGroupId);
+      await requireOrderPrincipal(req, finAuth, pool, settlement.orderId);
+      return await fiscal.issueForSettlement({
+        settlementGroupId: body.settlementGroupId,
+        issueIdempotencyKey: body.issueIdempotencyKey,
+      });
+    } catch (err) {
+      const mapped = mapError(err);
+      return reply.code(mapped.status).send(mapped.body);
+    }
+  });
 
   app.get<{ Params: { orderId: string } }>(
     '/api/v1/orders/:orderId/settlement',
@@ -681,7 +735,7 @@ export async function registerPosRoutes(
             message: 'completeIdempotencyKey, businessDate, businessOrder required',
           });
         }
-        // Production fiscal gate is UNAVAILABLE (fail closed) until Fiscalization runtime exists.
+        // FiscalCheckoutGate is authoritative (FISC1.1); fail closed unless SATISFIED / NOT_REQUIRED.
         return await checkout.tryAdvanceCheckout({
           settlementGroupId: req.params.settlementGroupId,
           completeIdempotencyKey: body.completeIdempotencyKey,

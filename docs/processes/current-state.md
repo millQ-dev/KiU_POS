@@ -10,13 +10,15 @@
 
 | Item | State |
 | --- | --- |
-| Migration head | **031** `031_tax_domain_foundation.sql` on main (no new migration in this docs block) |
+| Migration head | **032** `032_fisc11_payment_collection_fiscal_core.sql` (FISC1.1 PR; main was 031) |
 | TAX1.1 Tax runtime | **MERGED** Origin PR#74 — canonical closed |
 | ADR-0033 / ADR-0034 / ADR-0037 | **ACCEPTED** |
 | CASHIER-1 Production Front Door | **MERGED** Origin PR#76 |
-| Fiscalization (FISC1.1) | **NOT STARTED** — production `FiscalCheckoutGate` = **UNAVAILABLE** |
+| Fiscalization (FISC1.1) | **IN PR** — Core Runtime (PCE, ReceiveCash, FiscalPolicy/Document/Submission, gate); production adapter default **unavailable** (fail-closed); no G2 |
 | ADR-0014 Fiscalization delta | **ACCEPTED** 2026-10-10 |
-| ADR-0014 / ADR-0013 Chronology Delta | **ACCEPTED** 2026-10-11 (PO ACCEPT WITH DELTAS — D + strict A; docs-only; does **not** start FISC1.1) |
+| ADR-0014 / ADR-0013 Chronology Delta | **ACCEPTED** 2026-10-11 |
+| ADR-0038 C0 CASH+CARD PCE | **ACCEPTED** 2026-10-11 |
+| ADR-0039 Brand/Office bootstrap | **ACCEPTED** 2026-10-11 |
 | Floor/Table (R1.1) | **FROZEN / NOT STARTED** |
 | C0 Cafe Operability | **IN PROGRESS** — slice = **COUNTER-SERVICE / PREPAY CAFE** |
 
@@ -25,7 +27,7 @@
 - Origin PR **#74 MERGED**
 - `tax_required` tri-state: TRUE required / FALSE explicit ABSENT / NULL undecided fail-closed
 - Mixed PricingTaxMode honest; stale Tax snapshot cannot authorize Settlement after reprice
-- Production FiscalCheckoutGate remains **UNAVAILABLE** — **NO FISC1.1 runtime**
+- Production FiscalCheckoutGate is FISC1.1-authoritative (default adapter unavailable ⇒ fail-closed until verified evidence)
 
 ## CASHIER-1 (canonical closed)
 
@@ -47,10 +49,10 @@
 | Item | State |
 | --- | --- |
 | ADR-0014 delta | **ACCEPTED** 2026-10-10 |
-| Payment collection chronology | **ACCEPTED** 2026-10-11 — `PaymentCollectionEvent.collected_at` ← affirmed `provider_occurred_at` (collection only); no `received_at` / `satisfied_at` fallback; FISC1.1 = 1 Payment + 1 fully covered Check; CASH separate later |
-| FISC1.1 | **NOT STARTED** — after this Chronology docs merge + backup + ChatGPT SHA equality + explicit FISC1.1 Level B launch |
-| Production FiscalCheckoutGate | **UNAVAILABLE** (fail-closed) |
-| LEGAL GATE G2 | **REQUIRED** for Vietnam fiscal production go-live (not granted by this Accept) |
+| Payment collection chronology | **ACCEPTED** — CARD `provider_occurred_at` + `COLLECTION_OR_CAPTURE`; CASH `ReceiveCash` server clock; no `received_at` / `satisfied_at` fallback |
+| FISC1.1 Core Runtime | **IN PR** (Level B) — migration 032; CASH+CARD PCE; Fiscal Core; gate wired; A4 OPEN → `docs/processes/review-packets/fisc11-level-c-open-items.md` |
+| Production FiscalCheckoutGate | Authoritative; default **unavailable adapter** ⇒ not SATISFIED without verified evidence |
+| LEGAL GATE G2 | **REQUIRED** for Vietnam fiscal production go-live (not granted by FISC1.1 Core) |
 
 ## Legal baseline (product reference)
 
@@ -61,9 +63,9 @@
 
 ## Next
 
-1. Merge Chronology docs PR → Origin backup → ChatGPT independent SHA equality
-2. Then explicit **FISC1.1** Level B (migration `032`, Fiscal Core, `PaymentCollectionEvent` runtime) — no real provider / no G2
-3. Do **not** start DeviceIdentity / Quick Lock / CashShift Close / CASH tender / R1.1 / multi-payment fiscalization
+1. Independent review + PO final review of FISC1.1 Core Runtime PR — **STOP BEFORE MERGE** until authorized
+2. Close remaining ADR-0038 A4 Level C OPEN items for finished C0 polish
+3. Do **not** select Vietnam production provider / grant G2 / start DeviceIdentity / Quick Lock / CashShift Close / R1.1 / multi-tender fiscalization
 
 Preserve:
 
@@ -72,4 +74,5 @@ Preserve:
 - no CashShift Close
 - no FE Tax math
 - no fiscal success fabrication
+- no LEGAL GATE G2 claim
 - Vietnam restaurant → `NOT_REQUIRED` shortcut forbidden

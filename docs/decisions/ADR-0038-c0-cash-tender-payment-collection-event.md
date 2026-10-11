@@ -1,13 +1,13 @@
 # ADR-0038: C0 Cash + Card PaymentCollectionEvent (FISC1.1 readiness)
 
-- **Status:** **Accepted** (PO **ACCEPT WITH DELTAS** 2026-10-11) — docs/architecture only; **Origin merge pending** explicit PO merge authorization
+- **Status:** **Accepted** (PO **ACCEPT WITH DELTAS** 2026-10-11)
 - **Date:** 2026-10-11
 - **Revised:** 2026-10-11 (PO review deltas A1–A8)
 - **Accepted:** 2026-10-11 (PO ACCEPT WITH DELTAS — ChatGPT remediation deltas approved)
+- **Runtime:** FISC1.1 Core Runtime implements narrow C0 CASH/CARD `PaymentCollectionEvent` + `ReceiveCash` under this ADR (migration `032`). Remaining A4 OPEN items: see `docs/processes/review-packets/fisc11-level-c-open-items.md`. LEGAL GATE G2 still required for Vietnam production go-live.
 - **Decision owners:** Product Owner and System Architect
-- **Related:** ADR-0013 (Accepted + Chronology Delta 2026-10-11); ADR-0014 D13 / D32–D38 (Accepted; D37 superseded by this ADR for narrow C0 path); ADR-0016; ADR-0032; ADR-0036; ADR-0037 LC-08; CASH1.1 / PAY1.1 runtime
-- **Autonomy:** Level **C** (docs / architecture / contracts only)
-- **This PR:** Docs only. Does **not** create migration `032`, Fiscal runtime, or provider adapter. **Do not merge** until PO merge authorization.
+- **Related:** ADR-0013 (Accepted + Chronology Delta 2026-10-11); ADR-0014 D13 / D32–D38 (Accepted; D37 superseded by this ADR for narrow C0 path); ADR-0016; ADR-0032; ADR-0036; ADR-0037 LC-08; CASH1.1 / PAY1.1 / FISC1.1 runtime
+- **Autonomy (this ADR):** Level **C** (docs / architecture / contracts). Runtime implementation under Accepted ADRs is Level **B**.
 
 ---
 
