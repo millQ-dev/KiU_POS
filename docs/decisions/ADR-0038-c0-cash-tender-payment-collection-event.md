@@ -129,15 +129,15 @@ Items below are either **frozen here** or marked **RELEASE-BLOCKING OPEN** — m
 
 | Topic | Status in this Accepted ADR |
 | --- | --- |
-| Cash authorization permission (dedicated ReceiveCash / tender permission) | **RELEASE-BLOCKING OPEN** (exact key name); manager role alone ≠ cash accept |
+| Cash authorization permission (dedicated ReceiveCash / tender permission) | **Frozen (PO 2026-10-11):** key = `payments.receive_cash`; manager role alone ≠ cash accept |
 | Tendered/change validity (tendered ≥ due; non-negative; currency match) | **Frozen direction:** server validates; invalid ⇒ reject |
 | No-change case (tendered == due) | **Frozen:** `change_minor = 0`; allowed |
-| Exact overpay upper bounds / denomination UX | **RELEASE-BLOCKING OPEN** |
-| Tips in same ReceiveCash | **RELEASE-BLOCKING OPEN** (default: tips ≠ fiscal due; ADR-0013 allocation if Accepted later) |
-| Partial cash acceptance (tendered < due) | **RELEASE-BLOCKING OPEN** — default proposal: **reject** for FISC1.1 one-Payment shape |
+| Exact overpay upper bounds / denomination UX | **Frozen (PO 2026-10-11):** no separate C0 business overpay cap; Money technical bounds + amount/currency/change checks remain mandatory. Denomination UX out of Core. |
+| Tips in same ReceiveCash | **Frozen (PO 2026-10-11):** not supported in FISC1.1; future separate tips model |
+| Partial cash acceptance (tendered < due) | **Frozen (PO 2026-10-11):** **reject** for FISC1.1 one-Payment / one-Check shape (does not forbid later split Accept) |
 | Cash refunds / voids / compensating ReceiveCash | **RELEASE-BLOCKING OPEN** — out of FISC1.1 |
 | Concurrency (double ReceiveCash) | **Frozen direction:** serialize / fail closed → single success |
-| Retries / idempotent replay | **Frozen:** semantic idempotency (A3.4) |
+| Retries / idempotent replay | **Frozen:** semantic idempotency (A3.4); same key + different tendered/due ⇒ conflict |
 | Late / offline cash collection | **RELEASE-BLOCKING OPEN** — default proposal: production fail closed without server accept |
 | CompleteOrder without fiscal evidence | **Frozen forbidden** (ADR-0037 / ADR-0014) |
 | Manager ApprovalRequest as cash SUCCESS / fiscal SATISFIED backdoor | **Frozen forbidden** |

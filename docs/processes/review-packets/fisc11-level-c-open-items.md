@@ -1,39 +1,41 @@
-# FISC1.1 Level C decision packet — remaining OPEN items
+# FISC1.1 Level C decision packet — OPEN / CLOSED
 
-**Autonomy:** Level C (decision required before finished C0 polish claims)  
+**Autonomy:** Level C decisions for finished-C0 polish vs Core staging  
 **Date:** 2026-10-11  
-**Context:** FISC1.1 Core Runtime implements Accepted ADR-0014 / ADR-0038 / ADR-0039 under Level B.  
-ReceiveCash and Fiscal Core ship with frozen Accepted direction. The following ADR-0038 A4 items remain **RELEASE-BLOCKING OPEN** and were **not silently invented as product policy**.
+**Updated:** 2026-10-11 — PO independent review CONDITIONAL APPROVE; three product decisions Accepted below  
+**Context:** FISC1.1 Core Runtime (Origin PR #81) under Accepted ADR-0014 / ADR-0038 / ADR-0039.
 
-## Implemented under Accepted frozen direction (Level B)
+---
 
-| Topic | Binding used |
+## PO ACCEPT (2026-10-11) — closed for FISC1.1
+
+| Decision | Binding |
 | --- | --- |
-| Dedicated ReceiveCash permission | Provisional key `payments.receive_cash` (Accepted A3 dedicated permission; exact name was OPEN) |
-| Tendered ≥ due; change = tendered − due | Server-authored; client cannot set lifecycle/fiscal status |
-| tendered == due → change 0 | Allowed |
-| Partial (tendered < due) | Rejected (`PARTIAL_CASH_REJECTED`) |
-| Tips in ReceiveCash | Rejected (`TIPS_NOT_SUPPORTED`) |
-| Client `collected_at` | Forbidden |
-| Concurrency / idempotency | Unique per Check + LE idempotency key |
-| Cash ≠ Fiscal SATISFIED | Gate remains fail-closed until verified fiscal evidence |
-| No Vietnam production provider | Unavailable adapter default; test adapter only in tests |
+| Cash authorization permission key | **`payments.receive_cash`** is the permanent dedicated ReceiveCash permission key (closes ADR-0038 A4 exact-name OPEN) |
+| Overpay upper business bound | **No** separate C0 business overpay cap. Technical Money bounds + server validation of amount / currency / change remain mandatory (tendered ≥ due; change = tendered − due) |
+| Tips inside ReceiveCash | **Not supported** in FISC1.1. Future tips require a separate Accepted model (allocation / fiscal rules) |
+| Partial cash (tendered < due) | **Rejected** for the current one-Payment / one-Check narrow shape. Does **not** forbid future split/multi-tender under a later Accept |
 
-## Level C decisions still required
+Runtime already implements these bindings (`PARTIAL_CASH_REJECTED`, `TIPS_NOT_SUPPORTED`, no artificial overpay cap, permission key `payments.receive_cash`).
 
-1. **Exact permission key name** — confirm or rename `payments.receive_cash`.
-2. **Overpay upper bounds / denomination UX** — no artificial cap enforced; confirm product bounds.
-3. **Tips model** — if tips ever accepted in same command, allocation/fiscal rules (ADR-0013).
-4. **Partial cash / multi-tender** — out of FISC1.1; separate Accept if needed.
-5. **Cash refunds / voids / compensating ReceiveCash** — out of FISC1.1.
-6. **Late / offline cash collection** — production remains fail-closed without server accept.
-7. **Vietnam production FiscalProviderAdapter selection** — OUT; LEGAL GATE G2 still required for go-live.
-8. **LEGAL GATE G2** — not granted by this runtime.
+---
 
-## Ask of Product Owner
+## Still OPEN / out of FISC1.1 Core (not silent product invention)
 
-- Accept provisional `payments.receive_cash` as the binding key name, or specify the final key.
-- Confirm no overpay upper bound for C0, or provide the bound.
-- Confirm tips remain out of ReceiveCash for C0.
+| Topic | Class |
+| --- | --- |
+| Cash refunds / voids / compensating ReceiveCash | Explicitly out of FISC1.1 |
+| Late / offline cash collection | Production fail-closed without server accept (default) |
+| Vietnam production FiscalProviderAdapter selection | Production / G2-blocking — OUT of Core |
+| LEGAL GATE G2 | **Not granted** — production fiscal go-live forbidden until G2 |
+| Split / multi-tender fiscalization | Explicitly blocked in FISC1.1 shape; later Level C |
 
-No merge of this packet into “finished C0 release” language until these are Accepted.
+---
+
+## Ask resolved
+
+- ~~Accept provisional `payments.receive_cash`~~ → **Accepted as permanent key**
+- ~~Confirm no overpay upper bound for C0~~ → **Accepted (no business cap)**
+- ~~Confirm tips remain out of ReceiveCash for C0~~ → **Accepted (out of FISC1.1)**
+
+Finished C0 product release language still requires remaining OPEN items above + G2 for fiscal production — distinct from FISC1.1 Core staging merge authorization after adversarial test close-out.

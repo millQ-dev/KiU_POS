@@ -53,11 +53,10 @@ export type ReceiveCashDeps = {
 };
 
 /**
- * Level B binding of Accepted ADR-0038 ReceiveCash.
- * OPEN items deferred (not silently invented as product policy):
- * - exact overpay upper bounds / denomination UX (A4 OPEN) — no artificial cap;
- * - tips in same command (A4 OPEN) — tip fields rejected;
- * - partial cash (A4 OPEN) — rejected (tendered < due).
+ * Accepted ADR-0038 ReceiveCash (PO 2026-10-11 closed A4 product decisions):
+ * - permission key `payments.receive_cash` (permanent);
+ * - no separate C0 business overpay cap (Money/currency/change validation remains);
+ * - tips rejected in FISC1.1; partial (tendered < due) rejected for one-Payment shape.
  */
 export class ReceiveCashService {
   constructor(
@@ -187,6 +186,16 @@ export class ReceiveCashService {
           throw new DomainValidationError(
             'IDEMPOTENCY_CONFLICT',
             'receiveIdempotencyKey already used for a different Check',
+          );
+        }
+        // Same key + different tendered (or due/change) is not a safe replay.
+        if (
+          idem.rows[0].amount_tendered_minor !== input.amountTenderedMinor ||
+          idem.rows[0].amount_due_minor !== check.customer_payable_minor
+        ) {
+          throw new DomainValidationError(
+            'IDEMPOTENCY_CONFLICT',
+            'receiveIdempotencyKey reused with different tendered/due semantics',
           );
         }
         const payment = await loadPayment(client, idem.rows[0].payment_id);
