@@ -648,6 +648,8 @@ CASH requires a **separate** Accepted confirmed cash-receipt / drawer collection
 - CASH tender fiscalization remains **out of FISC1.1**;
 - do not pretend card/provider chronology applies to cash.
 
+**Superseded for narrow C0 path (ADR-0038 Accepted 2026-10-11 — PO ACCEPT WITH DELTAS; Origin merge pending):** [ADR-0038](ADR-0038-c0-cash-tender-payment-collection-event.md) binds mandatory C0 CASH + CARD, frozen tender/change Money, server-authored `ReceiveCash`, and cash `PaymentCollectionEvent` for the one-Payment XOR one-Check shape. FISC Core staging ≠ finished C0 release. Historical D37 text above is retained for honesty; **ADR-0038 is the binding SoT** for that narrow path after merge.
+
 ### D38. Relationship to D13 / ADR-0013 / FISC1.1 launch
 
 - D13 product trigger unchanged: PAYMENT COLLECTION EVENT.
@@ -658,7 +660,8 @@ CASH requires a **separate** Accepted confirmed cash-receipt / drawer collection
 
 - Historical financial fact for C0 invoice time = Payments `PaymentCollectionEvent.collected_at` from affirmed collection evidence.
 - KiU learning lag (`received_at`) and Settlement satisfaction lag (`satisfied_at`) stay observable but non-authoritative for fiscal business time.
-- Split / multi-tender / CASH fiscalization remain blocked until further Accepted Level C.
+- Split / multi-tender fiscalization remain blocked until further Accepted Level C.
+- Narrow C0 CASH fiscalization path is bound by **ADR-0038** (Accepted 2026-10-11 — PO ACCEPT WITH DELTAS; Origin merge pending): `ReceiveCash` + cash `PaymentCollectionEvent` for one Payment XOR one Check. Provider time remains non-universal for CASH (D37 historical text retained).
 
 ### Accepted Chronology Delta alternatives considered
 

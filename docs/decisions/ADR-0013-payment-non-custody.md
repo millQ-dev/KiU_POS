@@ -38,9 +38,9 @@ Payments owns immutable **`PaymentCollectionEvent`**:
 
 **Missing trustworthy collection time:** no `PaymentCollectionEvent` → Fiscalization fail closed (ADR-0014 D35).
 
-**CASH:** provider collection chronology is **not** universal. CASH needs a separate Accepted cash-receipt / drawer collection event before it may drive `collected_at`. Out of FISC1.1 until then.
+**CASH:** provider collection chronology is **not** universal. Cash `collected_at` is bound by **ADR-0038** (Accepted 2026-10-11 — PO ACCEPT WITH DELTAS; Origin merge pending): authenticated server-authored `ReceiveCash` + immutable cash collection evidence → `PaymentCollectionEvent`. Opening float remains ≠ Payment / Revenue / Tax / Fiscal.
 
-**FISC1.1 shape (Payments side):** support creating at most one `PaymentCollectionEvent` path for C0 electronic tender where exactly one Payment fully covers exactly one SettlementCheck. Multi-payment / split → explicit blocked (no fabricated collection event).
+**FISC1.1 shape (Payments side):** at most one `PaymentCollectionEvent` for C0 where exactly one qualifying Payment (CASH **XOR** CARD) fully covers exactly one SettlementCheck. Multi-payment / split → explicit blocked (no fabricated collection event).
 
 This Chronology Delta is **docs only**. It does not create runtime tables in this PR.
 

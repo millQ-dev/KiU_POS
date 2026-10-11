@@ -138,7 +138,7 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 | --- | --- |
 | **Owns** | Payment/refund transactions; TenderDefinition registry; PaymentAllocation; immutable **PaymentCollectionEvent** (authoritative `collected_at` for actual collection — ADR-0013 / ADR-0014 Chronology Delta) |
 | **Does not own** | Order lines, cash drawer sessions, merchant/customer fund custody (forbidden — ADR-0013); FiscalDocument / FiscalCheckoutGate |
-| **Key concepts** | TenderDefinition, Payment, PaymentAllocation, PaymentCollectionEvent; non-custody boundary (ADR-0013 **Accepted**: no wallet/internal balance; tips as allocation only; gift cards / marketplace settlement out of scope); `collected_at` ≠ `received_at` ≠ Settlement `satisfied_at`; CASH collection event separate / not started |
+| **Key concepts** | TenderDefinition, Payment, PaymentAllocation, PaymentCollectionEvent; non-custody boundary (ADR-0013 **Accepted**: no wallet/internal balance; tips as allocation only; gift cards / marketplace settlement out of scope); `collected_at` ≠ `received_at` ≠ Settlement `satisfied_at`; **ADR-0038 Accepted** (merge pending): CASH via `ReceiveCash` XOR CARD provider collection; one Payment / one Check |
 | **Commands in** | RecordPayment, RecordRefund, AllocatePayment |
 | **Facts out** | PaymentRecorded |
 | **Depends on** | Orders (settlement), Organization |
