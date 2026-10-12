@@ -14,6 +14,12 @@ import {
   type ReconciliationOrigin,
   type VerificationStatus,
 } from './payment-lifecycle.js';
+import { insertCardPaymentCollectionEvent } from './payment-collection-event.js';
+
+export type CollectionTimeProvenance =
+  | 'COLLECTION_OR_CAPTURE'
+  | 'AUTHORIZATION'
+  | 'UNKNOWN';
 
 type Queryable = Pool | PoolClient;
 
@@ -82,6 +88,8 @@ export type PaymentProviderOutcomeProjection = {
   evidenceAmountMinor: string | null;
   evidenceCurrencyCode: string | null;
   receivedAt: string;
+  providerOccurredAt: string | null;
+  collectionTimeProvenance: CollectionTimeProvenance | null;
 };
 
 export type PaymentAllocationProjection = {
@@ -456,6 +464,11 @@ export class PaymentsService {
     reconciliationOrigin: ReconciliationOrigin;
     merchantRequestIdentity?: string | null;
     providerOccurredAt?: string | null;
+    /**
+     * Adapter must affirm collection vs authorization (ADR-0014 D33 / ADR-0038 A5).
+     * Only COLLECTION_OR_CAPTURE with provider_occurred_at may mint PaymentCollectionEvent.
+     */
+    collectionTimeProvenance?: CollectionTimeProvenance | null;
     evidenceAmountMinor?: string | null;
     evidenceCurrencyCode?: string | null;
     providerTransactionReference?: string | null;
@@ -534,14 +547,26 @@ export class PaymentsService {
         reconciliationState = 'QUARANTINED';
       }
 
+      const provenance: CollectionTimeProvenance | null =
+        input.collectionTimeProvenance ?? null;
+      if (
+        provenance != null &&
+        provenance !== 'COLLECTION_OR_CAPTURE' &&
+        provenance !== 'AUTHORIZATION' &&
+        provenance !== 'UNKNOWN'
+      ) {
+        throw new DomainValidationError('VALIDATION', 'Invalid collectionTimeProvenance');
+      }
+
       const outcomeId = randomUUID();
       await client.query(
         `INSERT INTO payment_provider_outcome (
            payment_provider_outcome_id, payment_id, tenant_id, legal_entity_id,
            provider_event_identity, merchant_request_identity, provider_occurred_at,
+           collection_time_provenance,
            raw_provider_status, normalized_outcome, evidence_amount_minor, evidence_currency_code,
            verification_status, reconciliation_origin, diagnostic_metadata
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
         [
           outcomeId,
           pay.payment_id,
@@ -550,6 +575,7 @@ export class PaymentsService {
           input.providerEventIdentity,
           input.merchantRequestIdentity ?? pay.merchant_payment_reference,
           input.providerOccurredAt ?? null,
+          provenance,
           input.rawProviderStatus,
           normalized,
           input.evidenceAmountMinor ?? null,
@@ -600,6 +626,8 @@ export class PaymentsService {
         input.allocateToCheckId &&
         input.allocationIdempotencyKey
       ) {
+        // allocatePaymentToCheckTx mints CARD PaymentCollectionEvent when
+        // COLLECTION_OR_CAPTURE + provider_occurred_at evidence exists.
         allocation = await this.allocatePaymentToCheckTx(client, {
           paymentId: payment.paymentId,
           settlementCheckId: input.allocateToCheckId,
@@ -607,6 +635,46 @@ export class PaymentsService {
           allocationIdempotencyKey: input.allocationIdempotencyKey,
         });
         touchedGroups.add(allocation.settlementGroupId);
+      } else if (
+        isQualifyingSuccess(payment.lifecycleState) &&
+        verification === 'VERIFIED' &&
+        normalized === 'SUCCEEDED' &&
+        provenance === 'COLLECTION_OR_CAPTURE' &&
+        input.providerOccurredAt
+      ) {
+        // Late capture after prior allocate: mint PCE if allocation already exists.
+        const priorAlloc = await client.query<{
+          settlement_check_id: string;
+          settlement_group_id: string;
+        }>(
+          `SELECT settlement_check_id, settlement_group_id FROM payment_allocation
+           WHERE payment_id = $1 AND active = TRUE
+           ORDER BY created_at ASC LIMIT 1`,
+          [payment.paymentId],
+        );
+        const existingPce = await client.query(
+          `SELECT 1 FROM payment_collection_event WHERE payment_id = $1`,
+          [payment.paymentId],
+        );
+        if (priorAlloc.rows[0] && !existingPce.rows[0]) {
+          const tender = await client.query<{ instrument_family: string | null }>(
+            `SELECT instrument_family FROM tender_definition WHERE tender_definition_id = $1`,
+            [payment.tenderDefinitionId],
+          );
+          await insertCardPaymentCollectionEvent(client, {
+            paymentId: payment.paymentId,
+            tenantId: payment.tenantId,
+            legalEntityId: payment.legalEntityId,
+            settlementCheckId: priorAlloc.rows[0].settlement_check_id,
+            settlementGroupId: priorAlloc.rows[0].settlement_group_id,
+            instrumentFamily: tender.rows[0]?.instrument_family ?? 'CARD',
+            collectedAt: input.providerOccurredAt,
+            paymentProviderOutcomeId: outcomeId,
+            amountCollectedMinor: payment.requestedAmountMinor,
+            currencyCode: payment.currencyCode,
+            minorUnitExponent: payment.minorUnitExponent,
+          });
+        }
       }
 
       const outcome = await this.loadOutcome(client, outcomeId);
@@ -845,6 +913,50 @@ export class PaymentsService {
       ],
     );
     const row = ins.rows[0]!;
+
+    // Late-allocate path: mint CARD PCE if collection evidence already recorded.
+    const existingPce = await client.query(
+      `SELECT 1 FROM payment_collection_event WHERE payment_id = $1`,
+      [pay.payment_id],
+    );
+    if (!existingPce.rows[0]) {
+      const coll = await client.query<{
+        payment_provider_outcome_id: string;
+        provider_occurred_at: Date;
+        collection_time_provenance: string | null;
+      }>(
+        `SELECT payment_provider_outcome_id, provider_occurred_at, collection_time_provenance
+         FROM payment_provider_outcome
+         WHERE payment_id = $1
+           AND verification_status = 'VERIFIED'
+           AND normalized_outcome = 'SUCCEEDED'
+           AND collection_time_provenance = 'COLLECTION_OR_CAPTURE'
+           AND provider_occurred_at IS NOT NULL
+         ORDER BY received_at ASC
+         LIMIT 1`,
+        [pay.payment_id],
+      );
+      if (coll.rows[0]) {
+        const tender = await client.query<{ instrument_family: string | null }>(
+          `SELECT instrument_family FROM tender_definition WHERE tender_definition_id = $1`,
+          [pay.tender_definition_id],
+        );
+        await insertCardPaymentCollectionEvent(client, {
+          paymentId: pay.payment_id,
+          tenantId: pay.tenant_id,
+          legalEntityId: pay.legal_entity_id,
+          settlementCheckId: row.settlement_check_id,
+          settlementGroupId: row.settlement_group_id,
+          instrumentFamily: tender.rows[0]?.instrument_family ?? 'CARD',
+          collectedAt: coll.rows[0].provider_occurred_at.toISOString(),
+          paymentProviderOutcomeId: coll.rows[0].payment_provider_outcome_id,
+          amountCollectedMinor: pay.requested_amount_minor,
+          currencyCode: pay.currency_code,
+          minorUnitExponent: pay.minor_unit_exponent,
+        });
+      }
+    }
+
     return {
       paymentAllocationId: row.payment_allocation_id,
       paymentId: row.payment_id,
@@ -871,6 +983,8 @@ export class PaymentsService {
       evidence_amount_minor: string | null;
       evidence_currency_code: string | null;
       received_at: Date;
+      provider_occurred_at: Date | null;
+      collection_time_provenance: CollectionTimeProvenance | null;
     }>(`SELECT * FROM payment_provider_outcome WHERE payment_provider_outcome_id = $1`, [
       outcomeId,
     ]);
@@ -886,6 +1000,10 @@ export class PaymentsService {
       evidenceAmountMinor: r.evidence_amount_minor,
       evidenceCurrencyCode: r.evidence_currency_code,
       receivedAt: r.received_at.toISOString(),
+      providerOccurredAt: r.provider_occurred_at
+        ? r.provider_occurred_at.toISOString()
+        : null,
+      collectionTimeProvenance: r.collection_time_provenance,
     };
   }
 

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import {
   IdentityDomainError,
+  PERMISSION_PAYMENTS_RECEIVE_CASH,
   PERMISSION_POS_OPERATE,
   rejectTenantAuthorityInjection,
   requireFinancialPrincipal,
@@ -10,6 +11,7 @@ import {
 } from '../modules/identity/index.js';
 import { DomainValidationError } from '../modules/orders/errors.js';
 import { PaymentsService } from '../modules/payments/payments-service.js';
+import { ReceiveCashService } from '../modules/payments/receive-cash-service.js';
 import type { NormalizedProviderOutcome } from '../modules/payments/payment-lifecycle.js';
 import type { SettlementService } from '../modules/settlement/settlement-service.js';
 
@@ -82,8 +84,13 @@ export async function registerPaymentRoutes(
   app: FastifyInstance,
   payments: PaymentsService,
   auth: PaymentRouteAuth,
+  receiveCash?: ReceiveCashService,
 ): Promise<void> {
   const opts = authOpts(auth);
+  const receiveCashOpts: FinancialAuthOptions = {
+    ...opts,
+    permissionKey: PERMISSION_PAYMENTS_RECEIVE_CASH,
+  };
 
   app.post('/api/v1/payments/tenders', async (req, reply) => {
     try {
@@ -321,6 +328,80 @@ export async function registerPaymentRoutes(
       return reply.code(mapped.status).send(mapped.body);
     }
   });
+
+  /** Authenticated ReceiveCash (ADR-0038). Requires payments.receive_cash — not fiscal SATISFIED. */
+  app.post('/api/v1/payments/receive-cash', async (req, reply) => {
+    try {
+      if (!receiveCash) {
+        return reply.code(503).send({
+          error: 'UNAVAILABLE',
+          message: 'ReceiveCash service not wired',
+        });
+      }
+      const body = (req.body ?? {}) as {
+        settlementCheckId?: string;
+        tenderDefinitionId?: string;
+        terminalId?: string;
+        receiveIdempotencyKey?: string;
+        amountTenderedMinor?: string;
+        humanConfirmation?: boolean;
+        tipAmountMinor?: string | null;
+        collectedAt?: string | null;
+        tenantId?: string;
+        lifecycleState?: unknown;
+        verificationStatus?: unknown;
+        fiscalStatus?: unknown;
+      };
+      if (
+        body.lifecycleState !== undefined ||
+        body.verificationStatus !== undefined ||
+        body.fiscalStatus !== undefined
+      ) {
+        return reply.code(400).send({
+          error: 'VALIDATION',
+          message: 'Client cannot set Payment lifecycle, verification, or fiscal status',
+        });
+      }
+      let outletId: string | null = null;
+      if (body.settlementCheckId) {
+        const scope = await payments.resolveOutletForSettlementCheck(body.settlementCheckId);
+        outletId = scope?.outletId ?? null;
+      }
+      const principal = await requireFinancialPrincipal(req, receiveCashOpts, {
+        outletId,
+        terminalId: body.terminalId ?? null,
+      });
+      rejectTenantAuthorityInjection(principal, body.tenantId);
+      if (
+        !body.settlementCheckId ||
+        !body.tenderDefinitionId ||
+        !body.terminalId ||
+        !body.receiveIdempotencyKey ||
+        body.amountTenderedMinor == null ||
+        body.humanConfirmation == null
+      ) {
+        return reply.code(400).send({
+          error: 'VALIDATION',
+          message:
+            'settlementCheckId, tenderDefinitionId, terminalId, receiveIdempotencyKey, amountTenderedMinor, humanConfirmation required',
+        });
+      }
+      return await receiveCash.receiveCash({
+        principal,
+        terminalId: body.terminalId,
+        settlementCheckId: body.settlementCheckId,
+        tenderDefinitionId: body.tenderDefinitionId,
+        receiveIdempotencyKey: body.receiveIdempotencyKey,
+        amountTenderedMinor: body.amountTenderedMinor,
+        humanConfirmation: body.humanConfirmation,
+        tipAmountMinor: body.tipAmountMinor,
+        collectedAt: body.collectedAt,
+      });
+    } catch (err) {
+      const mapped = mapPaymentError(err);
+      return reply.code(mapped.status).send(mapped.body);
+    }
+  });
 }
 
 /**
@@ -421,6 +502,14 @@ export async function registerDevPaymentSimulatorRoutes(
       const origin =
         scenario === 'INQUIRY_SUCCESS' ? ('INQUIRY' as const) : ('DEV_SIMULATOR' as const);
 
+      const isCollectionSuccess =
+        (scenario === 'SUCCESS' ||
+          scenario === 'LATE_SUCCESS' ||
+          scenario === 'DUPLICATE_SUCCESS_EVENT' ||
+          scenario === 'INQUIRY_SUCCESS') &&
+        verificationStatus === 'VERIFIED' &&
+        normalizedOutcome === 'SUCCEEDED';
+
       const result = await payments.recordVerifiedProviderOutcome({
         paymentId: body.paymentId,
         providerEventIdentity: eventId,
@@ -432,6 +521,13 @@ export async function registerDevPaymentSimulatorRoutes(
         evidenceCurrencyCode: evidenceCurrency,
         providerTransactionReference:
           body.providerTransactionReference ?? `dev_tx_${body.paymentId.slice(0, 8)}`,
+        // DEV only: affirm collection semantics when simulating SUCCESS (never uses received_at).
+        ...(isCollectionSuccess
+          ? {
+              providerOccurredAt: new Date().toISOString(),
+              collectionTimeProvenance: 'COLLECTION_OR_CAPTURE' as const,
+            }
+          : {}),
         ...(body.allocateToCheckId !== undefined
           ? { allocateToCheckId: body.allocateToCheckId }
           : {}),

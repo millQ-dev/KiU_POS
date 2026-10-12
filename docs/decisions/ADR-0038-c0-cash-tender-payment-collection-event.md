@@ -1,13 +1,13 @@
 # ADR-0038: C0 Cash + Card PaymentCollectionEvent (FISC1.1 readiness)
 
-- **Status:** **Accepted** (PO **ACCEPT WITH DELTAS** 2026-10-11) — docs/architecture only; **Origin merge pending** explicit PO merge authorization
+- **Status:** **Accepted** (PO **ACCEPT WITH DELTAS** 2026-10-11)
 - **Date:** 2026-10-11
 - **Revised:** 2026-10-11 (PO review deltas A1–A8)
 - **Accepted:** 2026-10-11 (PO ACCEPT WITH DELTAS — ChatGPT remediation deltas approved)
+- **Runtime:** FISC1.1 Core Runtime implements narrow C0 CASH/CARD `PaymentCollectionEvent` + `ReceiveCash` under this ADR (migration `032`). Remaining A4 OPEN items: see `docs/processes/review-packets/fisc11-level-c-open-items.md`. LEGAL GATE G2 still required for Vietnam production go-live.
 - **Decision owners:** Product Owner and System Architect
-- **Related:** ADR-0013 (Accepted + Chronology Delta 2026-10-11); ADR-0014 D13 / D32–D38 (Accepted; D37 superseded by this ADR for narrow C0 path); ADR-0016; ADR-0032; ADR-0036; ADR-0037 LC-08; CASH1.1 / PAY1.1 runtime
-- **Autonomy:** Level **C** (docs / architecture / contracts only)
-- **This PR:** Docs only. Does **not** create migration `032`, Fiscal runtime, or provider adapter. **Do not merge** until PO merge authorization.
+- **Related:** ADR-0013 (Accepted + Chronology Delta 2026-10-11); ADR-0014 D13 / D32–D38 (Accepted; D37 superseded by this ADR for narrow C0 path); ADR-0016; ADR-0032; ADR-0036; ADR-0037 LC-08; CASH1.1 / PAY1.1 / FISC1.1 runtime
+- **Autonomy (this ADR):** Level **C** (docs / architecture / contracts). Runtime implementation under Accepted ADRs is Level **B**.
 
 ---
 
@@ -129,15 +129,15 @@ Items below are either **frozen here** or marked **RELEASE-BLOCKING OPEN** — m
 
 | Topic | Status in this Accepted ADR |
 | --- | --- |
-| Cash authorization permission (dedicated ReceiveCash / tender permission) | **RELEASE-BLOCKING OPEN** (exact key name); manager role alone ≠ cash accept |
+| Cash authorization permission (dedicated ReceiveCash / tender permission) | **Frozen (PO 2026-10-11):** key = `payments.receive_cash`; manager role alone ≠ cash accept |
 | Tendered/change validity (tendered ≥ due; non-negative; currency match) | **Frozen direction:** server validates; invalid ⇒ reject |
 | No-change case (tendered == due) | **Frozen:** `change_minor = 0`; allowed |
-| Exact overpay upper bounds / denomination UX | **RELEASE-BLOCKING OPEN** |
-| Tips in same ReceiveCash | **RELEASE-BLOCKING OPEN** (default: tips ≠ fiscal due; ADR-0013 allocation if Accepted later) |
-| Partial cash acceptance (tendered < due) | **RELEASE-BLOCKING OPEN** — default proposal: **reject** for FISC1.1 one-Payment shape |
+| Exact overpay upper bounds / denomination UX | **Frozen (PO 2026-10-11):** no separate C0 business overpay cap; Money technical bounds + amount/currency/change checks remain mandatory. Denomination UX out of Core. |
+| Tips in same ReceiveCash | **Frozen (PO 2026-10-11):** not supported in FISC1.1; future separate tips model |
+| Partial cash acceptance (tendered < due) | **Frozen (PO 2026-10-11):** **reject** for FISC1.1 one-Payment / one-Check shape (does not forbid later split Accept) |
 | Cash refunds / voids / compensating ReceiveCash | **RELEASE-BLOCKING OPEN** — out of FISC1.1 |
 | Concurrency (double ReceiveCash) | **Frozen direction:** serialize / fail closed → single success |
-| Retries / idempotent replay | **Frozen:** semantic idempotency (A3.4) |
+| Retries / idempotent replay | **Frozen:** semantic idempotency (A3.4); same key + different tendered/due ⇒ conflict |
 | Late / offline cash collection | **RELEASE-BLOCKING OPEN** — default proposal: production fail closed without server accept |
 | CompleteOrder without fiscal evidence | **Frozen forbidden** (ADR-0037 / ADR-0014) |
 | Manager ApprovalRequest as cash SUCCESS / fiscal SATISFIED backdoor | **Frozen forbidden** |
