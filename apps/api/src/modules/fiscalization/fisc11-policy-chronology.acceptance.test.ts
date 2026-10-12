@@ -534,4 +534,66 @@ describe('FISC1.1 FiscalPolicy chronology + document freeze', () => {
     expect(frozen.rows[0]!.fiscal_policy_version_id).toBe(v1.fiscalPolicyVersionId);
     expect(frozen.rows[0]!.status).toBe('SATISFIED');
   });
+
+  it('late failing issue attempt must not regress SATISFIED after concurrent reconcile', async () => {
+    const { v1 } = await seedV1V2Policy();
+    const check = await openSettledCheck('47000');
+    await cardCollectAt(check.settlementCheckId, '47000', T_COLLECT);
+
+    let releaseIssue!: () => void;
+    const hold = new Promise<void>((resolve) => {
+      releaseIssue = resolve;
+    });
+    const slowFailAdapter = {
+      adapterIdentity: 'millq.fiscal.test-slow-fail',
+      issue: async () => {
+        await hold;
+        return {
+          attemptStatus: 'FAILED' as const,
+          evidenceClass: 'TRANSPORT_FAILURE' as const,
+          verificationStatus: 'UNVERIFIED' as const,
+          rawProviderStatus: 'LATE_FAIL',
+        };
+      },
+      queryStatus: unavailableFiscalProviderAdapter().queryStatus,
+      retrieveEvidence: unavailableFiscalProviderAdapter().retrieveEvidence,
+      idempotentRetry: unavailableFiscalProviderAdapter().idempotentRetry,
+      reconcileTimeoutAfterSuccess:
+        unavailableFiscalProviderAdapter().reconcileTimeoutAfterSuccess,
+    };
+
+    const issuing = new FiscalService(pool, { adapter: slowFailAdapter });
+    const pendingIssue = issuing.issueForSettlement({
+      settlementGroupId: check.settlementGroupId,
+      issueIdempotencyKey: `late-fail-${check.settlementGroupId}`,
+    });
+
+    let docId: string | null = null;
+    for (let i = 0; i < 50 && !docId; i++) {
+      const row = await pool.query<{ fiscal_document_id: string }>(
+        `SELECT fiscal_document_id FROM fiscal_document WHERE settlement_group_id = $1`,
+        [check.settlementGroupId],
+      );
+      if (row.rows[0]) docId = row.rows[0].fiscal_document_id;
+      else await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(docId).toBeTruthy();
+
+    const reconciling = new FiscalService(pool, {
+      adapter: testSatisfyingFiscalProviderAdapter('AUTHORITY_ACCEPTED'),
+    });
+    const satisfied = await reconciling.reconcileDocument(docId!);
+    expect(satisfied.status).toBe('SATISFIED');
+    expect(satisfied.fiscalPolicyVersionId).toBe(v1.fiscalPolicyVersionId);
+
+    releaseIssue();
+    await pendingIssue;
+
+    const after = await pool.query<{ status: string; fiscal_policy_version_id: string }>(
+      `SELECT status, fiscal_policy_version_id FROM fiscal_document WHERE fiscal_document_id = $1`,
+      [docId],
+    );
+    expect(after.rows[0]!.status).toBe('SATISFIED');
+    expect(after.rows[0]!.fiscal_policy_version_id).toBe(v1.fiscalPolicyVersionId);
+  });
 });

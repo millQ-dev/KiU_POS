@@ -613,6 +613,11 @@ export class FiscalService {
       if (!sub.rows[0]) {
         throw new DomainValidationError('VALIDATION', 'No FiscalSubmission for document');
       }
+      const docLock = await client.query<{ status: string }>(
+        `SELECT status FROM fiscal_document WHERE fiscal_document_id = $1 FOR UPDATE`,
+        [fiscalDocumentId],
+      );
+      const liveStatus = docLock.rows[0]?.status;
       const attemptN = await nextAttemptNumber(client, sub.rows[0].fiscal_submission_id);
       const attemptId = randomUUID();
       const meta = { rows: [{ tenant_id: drow.tenant_id, legal_entity_id: drow.legal_entity_id }] };
@@ -654,6 +659,11 @@ export class FiscalService {
           JSON.stringify(result.diagnosticMetadata ?? {}),
         ],
       );
+      // Never regress SATISFIED once reached (append-only evidence still recorded above).
+      if (liveStatus === 'SATISFIED') {
+        await client.query('COMMIT');
+        return (await this.getDocument(fiscalDocumentId))!;
+      }
       if (
         evidenceSatisfiesProfile(policy.satisfactionEvidenceProfile, {
           evidenceClass: result.evidenceClass,
@@ -719,12 +729,17 @@ export class FiscalService {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      // Durable uniqueness: allocate next attempt_number under submission lock (fail closed on race).
+      // Durable uniqueness + monotonic document status under locks (fail closed on race).
       await client.query(
         `SELECT fiscal_submission_id FROM fiscal_submission
          WHERE fiscal_submission_id = $1 FOR UPDATE`,
         [input.fiscalSubmissionId],
       );
+      const docLock = await client.query<{ status: string }>(
+        `SELECT status FROM fiscal_document WHERE fiscal_document_id = $1 FOR UPDATE`,
+        [input.fiscalDocumentId],
+      );
+      const currentStatus = docLock.rows[0]?.status;
       const attemptN = await nextAttemptNumber(client, input.fiscalSubmissionId);
       const attemptId = randomUUID();
       await client.query(
@@ -763,6 +778,12 @@ export class FiscalService {
         ],
       );
 
+      // Never regress SATISFIED: late adapter returns after concurrent reconcile must not clobber.
+      if (currentStatus === 'SATISFIED') {
+        await client.query('COMMIT');
+        return;
+      }
+
       const satisfies = evidenceSatisfiesProfile(input.policy.satisfactionEvidenceProfile, {
         evidenceClass: result.evidenceClass,
         verificationStatus: result.verificationStatus,
@@ -777,35 +798,40 @@ export class FiscalService {
           `UPDATE fiscal_submission SET status = 'COMPLETED' WHERE fiscal_submission_id = $1`,
           [input.fiscalSubmissionId],
         );
-      } else if (result.attemptStatus === 'TIMEOUT') {
-        await client.query(
-          `UPDATE fiscal_document SET status = 'ISSUED_PENDING_EVIDENCE'
-           WHERE fiscal_document_id = $1`,
-          [input.fiscalDocumentId],
-        );
-        await client.query(
-          `UPDATE fiscal_submission SET status = 'NEEDS_RECONCILE'
-           WHERE fiscal_submission_id = $1`,
-          [input.fiscalSubmissionId],
-        );
-      } else if (result.attemptStatus === 'ADAPTER_UNAVAILABLE') {
-        await client.query(
-          `UPDATE fiscal_document SET status = 'PENDING_ISSUE' WHERE fiscal_document_id = $1`,
-          [input.fiscalDocumentId],
-        );
-        await client.query(
-          `UPDATE fiscal_submission SET status = 'FAILED' WHERE fiscal_submission_id = $1`,
-          [input.fiscalSubmissionId],
-        );
-      } else {
-        await client.query(
-          `UPDATE fiscal_document SET status = 'FAILED' WHERE fiscal_document_id = $1`,
-          [input.fiscalDocumentId],
-        );
-        await client.query(
-          `UPDATE fiscal_submission SET status = 'FAILED' WHERE fiscal_submission_id = $1`,
-          [input.fiscalSubmissionId],
-        );
+      } else if (
+        currentStatus === 'PENDING_ISSUE' ||
+        currentStatus === 'ISSUED_PENDING_EVIDENCE'
+      ) {
+        if (result.attemptStatus === 'TIMEOUT') {
+          await client.query(
+            `UPDATE fiscal_document SET status = 'ISSUED_PENDING_EVIDENCE'
+             WHERE fiscal_document_id = $1`,
+            [input.fiscalDocumentId],
+          );
+          await client.query(
+            `UPDATE fiscal_submission SET status = 'NEEDS_RECONCILE'
+             WHERE fiscal_submission_id = $1`,
+            [input.fiscalSubmissionId],
+          );
+        } else if (result.attemptStatus === 'ADAPTER_UNAVAILABLE') {
+          await client.query(
+            `UPDATE fiscal_document SET status = 'PENDING_ISSUE' WHERE fiscal_document_id = $1`,
+            [input.fiscalDocumentId],
+          );
+          await client.query(
+            `UPDATE fiscal_submission SET status = 'FAILED' WHERE fiscal_submission_id = $1`,
+            [input.fiscalSubmissionId],
+          );
+        } else {
+          await client.query(
+            `UPDATE fiscal_document SET status = 'FAILED' WHERE fiscal_document_id = $1`,
+            [input.fiscalDocumentId],
+          );
+          await client.query(
+            `UPDATE fiscal_submission SET status = 'FAILED' WHERE fiscal_submission_id = $1`,
+            [input.fiscalSubmissionId],
+          );
+        }
       }
       await client.query('COMMIT');
     } catch (e) {
