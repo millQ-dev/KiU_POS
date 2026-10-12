@@ -112,25 +112,13 @@ export class ReceiveCashService {
     try {
       await client.query('BEGIN');
 
-      // Semantic idempotency (LE + key)
-      const prior = await client.query<{
-        payment_id: string;
-        payment_cash_collection_evidence_id: string;
-      }>(
-        `SELECT e.payment_id, e.payment_cash_collection_evidence_id
-         FROM payment_cash_collection_evidence e
-         WHERE e.legal_entity_id = (
-           SELECT sg.legal_entity_id
-           FROM settlement_check sc
-           INNER JOIN settlement_group sg ON sg.settlement_group_id = sc.settlement_group_id
-           WHERE sc.settlement_check_id = $1
-         )
-         AND e.receive_idempotency_key = $2
-         FOR UPDATE`,
-        [input.settlementCheckId, input.receiveIdempotencyKey],
-      );
-      // If check missing, LE subquery null — handle below via check lock
-
+      /**
+       * Verified lock order (Bugbot deadlock remediation):
+       * 1) settlement_group + settlement_check
+       * 2) payment_cash_collection_evidence by (LE, idempotency key)
+       * 3) payment_cash_collection_evidence by settlement_check_id
+       * Never lock evidence before the Check — prevents deadlock vs distinct-key concurrent ReceiveCash.
+       */
       const checkRes = await client.query<{
         settlement_check_id: string;
         settlement_group_id: string;
@@ -221,7 +209,6 @@ export class ReceiveCashService {
           duplicate: true,
         };
       }
-      void prior;
 
       // Concurrent distinct keys → unique on check fails closed
       const existingCash = await client.query(

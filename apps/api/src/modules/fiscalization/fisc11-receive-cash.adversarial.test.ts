@@ -315,6 +315,8 @@ describe('FISC1.1 ReceiveCash adversarial (PO close-out)', () => {
   });
 
   it('concurrent ReceiveCash with distinct keys → single Payment (fail closed)', async () => {
+    // Lock-order regression (Bugbot thread 2): Check→evidence-by-key→evidence-by-check.
+    // Concurrent distinct keys must serialize on the Check lock — no deadlock, one winner.
     const principal = await openShiftForCashier();
     const check = await openCollectingCheck('65000');
     const results = await Promise.allSettled(
@@ -331,7 +333,15 @@ describe('FISC1.1 ReceiveCash adversarial (PO close-out)', () => {
       ),
     );
     const ok = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
     expect(ok.length).toBe(1);
+    expect(rejected.length).toBe(7);
+    // Fail-closed losers: domain CASH_COLLECTION_ALREADY_EXISTS (Check lock path).
+    for (const r of rejected) {
+      if (r.status !== 'rejected') continue;
+      const code = (r.reason as { code?: string })?.code;
+      expect(code === 'CASH_COLLECTION_ALREADY_EXISTS' || code === undefined).toBe(true);
+    }
     const payCount = await pool.query<{ c: number }>(
       `SELECT count(*)::int AS c FROM payment_allocation
        WHERE settlement_check_id = $1 AND active = TRUE`,

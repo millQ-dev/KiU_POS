@@ -41,6 +41,8 @@ export type FiscalDocumentProjection = {
   paymentId: string;
   paymentCollectionEventId: string;
   taxOrderSnapshotId: string;
+  fiscalPolicyId: string;
+  fiscalPolicyVersionId: string;
   status: string;
   collectionBusinessTime: string;
   documentAmountMinor: string;
@@ -69,6 +71,8 @@ type DocRow = {
   payment_id: string;
   payment_collection_event_id: string;
   tax_order_snapshot_id: string;
+  fiscal_policy_id: string;
+  fiscal_policy_version_id: string;
   status: string;
   collection_business_time: Date;
   document_amount_minor: string;
@@ -85,6 +89,8 @@ function mapDoc(r: DocRow): FiscalDocumentProjection {
     paymentId: r.payment_id,
     paymentCollectionEventId: r.payment_collection_event_id,
     taxOrderSnapshotId: r.tax_order_snapshot_id,
+    fiscalPolicyId: r.fiscal_policy_id,
+    fiscalPolicyVersionId: r.fiscal_policy_version_id,
     status: r.status,
     collectionBusinessTime: r.collection_business_time.toISOString(),
     documentAmountMinor: r.document_amount_minor,
@@ -187,22 +193,17 @@ export class FiscalService {
     return mapPolicyVersion(row);
   }
 
+  /**
+   * Resolve FiscalPolicyVersion at authoritative collection business time
+   * (PaymentCollectionEvent.collected_at). Never wall-clock / submission /
+   * reconcile / settlement satisfaction / ingest timestamps.
+   * Missing → null. Ambiguous multi-policy head → FISCAL_POLICY_AMBIGUOUS.
+   */
   async resolveEffectivePolicy(
     legalEntityId: string,
-    at: Date = new Date(),
+    collectionBusinessTime: Date | string,
   ): Promise<FiscalPolicyVersionProjection | null> {
-    const res = await this.pool.query<PolicyVersionRow>(
-      `SELECT fpv.*, fp.policy_code
-       FROM fiscal_policy_version fpv
-       INNER JOIN fiscal_policy fp ON fp.fiscal_policy_id = fpv.fiscal_policy_id
-       WHERE fpv.legal_entity_id = $1
-         AND fpv.effective_from <= $2
-         AND (fpv.effective_to IS NULL OR fpv.effective_to > $2)
-       ORDER BY fpv.policy_version DESC
-       LIMIT 1`,
-      [legalEntityId, at.toISOString()],
-    );
-    return res.rows[0] ? mapPolicyVersion(res.rows[0]) : null;
+    return this.resolveEffectivePolicyTx(this.pool, legalEntityId, collectionBusinessTime);
   }
 
   createCheckoutGate(): FiscalCheckoutGate {
@@ -239,12 +240,47 @@ export class FiscalService {
         detail: 'legal_entity.fiscal_required undecided; fail closed (not NOT_REQUIRED)',
       };
     }
-    const policy = await this.resolveEffectivePolicy(input.legalEntityId);
-    if (!policy) {
-      return {
-        status: 'UNAVAILABLE',
-        detail: 'No effective FiscalPolicyVersion; cannot authoritatively determine fiscal prerequisite',
-      };
+
+    const doc = await this.pool.query<DocRow>(
+      `SELECT * FROM fiscal_document WHERE settlement_group_id = $1`,
+      [input.settlementGroupId],
+    );
+
+    let policy: FiscalPolicyVersionProjection;
+    try {
+      if (doc.rows[0]) {
+        // Document-bound freeze — never re-resolve live policy for an existing document.
+        policy = await this.getPolicyVersion(doc.rows[0].fiscal_policy_version_id);
+      } else {
+        const shape = await this.evaluateC0Shape(input.settlementGroupId);
+        if (shape.kind === 'blocked') {
+          if (fiscalRequired === true) {
+            return { status: 'REQUIRED_NOT_SATISFIED', detail: shape.reason };
+          }
+          return {
+            status: 'UNAVAILABLE',
+            detail:
+              'PaymentCollectionEvent required to bind FiscalPolicy at collection business time',
+          };
+        }
+        const resolved = await this.resolveEffectivePolicy(
+          input.legalEntityId,
+          shape.collectedAt,
+        );
+        if (!resolved) {
+          return {
+            status: 'UNAVAILABLE',
+            detail:
+              'No FiscalPolicyVersion effective at PaymentCollectionEvent.collected_at; fail closed',
+          };
+        }
+        policy = resolved;
+      }
+    } catch (e) {
+      if (e instanceof DomainValidationError && e.code === 'FISCAL_POLICY_AMBIGUOUS') {
+        return { status: 'UNAVAILABLE', detail: e.message };
+      }
+      throw e;
     }
 
     if (fiscalRequired === false) {
@@ -258,7 +294,6 @@ export class FiscalService {
       return { status: 'NOT_REQUIRED', detail: 'Explicit FiscalPolicy: document not required' };
     }
 
-    // fiscal_required=TRUE must not be overridden by policy.fiscal_document_required=FALSE
     if (!policy.fiscalDocumentRequired) {
       return {
         status: 'UNAVAILABLE',
@@ -267,15 +302,6 @@ export class FiscalService {
       };
     }
 
-    const shape = await this.evaluateC0Shape(input.settlementGroupId);
-    if (shape.kind === 'blocked') {
-      return { status: 'REQUIRED_NOT_SATISFIED', detail: shape.reason };
-    }
-
-    const doc = await this.pool.query<DocRow>(
-      `SELECT * FROM fiscal_document WHERE settlement_group_id = $1`,
-      [input.settlementGroupId],
-    );
     if (!doc.rows[0]) {
       return {
         status: 'REQUIRED_NOT_SATISFIED',
@@ -385,17 +411,22 @@ export class FiscalService {
         );
       }
 
-      const policy = await this.resolveEffectivePolicyTx(client, g.legal_entity_id);
-      if (!policy || !policy.fiscalDocumentRequired) {
-        throw new DomainValidationError(
-          'FISCAL_POLICY_BLOCKED',
-          'No fiscal-required FiscalPolicyVersion for issue',
-        );
-      }
-
       const shape = await this.evaluateC0ShapeTx(client, input.settlementGroupId);
       if (shape.kind === 'blocked') {
         throw new DomainValidationError('FISCAL_SHAPE_BLOCKED', shape.reason);
+      }
+
+      // Bind FiscalPolicy at PaymentCollectionEvent.collected_at — never wall-clock.
+      const policy = await this.resolveEffectivePolicyTx(
+        client,
+        g.legal_entity_id,
+        shape.collectedAt,
+      );
+      if (!policy || !policy.fiscalDocumentRequired) {
+        throw new DomainValidationError(
+          'FISCAL_POLICY_BLOCKED',
+          'No fiscal-required FiscalPolicyVersion effective at collection business time',
+        );
       }
 
       // ADR-0014 D1: consume the same TaxOrderSnapshot identity Settlement froze.
@@ -525,17 +556,8 @@ export class FiscalService {
     if (!doc) throw new NotFoundError(`FiscalDocument not found: ${fiscalDocumentId}`);
     if (doc.status === 'SATISFIED') return doc;
 
-    const policy = await this.resolveEffectivePolicy(
-      (
-        await this.pool.query<{ legal_entity_id: string }>(
-          `SELECT legal_entity_id FROM fiscal_document WHERE fiscal_document_id = $1`,
-          [fiscalDocumentId],
-        )
-      ).rows[0]!.legal_entity_id,
-    );
-    if (!policy) {
-      throw new DomainValidationError('FISCAL_POLICY_BLOCKED', 'No effective FiscalPolicy');
-    }
+    // Always use document-bound FiscalPolicyVersion — never live re-resolve.
+    const policy = await this.getPolicyVersion(doc.fiscalPolicyVersionId);
 
     const metaPre = await this.pool.query<{
       tenant_id: string;
@@ -549,8 +571,15 @@ export class FiscalService {
       document_amount_minor: string;
       currency_code: string;
       status: string;
+      fiscal_policy_version_id: string;
     }>(`SELECT * FROM fiscal_document WHERE fiscal_document_id = $1`, [fiscalDocumentId]);
     const drow = metaPre.rows[0]!;
+    if (drow.fiscal_policy_version_id !== doc.fiscalPolicyVersionId) {
+      throw new DomainValidationError(
+        'FISCAL_POLICY_BLOCKED',
+        'FiscalDocument fiscal_policy_version_id mismatch',
+      );
+    }
 
     const result =
       drow.status === 'PENDING_ISSUE'
@@ -690,18 +719,26 @@ export class FiscalService {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+      // Durable uniqueness: allocate next attempt_number under submission lock (fail closed on race).
+      await client.query(
+        `SELECT fiscal_submission_id FROM fiscal_submission
+         WHERE fiscal_submission_id = $1 FOR UPDATE`,
+        [input.fiscalSubmissionId],
+      );
+      const attemptN = await nextAttemptNumber(client, input.fiscalSubmissionId);
       const attemptId = randomUUID();
       await client.query(
         `INSERT INTO fiscal_provider_attempt (
            fiscal_provider_attempt_id, fiscal_submission_id, fiscal_document_id,
            tenant_id, legal_entity_id, attempt_number, operation, adapter_identity, status, finished_at
-         ) VALUES ($1,$2,$3,$4,$5,1,'ISSUE',$6,$7,NOW())`,
+         ) VALUES ($1,$2,$3,$4,$5,$6,'ISSUE',$7,$8,NOW())`,
         [
           attemptId,
           input.fiscalSubmissionId,
           input.fiscalDocumentId,
           input.tenantId,
           input.legalEntityId,
+          attemptN,
           this.adapter.adapterIdentity,
           result.attemptStatus,
         ],
@@ -916,20 +953,54 @@ export class FiscalService {
   private async resolveEffectivePolicyTx(
     q: Queryable,
     legalEntityId: string,
-    at: Date = new Date(),
+    collectionBusinessTime: Date | string,
   ): Promise<FiscalPolicyVersionProjection | null> {
-    const res = await q.query<PolicyVersionRow>(
+    const at =
+      typeof collectionBusinessTime === 'string'
+        ? new Date(collectionBusinessTime)
+        : collectionBusinessTime;
+    if (Number.isNaN(at.getTime())) {
+      throw new DomainValidationError(
+        'FISCAL_POLICY_BLOCKED',
+        'Invalid collection business time for FiscalPolicy resolution',
+      );
+    }
+    const atIso = at.toISOString();
+
+    const policyHeads = await q.query<{ fiscal_policy_id: string }>(
+      `SELECT DISTINCT fpv.fiscal_policy_id
+       FROM fiscal_policy_version fpv
+       WHERE fpv.legal_entity_id = $1
+         AND fpv.effective_from <= $2::timestamptz
+         AND (fpv.effective_to IS NULL OR fpv.effective_to > $2::timestamptz)`,
+      [legalEntityId, atIso],
+    );
+    if (policyHeads.rows.length === 0) return null;
+    if (policyHeads.rows.length > 1) {
+      throw new DomainValidationError(
+        'FISCAL_POLICY_AMBIGUOUS',
+        `Multiple FiscalPolicy heads effective at collection business time (${policyHeads.rows.length})`,
+      );
+    }
+
+    const versions = await q.query<PolicyVersionRow>(
       `SELECT fpv.*, fp.policy_code
        FROM fiscal_policy_version fpv
        INNER JOIN fiscal_policy fp ON fp.fiscal_policy_id = fpv.fiscal_policy_id
-       WHERE fpv.legal_entity_id = $1
-         AND fpv.effective_from <= $2
-         AND (fpv.effective_to IS NULL OR fpv.effective_to > $2)
-       ORDER BY fpv.policy_version DESC
-       LIMIT 1`,
-      [legalEntityId, at.toISOString()],
+       WHERE fpv.fiscal_policy_id = $1
+         AND fpv.effective_from <= $2::timestamptz
+         AND (fpv.effective_to IS NULL OR fpv.effective_to > $2::timestamptz)
+       ORDER BY fpv.policy_version DESC`,
+      [policyHeads.rows[0]!.fiscal_policy_id, atIso],
     );
-    return res.rows[0] ? mapPolicyVersion(res.rows[0]) : null;
+    if (versions.rows.length === 0) return null;
+    if (versions.rows.length > 1) {
+      throw new DomainValidationError(
+        'FISCAL_POLICY_AMBIGUOUS',
+        'Overlapping FiscalPolicyVersion intervals at collection business time',
+      );
+    }
+    return mapPolicyVersion(versions.rows[0]!);
   }
 }
 
