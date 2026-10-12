@@ -1,13 +1,13 @@
 # ADR-0039: Office Global Account, MFA & Owner Business Bootstrap
 
-- **Status:** **Accepted** (PO **ACCEPT WITH DELTAS** 2026-10-11) — docs/architecture only; **Origin merge pending** explicit PO merge authorization
+- **Status:** **Accepted** (PO **ACCEPT WITH DELTAS** 2026-10-11)
 - **Date:** 2026-10-11
 - **Revised:** 2026-10-11 (PO review deltas B1–B8; Brand #1 bootstrap delta after ADR-0038 canonical close)
 - **Accepted:** 2026-10-11 (PO ACCEPT WITH DELTAS — ChatGPT remediation deltas approved; Brand bootstrap clarification for merge review)
 - **Decision owners:** Product Owner and System Architect
 - **Related:** ADR-0015; ADR-0022 (Professional Account preserved); ADR-0036 (POS auth preserved); domain-module-map Identity / Organization; Identity migration `027`
 - **Autonomy:** Level **C** (docs / architecture / contracts only)
-- **This PR:** Docs only. **No** runtime, **no** migrations applied. **Do not merge** until PO merge authorization.
+- **Proposed amendment (not Accepted):** [ADR-0039 Amendment A — phone-first / optional email](ADR-0039-amendment-A-phone-first-optional-email.md) + [ADR-0040](ADR-0040-office-username-invites-professional-grants.md) (OFFICE1.1). Until PO Accepts Amendment A, **B3 email-primary MFA rows remain binding**.
 - **Notion brief:** `https://app.notion.com/p/3f630d51715181faba65d6ffa13b909e` — **access limitation** (login wall); product requirements bound via PO B6 checklist in §B6 only; do not claim full Notion UI parity without readable brief.
 
 ---

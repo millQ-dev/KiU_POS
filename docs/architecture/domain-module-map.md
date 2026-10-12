@@ -37,7 +37,7 @@ LegalEntity is fiscal/legal — **not** part of menu inheritance.
 | --- | --- |
 | **Owns** | Users, credentials, roles, permissions, ordinary tenant access grants, sessions/devices; ProfessionalProfile / ClientAccessGrant path (ADR-0022) |
 | **Does not own** | Workforce HR records beyond access; ProfessionalOrganization commercial billing |
-| **Key concepts** | User, Role, Permission, AccessGrant, Session, AuthorizationPolicy, VisibilityPolicy; ProfessionalProfile; ClientAccessGrant (independent per client; no inheritance). **ADR-0039 Accepted** (merge pending): GlobalAccount (0..N TenantMemberships + optional ADR-0022 grants) **coexists with** tenant-scoped POS `identity_user`/PIN; OfficePartialAuth → OfficeSession after 2FA; OFFICE ≠ TERMINAL/MOBILE; owner CreateBusinessBootstrap |
+| **Key concepts** | User, Role, Permission, AccessGrant, Session, AuthorizationPolicy, VisibilityPolicy; ProfessionalProfile; ClientAccessGrant (independent per client; no inheritance). **ADR-0039 Accepted**: GlobalAccount (0..N TenantMemberships + optional ADR-0022 grants) **coexists with** tenant-scoped POS `identity_user`/PIN; OfficePartialAuth → OfficeSession after 2FA; OFFICE ≠ TERMINAL/MOBILE; owner CreateBusinessBootstrap. **OFFICE1.1 Proposed** (docs only): mandatory `@username`; phone-first Amendment A; invitations → ClientAccessGrant activation; accountant read-only inbox — see `office1.1-global-username-professional-access.md` |
 | **Commands in** | Authenticate, GrantAccess, GrantProfessionalClientAccess, RevokeProfessionalClientAccess, AuthorizeDangerousOperation |
 | **Facts out** | AccessGranted, ProfessionalClientAccessGranted/Revoked, DangerousOperationAuthorized (AUDIT) |
 | **Depends on** | Organization (scope targets) |
