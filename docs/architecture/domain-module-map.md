@@ -42,6 +42,16 @@ LegalEntity is fiscal/legal — **not** part of menu inheritance.
 | **Facts out** | AccessGranted, ProfessionalClientAccessGranted/Revoked, DangerousOperationAuthorized (AUDIT) |
 | **Depends on** | Organization (scope targets) |
 
+### Task / Operations Dispatcher (Gate 0 — Proposed only)
+
+| | |
+| --- | --- |
+| **Owns** | *(Proposed — not Accepted)* Task, TaskOverrideEvent, TaskAssignmentHistory, task audit/outbox |
+| **Does not own** | Inventory movements, Settlement/Payment/Fiscal satisfaction, POS ApprovalRequest (until Level C decides subtype vs separate lane) |
+| **Key concepts** | Four-color display priority + immutable `priorityFloor`; lanes OPERATIONAL_ALERT / OWNER_APPROVAL / LEGAL_SAFETY / MANUAL_ESCALATION / WORK; `reviewRequired`; idempotent `derivationKey` |
+| **Status** | **Proposed** in [`backoffice-gate0-architecture-reconciliation.md`](backoffice-gate0-architecture-reconciliation.md). No runtime. Do not treat as Accepted ADR. |
+| **Depends on** | Identity (authz), Organization (tenant/outlet scope), optional source-entity refs (Orders/Cash/…) |
+
 ### Workforce
 
 | | |
