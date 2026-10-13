@@ -16,7 +16,7 @@
 
 | # | Check | Result |
 | --- | --- | --- |
-| 1 | Architecture / FinSec / Privacy final reviews on exact latest HEAD | PENDING → fill after independent agents |
+| 1 | Architecture / FinSec / Privacy final reviews on exact latest HEAD | **PASS** — three APPROVE @ `ccf7579…` (content). Tip may advance with review commit. |
 | 2 | Diff remains docs-only | **PASS** — no `apps/`, no migrations |
 | 3 | Notion matrix covers 00–07 + Parent; ACCEPTED/PROPOSED/OPEN preserved | **PASS** — matrix + durable snapshot |
 | 4 | Export date, page refs, SHA-256 snapshot in-repo (not Downloads-only) | **PASS** — `docs/processes/handoff-snapshots/kiu-backoffice-2026-10-13/` |
@@ -46,9 +46,9 @@
 
 | Review | Verdict | Packet |
 | --- | --- | --- |
-| Architecture | PENDING | `gate0-pr83-architecture-final-review.md` |
-| Financial Security | PENDING | `gate0-pr83-finsec-final-review.md` |
-| Privacy | PENDING | `gate0-pr83-privacy-final-review.md` |
+| Architecture | **APPROVE** @ `ccf75790f01ee6953c04df539a3a51f6f1d0ffd1` | `gate0-pr83-architecture-final-review.md` |
+| Financial Security | **APPROVE** @ `ccf75790f01ee6953c04df539a3a51f6f1d0ffd1` | `gate0-pr83-finsec-final-review.md` |
+| Privacy | **APPROVE** @ `ccf75790f01ee6953c04df539a3a51f6f1d0ffd1` | `gate0-pr83-privacy-final-review.md` |
 
 ## Unresolved blockers to **merge**
 
