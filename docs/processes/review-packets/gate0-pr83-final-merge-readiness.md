@@ -9,7 +9,7 @@
 
 | Field | Value |
 | --- | --- |
-| Final HEAD SHA | `e90920e3a7f46cce594d269c9297c95e59a3be83` |
+| Final HEAD SHA | `acc0f65c9d8937e403280b51a0fe68d8fc68d092` |
 | Diff vs `main` | docs paths only (verified) |
 
 ## Checklist before PO merge auth
