@@ -18,9 +18,9 @@
 
 | Review | Verdict |
 | --- | --- |
-| Architecture | PENDING |
-| Financial Security | PENDING |
-| Privacy | PENDING |
+| Architecture | **APPROVE** @ `9f20f59…` |
+| Financial Security | **APPROVE** @ `9f20f59…` |
+| Privacy | **APPROVE** @ `9f20f59…` |
 
 ## Final HEAD
 

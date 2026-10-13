@@ -26,9 +26,9 @@ Four colors; unrestricted manual reprioritization with reason; immutable priorit
 
 | Review | Focus | Verdict |
 | --- | --- | --- |
-| Architecture | D1–D4 contract honesty | PENDING |
-| Financial Security | D2 gate non-substitution | PENDING |
-| Privacy | §8.1 still holds; D1 session separation | PENDING |
+| Architecture | D1–D4 contract honesty | **APPROVE** @ `9f20f592777951e77656eb527c945ca941eaeac6` ([delta review](./adr-0041-delta-architecture-review.md)) |
+| Financial Security | D2 gate non-substitution (+ D3 no auto Owner escalate) | **APPROVE** — [`adr-0041-delta-finsec-review.md`](./adr-0041-delta-finsec-review.md) @ `9f20f59…` |
+| Privacy | §8.1 still holds; D1 session separation | **APPROVE** (`adr-0041-delta-privacy-review.md` @ `9f20f59…`) |
 
 ## Runtime stance
 
