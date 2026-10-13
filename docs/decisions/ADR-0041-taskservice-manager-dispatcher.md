@@ -80,21 +80,56 @@ Reminders: on overdue and while AWAITING_REVIEW (exact timing defaults **OPEN** 
 - Proposed permission keys (modeling labels, not final strings): `task.dispatch`, `task.create`, `task.assign`, `task.complete`, `task.review`, `task.priority`, `task.escalate_owner`.
 - Professional `ClientAccessGrant` path remains independent of employee membership (ADR-0022).
 
-### 6. Idempotency, reconnect, revocation
+### 6. State machine and `reviewRequired` (Channel A)
 
-- System-derived tasks: unique `(tenantId, derivationKey)`; retries/reconnect → same Task or SUPERSEDE + audit.
-- Outbox delivery ACK / retry must not duplicate Tasks.
-- On grant/membership revoke or outlet leave: open assignments REVOKED or require reassign — no silent keep.
-- Stale assignee handling: configuration OPEN; must not leave orphaned ACTIVE without audit.
+```text
+OPEN
+  → IN_PROGRESS          (assignee starts / system marks active)
+  → AWAITING_REVIEW      (assignee completes AND reviewRequired=true)
+  → COMPLETED            (assignee completes AND reviewRequired=false
+                          OR manager approves review)
+  → OPEN / IN_PROGRESS   (manager rejects review / reopen + comment)
+  → CANCELLED            (authorized cancel)
+  → REVOKED              (grant/membership/outlet leave / explicit revoke)
+  → SUPERSEDED           (idempotent re-derive replaces prior open task)
+```
 
-### 7. Event routing (role-aware, grant-enforced)
+- Terminal for reminder purposes: COMPLETED, CANCELLED, REVOKED, SUPERSEDED.
+- Priority changes allowed in non-terminal states; history append-only; never implies gate clearance.
+
+### 7. Idempotent `derivationKey` (boundaries + concurrency)
+
+- **Uniqueness scope:** `(tenantId, derivationKey)` — derivationKey **must not** be unique only globally across tenants.
+- **Recommended key content (PROPOSED):** stable hash/string of `{sourceType, sourceId, eventId|occurrenceId, ruleId}` within the tenant. Do not include mutable displayPriority.
+- **Retry / reconnect:** same key → return existing Task (same taskId); no second open Task.
+- **Concurrency:** insert under uniqueness constraint; loser reads winner; never two OPEN rows for same key.
+- **SUPERSEDE:** only when rule explicitly replaces prior open Task (e.g. corrected source event); prior → SUPERSEDED + audit; new Task new taskId with link to prior.
+- **Cross-tenant:** derivationKey from tenant A never creates/reads Task in tenant B.
+
+### 8. Reminders, notification failure, deduplication
+
+- Reminder rows keyed by `(taskId, reminderKind, dueSlot)` (PROPOSED) so scheduler retries do not spam duplicates.
+- Kinds (PROPOSED): `DEADLINE_APPROACHING`, `OVERDUE`, `AWAITING_REVIEW`.
+- Delivery via outbox: PENDING → SENT | FAILED; FAILED may retry with backoff; **dedupe on reminder key**, not on raw push attempts.
+- Notification failure **must not** mutate Task status or clear gates; must not escalate to Owner as a side effect of Channel A delivery failure.
+- Reminders **stop** once Task is terminal (§6). Exact SLA timings remain **OPEN**.
+
+### 9. Manager absence, unavailable assignee, operational fallback
+
+- If assignee unavailable (revoked grant, inactive, wrong outlet): **reassign** within Manager dispatch audience or leave OPEN unassigned with Manager-visible flag — **do not** silently notify Owner.
+- If Manager on duty absent: fallback to **other Managers with `task.dispatch` on same outlet scope** (or tenant-wide only if explicit grant). If none: Task remains visible in outlet dispatcher for next authorized Manager session; optional outlet-level escalation list is **OPEN** config — still **not** Owner auto-push.
+- Channel D remains the only Manager-initiated Owner path for ordinary operational Tasks.
+- Permission **revalidation** on every mutate: cached UI grants are insufficient; server re-checks scope + capability at command time.
+
+### 10. Event routing (role-aware, grant-enforced)
 
 - Task created/assigned/priority-changed/completed/review → notify **assignees / Manager dispatch audience** per grants.
 - **No** automatic Owner push for Channel A (including RED).
 - Channel D creates Owner-visible escalation with task/context snapshot.
 - Channel B/C use their own notification policies (Mobile Owner approve, statutory).
+- Cross-tenant notify/read/write: **denied**.
 
-### 8. First usable Manager vertical (runtime scope after Accept)
+### 11. First usable Manager vertical (runtime scope after Accept)
 
 **In:**
 
@@ -109,27 +144,39 @@ Reminders: on overdue and while AWAITING_REVIEW (exact timing defaults **OPEN** 
 
 **Out of first vertical:** Floor/Table, payroll, bank execution, biometry/selfie shift, fiscal provider, full Accounting, Chef/Bar specialty, OCR, Q Place/Q Card, automatic derivation from all domain events (optional thin derive from one existing signal later — not required for M1).
 
-### 9. Five-cabinet compatibility
+### 12. Five-cabinet compatibility
 
-One Task kernel; cabinets are projections + permission packs. Owner uses Channel B/D + task assign; Accountant client-scoped tasks after Identity grants; Chef/Bar attach production/QA sources — without separate task engines.
+One Task kernel; cabinets are projections + permission packs. Owner uses Channel B/D + task assign; Accountant client-scoped tasks after Identity grants (ADR-0022 single-tenant mutation); Chef/Bar attach production/QA/ml-stock sources — without separate task engines. Shared invariants: fail-closed scope, channel separation, gate non-bypass.
 
-### 10. Concrete tests (required before runtime merge of Task PRs)
+### 13. Concrete tests (required before runtime merge of Task PRs)
 
 1. **RED→YELLOW** without explanation → reject; with explanation → history append; Owner **not** auto-notified.
 2. **Manual escalation (D)** → Owner-targeted notification/record; Task Channel A remains distinct.
-3. **Authorization denial:** actor without outlet grant cannot create/complete/priority-change; empty scope rejected; cross-tenant denied.
-4. **reviewRequired:** complete → AWAITING_REVIEW; approve/reopen works; reminders stop only when truly COMPLETED.
-5. **Idempotent derive** (when derive API exists): duplicate derivationKey → one Task.
-6. **Gate non-bypass:** completing Task does not create Payment/Fiscal/RecipePublish approval side effects.
+3. **Authorization denial:** actor without outlet grant cannot create/complete/priority-change; empty scope rejected; cross-tenant denied; permission revalidation on mutate.
+4. **reviewRequired:** complete → AWAITING_REVIEW; approve/reopen works; reminders stop only when terminal.
+5. **Idempotent derive:** duplicate `(tenantId, derivationKey)` under concurrency → one Task.
+6. **Gate non-bypass:** completing Task / changing priority does not create Payment/Fiscal/RecipePublish approval side effects.
+7. **Assignee unavailable:** reassign/unassign Manager-visible; no silent Owner notify.
+8. **Reminder dedupe:** repeated scheduler ticks do not create duplicate reminder deliveries for same `(taskId, kind, dueSlot)`.
 
-### 11. Acceptance consequences
+### 14. Acceptance consequences
 
 Accepting this ADR authorizes **design** of TaskService and subsequent Level B schema/API PRs under the above invariants. It does **not** authorize:
 
 - merge of Gate 0 #83 without separate PO merge auth;
 - OFFICE1.1 Accept;
 - fiscal provider go-live;
-- inventing unread Q Place/Q Card requirements.
+- inventing Q Place/Q Card requirements.
+
+### 15. Classification map (for PO decision)
+
+| Class | Items |
+| --- | --- |
+| **Already PO ACCEPTED behavior** | Four colors; Manager may move any color with reason+audit; display ≠ gates; manager-only ops notify; manual Owner escalate; reviewRequired workflow; empty scope fail-closed; Task complete ≠ regulated approve; food-safety/legal gates independent; Q Place/Q Card out of this delivery |
+| **Proposed technical choices** | Entity/DTO names; state enum; derivationKey composition; reminder keying; permission_key labels; HTTP shapes; SUPERSEDE rules; Manager-fallback to other `task.dispatch` holders |
+| **Open Level C** | Reminder SLA defaults; OfficeSession vs POS principal; Channel B vs POS `identity_approval_request` table mapping; automation rule matrix; outlet escalation list when no Manager |
+| **Runtime blockers (before M1 ship)** | ADR Accept; schema+API PR; Identity grants for `task.*`; independent reviews+tests §13 |
+| **Deferrable** | Auto-derive from all domain events; Owner/Accountant/Chef/Bar full UIs; Floor/Table; payroll; bank; biometry; fiscal provider; OCR |
 
 ## Alternatives considered
 
@@ -137,6 +184,7 @@ Accepting this ADR authorizes **design** of TaskService and subsequent Level B s
 - `priorityFloor` forbidding RED→YELLOW — **rejected** by PO 2026-10-13.
 - Auto-push all RED tasks to Owner — **rejected** (PO Manager policy).
 - Per-cabinet separate task databases — **rejected** (shared kernel).
+- Silent Owner notify on Manager absence — **rejected**.
 
 ## OPEN (do not invent)
 
@@ -145,3 +193,4 @@ Accepting this ADR authorizes **design** of TaskService and subsequent Level B s
 - OfficeSession vs POS principal binding for Manager cabinet.
 - Channel B schema vs reuse/extend POS approval tables.
 - Selfie shift check-in retention (privacy) — out of M1.
+- Outlet-level on-call escalation list when zero Managers available.
