@@ -35,9 +35,9 @@ See ADR §15: **PO ACCEPTED** vs **Proposed technical** vs **Open Level C** vs *
 
 ## Final HEAD
 
+`fb5f742ea983bf699655fd669a86657af6d8e9a0`
 
-
-
+Content ADR tip with §8.1: `1eb631bc67cc8a4e100e4495cf196d5f75a2cadf`. Privacy APPROVE reviewed `863d3df…`; Arch/FinSec `79b1073…`.
 ---
 
 ## Complete proposed ADR-0041 wording
