@@ -4,9 +4,9 @@
 - **Date:** 2026-10-12
 - **Decision owners:** Product Owner and System Architect
 - **Amends:** [ADR-0039](ADR-0039-office-global-account-mfa-owner-bootstrap.md) (**Accepted**)
-- **Related:** ADR-0015; ADR-0022; Proposed [ADR-0040](ADR-0040-office-username-invites-professional-grants.md)
+- **Related:** ADR-0015; ADR-0022; Proposed [ADR-0040](ADR-0040-office-username-invites-professional-grants.md); Proposed [Amendment B](ADR-0039-amendment-B-office11-mfa-otp-trusted-device.md) (OTP satisfaction / TrustedDevice / recovery — **read together** after Accept)
 - **Autonomy:** Level **C** (docs only). **STOP BEFORE RUNTIME.**
-- **Canonical baseline:** `18316b8f8aa2da6d045b04aebbde3c5434ea046e` (post FISC1.1 / migration 032)
+- **Canonical baseline:** `94f540ae64fc9c88bda50bf7c275ecec3f6f4909` (Origin `main` after #83/#84; Amendment A content unchanged in substance from 18316b8 baseline)
 - **Notion:** PO pages `3f721d5d34878197bab3c0f34c6b3867`, `3f721d5d348781c7b9deff2e48d040c4` — **agent access limited** (login/load wall). Product bindings in this amendment use the **PO ACCEPTED PRODUCT CONTRACT** supplied in the OFFICE1.1 preflight brief; do not claim full Notion UI parity.
 
 ---

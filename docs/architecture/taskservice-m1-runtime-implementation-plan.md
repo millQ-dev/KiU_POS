@@ -21,6 +21,7 @@ Authorized Manager (OfficeSession)
 2. Separate **Level B** authorization for schema/API.
 3. **OfficeSession** authenticate/authorize path available for Manager (D1) — may sequence after or with OFFICE1.1 runtime; M1 must not ship on POS PIN.
 4. Permission keys seeded: `task.dispatch`, `task.create`, `task.assign`, `task.complete`, `task.review`, `task.priority`, `task.escalate_owner` (final strings per ADR).
+5. **Employee complete in M1 (Proposed sequencing — OFFICE1.1 R82-M1):** perform via **OfficeSession** + `task.complete` on fail-closed outlet/tenant scope. **KiU Mobile / POS task-command principal mapping is deferred** to a later Approved slice. Compatible with Accepted ADR-0041 D1 / §11 item 5 (“Office or future Mobile”). POS PIN remains forbidden.
 
 ## Proposed Level B PR sequence (after GO)
 
@@ -34,7 +35,7 @@ Authorized Manager (OfficeSession)
 
 ## Explicit non-goals for M1
 
-Floor/Table, payroll, bank execution, biometry, fiscal provider, full Accounting, broad auto-derive, invented reminder SLAs, POS-PIN Manager session, Q Place/Q Card.
+Floor/Table, payroll, bank execution, biometry, fiscal provider, full Accounting, broad auto-derive, invented reminder SLAs, POS-PIN Manager session, Q Place/Q Card, **KiU Mobile employee-complete identity integration** (later slice).
 
 ## Channel stubs
 

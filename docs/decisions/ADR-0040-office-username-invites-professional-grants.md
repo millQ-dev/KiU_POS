@@ -5,8 +5,10 @@
 - **Decision owners:** Product Owner and System Architect
 - **Related:** ADR-0015 (**Accepted**); ADR-0022 (**Accepted**); ADR-0039 (**Accepted**); Proposed [ADR-0039 Amendment A](ADR-0039-amendment-A-phone-first-optional-email.md)
 - **Autonomy:** Level **C** (docs only). **STOP BEFORE RUNTIME / migrations.**
-- **Canonical baseline:** `18316b8f8aa2da6d045b04aebbde3c5434ea046e`
+- **Canonical baseline:** `94f540ae64fc9c88bda50bf7c275ecec3f6f4909` (Origin `main` after Gate 0 #83 + ADR-0041 #84)
+- **Related amendments:** Proposed [ADR-0039 Amendment B](ADR-0039-amendment-B-office11-mfa-otp-trusted-device.md) (OTP satisfaction / trusted device / recovery)
 - **Notion:** PO pages behind login for agent; bindings use **PO ACCEPTED PRODUCT CONTRACT** from OFFICE1.1 preflight brief.
+- **Security closure (2026-10-13):** §5 empty-scope fail-closed, §6 accountant read hub union, §9 recovery — see Remediation R82-3/4/5. Prior draft “empty = tenant-policy default OPEN” is **superseded by Proposed Accept wording below** (conflict flagged vs earlier PR #82 packet O5).
 
 ---
 
@@ -88,30 +90,46 @@ DRAFT → SENT → ACCEPTED → (grants ACTIVE)
 
 **Forbidden:** auto-activating grants on send; accepting for a different GlobalAccount; widening scope on accept without new invite.
 
-### 5. Scope model (per ClientAccessGrant)
+### 5. Scope model (per ClientAccessGrant) — **fail closed (R82-3)**
 
 Proposed scope tuple (refine at schema time):
 
 ```text
 ClientAccessGrant
   tenant_id                 REQUIRED
-  legal_entity_ids[]        OPTIONAL subset; empty = tenant-policy default OPEN
-  outlet_ids[]              OPTIONAL subset
+  scope_mode                REQUIRED enum: TENANT_WIDE | LEGAL_ENTITY_SET | OUTLET_SET
+  legal_entity_ids[]        REQUIRED non-empty when scope_mode=LEGAL_ENTITY_SET; else empty/absent
+  outlet_ids[]              REQUIRED non-empty when scope_mode=OUTLET_SET; else empty/absent
   role_code                 REQUIRED (professional role vocabulary OPEN)
   permissions[]             OPTIONAL fine-grained; else role expands server-side
 ```
 
-Enforcement: every professional **read** filtered by grant; every **mutation** requires selected `tenantId` ∈ grant and action allowed by Role/Scope.
+**Proposed Accept wording (binds R82-3):**
 
-### 6. Accountant multi-client + workspace
+1. **Empty or omitted** `legal_entity_ids` / `outlet_ids` **never** means tenant-wide authority.
+2. Tenant-wide access requires **`scope_mode = TENANT_WIDE`** set by an **explicit authorized selection** at invite/grant time (inviter must choose it; UI must not default silently).
+3. `scope_mode = LEGAL_ENTITY_SET` with empty/null LE list → **reject** at write and at authz evaluate.
+4. `scope_mode = OUTLET_SET` with empty/null outlet list → **reject** at write and at authz evaluate.
+5. Omitting `scope_mode` → **reject** (fail closed).
+6. Same fail-closed rule applies to TenantMembership / AccessGrant outlet·LE scopes used for Office Task and Manager commands (align ADR-0041 / mig 027 tenant-wide vs outlet unique indexes).
+
+**Conflict flag vs prior PR #82 draft:** earlier Proposed text said `empty = tenant-policy default OPEN` and packet O5 recommended empty = entire Tenant. That **conflicts** with Gate 0 / ADR-0041 fail-closed and this R82-3 Accept wording. **Do not silently keep the old default.**
+
+Enforcement: every professional **read** filtered by grant + scope_mode; every **mutation** requires selected `tenantId` ∈ grant, explicit scope match, and action allowed by Role/Scope.
+
+### 6. Accountant multi-client + workspace (R82-4)
 
 | Rule | Binding |
 | --- | --- |
 | Multi-client | One accountant GlobalAccount may hold many independent ClientAccessGrants across Tenants / LegalEntities / Outlets |
-| Unified inbox | Cross-client **read-only** aggregation of authorized documents, tasks, deadlines, exceptions |
+| **Read hub union** | Accountant **clients/inbox read models** MAY **union** rows from (a) ACTIVE `TenantMembership` with accountant-class role on a Tenant and (b) ACTIVE `ClientAccessGrant` clients — each row tagged with `authorizationSource: MEMBERSHIP \| PROFESSIONAL` |
+| **No mutation union** | Union is **read-only presentation**. Evaluating a mutating command still uses **exactly one** command class (`MEMBERSHIP` or `PROFESSIONAL`) and **must not** combine membership permissions with ClientAccessGrant permissions |
+| Unified inbox | Cross-source **read-only** aggregation of authorized documents, tasks, deadlines, exceptions (still labeled by `tenantId`) |
 | No shared truth | Inbox is a **read model**; does not merge ledgers/inventory/orders Operational Core |
 | Mutation context | Exactly **one** explicitly selected and authorized Tenant context per mutating command |
 | Context switch | UX may switch clients; server rejects missing/forged/unauthorized `tenantId` |
+
+**Conflict flag vs earlier packet §5.1:** prior architecture said clients strip = ClientAccessGrants only. R82-4 **extends** the read hub to include authorized membership accountant tenants. Mutation/isolation rules unchanged.
 
 ### 7. Effective permission checks
 
@@ -182,10 +200,23 @@ POST   /api/v1/office/tenants/{tenantId}/...   # path or header X-MillQ-Tenant-C
 
 ---
 
+### 9. Username retirement & recovery (R82-5) — Proposed Accept direction
+
+Pairs with [Amendment B §B3](ADR-0039-amendment-B-office11-mfa-otp-trusted-device.md).
+
+| Topic | Proposed binding |
+| --- | --- |
+| Username rename | Allowed; old normalized handle → `identity_username_retirement`; **never** transfers memberships/grants/invites/sessions |
+| Retirement cooldown | Recommend **90 days** before reclaim (**OPEN** exact); during quarantine, claim attempts fail closed |
+| Retire without rename | Owner may retire handle under policy; GlobalAccount must set a new unique active username in same transaction or enter `USERNAME_PENDING` (login by phone only until set) — **OPEN** exact status |
+| Phone loss | Multi-factor re-bind per Amendment B3; fresh Zalo OTP on new phone; old phone quarantine (recommend **30 days**) |
+| No mandatory email | Recovery must work without email (phone-first product); email is optional alternate factor only when verified |
+| Takeover prevention | Recovery cannot change `GlobalAccountId`; cannot silently move TenantMembership or ClientAccessGrant; support break-glass **OPEN**, audited, dual-control — not default |
+
 ## Explicit OPEN (Level C — not invented)
 
 1. Final username regex / Unicode policy / reserved list.
-2. Username retirement cooldown duration.
+2. Username retirement cooldown duration (recommend 90d).
 3. Invitation TTL and max outstanding invites.
 4. Professional role vocabulary and default scopes.
 5. Exact permission key for “invite professional”.
@@ -194,6 +225,8 @@ POST   /api/v1/office/tenants/{tenantId}/...   # path or header X-MillQ-Tenant-C
 8. Transport for mutation tenant context (path vs signed header).
 9. ProfessionalOrganization MVP timing (ADR-0022 future).
 10. Billing / commercial relationship for accountants.
+11. Support break-glass procedure for phone-loss without alternate factors.
+12. Exact accountant-class membership role codes that qualify for read-hub inclusion.
 
 ---
 
@@ -201,8 +234,10 @@ POST   /api/v1/office/tenants/{tenantId}/...   # path or header X-MillQ-Tenant-C
 
 - Handles are searchable within authorized invite UX without becoming security principals.
 - Accountants get multi-client read convenience without cross-tenant mutation or shared ledgers.
+- Read hub may surface membership∪professional sources; mutation privileges stay non-union (R82-4).
+- Empty LE/Outlet scope fail closed; tenant-wide requires explicit `scope_mode=TENANT_WIDE` (R82-3).
 - ADR-0022/0015 isolation strengthened with invitation activation gate.
-- Runtime requires separate PO Accept of this ADR + Amendment A, then Level B launch.
+- Runtime requires separate PO Accept of this ADR + Amendment A + Amendment B, then Level B launch.
 
 ## Alternatives considered
 

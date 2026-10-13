@@ -2,9 +2,10 @@
 
 - **Status:** Level **C** docs-only preflight — **STOP BEFORE RUNTIME**
 - **Date:** 2026-10-12
-- **Canonical baseline:** `18316b8f8aa2da6d045b04aebbde3c5434ea046e` (Origin `main` after FISC1.1 / migration **032**)
+- **Canonical baseline:** `94f540ae64fc9c88bda50bf7c275ecec3f6f4909` (Origin `main` after Gate 0 #83 + ADR-0041 #84)
 - **Autonomy:** Level C — owner Accept required before any schema/runtime PR
-- **ADRs:** ADR-0015 / ADR-0022 / ADR-0039 (**Accepted**); Proposed [ADR-0039 Amendment A](../decisions/ADR-0039-amendment-A-phone-first-optional-email.md); Proposed [ADR-0040](../decisions/ADR-0040-office-username-invites-professional-grants.md)
+- **ADRs:** ADR-0015 / ADR-0022 / ADR-0039 / ADR-0041 (**Accepted**); Proposed [ADR-0039 Amendment A](../decisions/ADR-0039-amendment-A-phone-first-optional-email.md); Proposed [ADR-0039 Amendment B](../decisions/ADR-0039-amendment-B-office11-mfa-otp-trusted-device.md); Proposed [ADR-0040](../decisions/ADR-0040-office-username-invites-professional-grants.md)
+- **Security closure:** [office1.1-pr82-security-closure-remediation.md](office1.1-pr82-security-closure-remediation.md)
 - **Notion:** `https://app.notion.com/p/3f721d5d34878197bab3c0f34c6b3867`, `https://app.notion.com/p/3f721d5d348781c7b9deff2e48d040c4` — **agent access limited** (login/load). Product bindings below use the **PO ACCEPTED PRODUCT CONTRACT** from the preflight brief.
 
 ---
@@ -46,7 +47,7 @@
 | O2 | Exact invitation TTL, max outstanding, reminder policy |
 | O3 | Permission key(s) for invite / revoke professional |
 | O4 | Professional role vocabulary + default scope templates |
-| O5 | LegalEntity/Outlet scope defaults when arrays empty |
+| O5 | ~~LegalEntity/Outlet empty = tenant-wide~~ → **superseded by R82-3 fail-closed `scope_mode`** (ADR-0040 §5); OPEN remains only for role vocab / TENANT_WIDE permission key |
 | O6 | Zalo ZBS vendor contract, templates, egress, OTP length/TTL/limits |
 | O7 | Fallback when Zalo unavailable and email not verified (recovery) |
 | O8 | Phone change cool-down / dual control |
@@ -131,10 +132,10 @@ PII fields live under ADR-0015 minimization/audit (phone/email in logical vault 
 | Method | Path | Notes |
 | --- | --- | --- |
 | POST | `/api/v1/office/auth/phone-otp/start` | Zalo ZBS; purpose=SIGNUP\|MFA\|PHONE_CHANGE |
-| POST | `/api/v1/office/auth/phone-otp/verify` | Returns short-lived phoneProof for register |
+| POST | `/api/v1/office/auth/phone-otp/verify` | Returns `PhoneOtpSatisfactionProof` (signup+first-session purpose per Amendment B) |
 | POST | `/api/v1/office/accounts/register` | `{ username, phoneE164, phoneProof, password, email?, idempotencyKey }` |
 | POST | `/api/v1/office/auth/password` | → PartialAuth only |
-| POST | `/api/v1/office/auth/mfa/*/verify` | phone OTP / email OTP / passkey / push |
+| POST | `/api/v1/office/auth/mfa/*/verify` | phone OTP / satisfaction-proof consume / email OTP / passkey / push / trusted-device |
 | POST | `/api/v1/office/contacts/email/verify/start\|confirm` | Independent email verify |
 
 ### 4.2 Username
@@ -168,14 +169,18 @@ PII fields live under ADR-0015 minimization/audit (phone/email in logical vault 
 
 ## 5. Accountant Workspace read-model contract
 
-### 5.1 Clients strip
+### 5.1 Clients strip (R82-4 read union)
 
 ```text
 GET /api/v1/office/accountant/clients
-→ [{ tenantId, displayName, grantId, roleCode, scopeSummary, status }]
+→ [{
+     tenantId, displayName, roleCode, scopeSummary, status,
+     authorizationSource: MEMBERSHIP | PROFESSIONAL,
+     grantId?, membershipId?
+   }]
 ```
 
-Only ACTIVE ClientAccessGrants. No data from non-granted tenants.
+**Union (read-only):** ACTIVE accountant-class `TenantMembership` rows **and** ACTIVE `ClientAccessGrant` clients. Each row tagged with `authorizationSource`. No data from tenants lacking either path.
 
 ### 5.2 Unified inbox (read-only)
 
@@ -186,7 +191,8 @@ GET /api/v1/office/accountant/inbox?cursor=&types=
       itemId, type: DOCUMENT|TASK|DEADLINE|EXCEPTION,
       tenantId, legalEntityId?, outletId?,
       title, summary, occurredAt|dueAt,
-      severity?, href, authorizationFingerprint
+      severity?, href, authorizationFingerprint,
+      authorizationSource: MEMBERSHIP | PROFESSIONAL
     }],
     nextCursor?
   }
@@ -194,9 +200,10 @@ GET /api/v1/office/accountant/inbox?cursor=&types=
 
 | Invariant | Binding |
 | --- | --- |
-| Authorization | Item visible iff grant covers tenant (+ LE/Outlet scope) |
+| Authorization | Item visible iff **either** membership accountant scope **or** professional grant covers tenant (+ LE/Outlet / `scope_mode`) |
 | No merge | Items remain labeled by `tenantId`; no combined ledger balances |
-| Mutation | Inbox endpoints are **GET-only**; actions deep-link into tenant-scoped mutating APIs with explicit context |
+| No mutation union | Read union **must not** combine membership and grant permissions for mutating commands |
+| Mutation | Inbox endpoints are **GET-only**; actions deep-link into tenant-scoped mutating APIs with explicit context + command class |
 | Producers | Which modules emit inbox items **OPEN** (Tax/Fiscal/Settlement/Reporting projections later) |
 
 ### 5.3 Mutation context
