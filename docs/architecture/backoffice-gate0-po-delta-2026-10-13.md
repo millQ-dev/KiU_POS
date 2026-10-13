@@ -13,18 +13,20 @@ Independent Architecture / FinSec / Privacy APPROVE verdicts on the prior Gate 0
 
 ## 1. Notion reconciliation status
 
-| Source page | Notion ID | Export present? | Status in Gate 0 |
+**Durable snapshot:** [`docs/processes/handoff-snapshots/kiu-backoffice-2026-10-13/`](../processes/handoff-snapshots/kiu-backoffice-2026-10-13/) (`MANIFEST.md` — export date, Notion IDs, SHA-256). Snapshot recorded 2026-10-13 from local Markdown export; reviews must cite this path, not transient Downloads.
+
+| Source page | Notion ID | Snapshot file | Status in Gate 0 |
 | --- | --- | --- | --- |
-| Parent Index | `3f721d5d34878197bab3c0f34c6b3867` | **Yes** — Markdown export under `Downloads/Private & Shared/` | Consumed; older parent sections marked historical vs 13.10 handoff children |
-| 00 Handoff | `3f821d5d34878186b682d5db96ff591d` | **Yes** | Consumed — **PO ACCEPTED** frames |
-| Owner | `3f821d5d34878178b417e5e574d5e8d8` | **Yes** | Consumed — **PO ACCEPTED** product flow |
-| Manager | `3f821d5d348781d09e3ad589f2c07726` | **Yes** | Consumed — **PO ACCEPTED** behavior |
-| Accountant | `3f821d5d348781fb947fe08664edb8cc` | **Yes** | Consumed — **PO ACCEPTED** direction; legal/API **OPEN** |
-| Chef | `3f821d5d3487810b9e86f82eb10159e1` | **Yes** | Consumed — **PO ACCEPTED** |
-| Bar Manager | `3f821d5d34878172b4c8c018180d50c5` | **Yes** | Consumed — **PO ACCEPTED** |
-| Engineering Contracts | `3f821d5d348781c49786ff2d638b94f6` | **Yes** | Consumed — ACCEPTED invariants + **PROPOSED** DTO/event names |
-| Implementation Roadmap | `3f821d5d3487811eaa15d7a947ef89a0` | **Yes** | Consumed — **PROPOSED** order of work (not release dates) |
-| Q Place + Q Card | `3f821d5d348781ed94e1e0c9dfbeb254` | **No** in supplied folder | **PARTIAL / OUT OF SCOPE** for five-cabinet delivery; separate discovery — do not invent |
+| Parent Index | `3f721d5d34878197bab3c0f34c6b3867` | `00-parent-index-…md` | Consumed; older parent sections historical vs 13.10 children |
+| 00 Handoff | `3f821d5d34878186b682d5db96ff591d` | `00-handoff-…md` | **PO ACCEPTED** frames |
+| Owner | `3f821d5d34878178b417e5e574d5e8d8` | `01-owner-…md` | **PO ACCEPTED** product flow |
+| Manager | `3f821d5d348781d09e3ad589f2c07726` | `02-manager-…md` | **PO ACCEPTED** behavior |
+| Accountant | `3f821d5d348781fb947fe08664edb8cc` | `03-accountant-…md` | **PO ACCEPTED** direction; legal/API **OPEN** |
+| Chef | `3f821d5d3487810b9e86f82eb10159e1` | `04-chef-…md` | **PO ACCEPTED** |
+| Bar Manager | `3f821d5d34878172b4c8c018180d50c5` | `05-bar-manager-…md` | **PO ACCEPTED** |
+| Engineering Contracts | `3f821d5d348781c49786ff2d638b94f6` | `06-engineering-contracts-…md` | ACCEPTED invariants + **PROPOSED** DTOs |
+| Implementation Roadmap | `3f821d5d3487811eaa15d7a947ef89a0` | `07-roadmap-…md` | **PROPOSED** work order (not release dates) |
+| Q Place + Q Card | `3f821d5d348781ed94e1e0c9dfbeb254` | **Not in snapshot** | **EXCLUDED** from Gate 0; separate discovery — do not invent |
 
 Requirement matrix: [`backoffice-gate0-notion-origin-matrix.md`](backoffice-gate0-notion-origin-matrix.md).
 

@@ -1,9 +1,11 @@
 # Gate 0 — Notion handoff (13.10.2026 export) → Origin matrix
 
 - **Baseline Origin:** `18316b8f8aa2da6d045b04aebbde3c5434ea046e` / migration head `032`
-- **Export source:** `/Users/admin/Downloads/Private & Shared/` (Markdown, 13.10.2026 handoff children + parent index)
+- **PO handoff date:** 13.10.2026
+- **Durable snapshot (authoritative for reviews):** [`docs/processes/handoff-snapshots/kiu-backoffice-2026-10-13/`](../processes/handoff-snapshots/kiu-backoffice-2026-10-13/) — see `MANIFEST.md` (SHA-256 per page, Notion IDs). Do **not** rely solely on transient `Downloads/`.
+- **Transient import path (historical):** `Downloads/Private & Shared/` (agent import 2026-10-13)
 - **PO status vocabulary:** **ACCEPTED** product behavior · **PROPOSED** engineering names · **OPEN** architecture/legal
-- **Caveat:** Parent index contains older discovery text; **children 00–07 supersede** for PO-accepted behavior (per page 00). Q Place+Q Card page **not** in export folder.
+- **Caveat:** Parent index contains older discovery text; **children 00–07 supersede** for PO-accepted behavior (per page 00). Q Place+Q Card page **not** in snapshot — **explicitly excluded** from Gate 0 / five-cabinet delivery (separate discovery).
 
 Legend: **EXISTS** / **PARTIAL** / **MISSING** / **LEVEL C REQUIRED** / **LEGAL/PROVIDER GATED** — same as Gate 0.
 
@@ -14,7 +16,7 @@ Legend: **EXISTS** / **PARTIAL** / **MISSING** / **LEVEL C REQUIRED** / **LEGAL/
 | Page | Status tag in export | Matrix completeness |
 | --- | --- | --- |
 | 00–07 + Parent | Present | **Reconciled** below |
-| Q Place + Q Card `…ed94e1e0…` | Missing from folder | **PARTIAL** — out of five-cabinet delivery; no invented requirements |
+| Q Place + Q Card `…ed94e1e0…` | Absent from durable snapshot | **EXCLUDED** — separate discovery; no invented requirements |
 
 ---
 

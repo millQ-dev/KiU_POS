@@ -403,7 +403,7 @@ Floor/Table, payroll, fiscal provider, employee biometrics, full Accounting, Che
 | Cabinet | Shared TaskService use | Separate concerns | Accepted PO vs proposed names |
 | --- | --- | --- | --- |
 | **Owner** | Assign tasks; **OWNER_APPROVAL** lane; mandatory approval requests | Bootstrap / LegalEntity (ADR-0039); entitlements | Keep `GlobalAccount`, `CreateBusinessBootstrap`; do not invent Notion DTO as Accepted |
-| **Manager** | Four-color dispatcher; overrides; reviewRequired | Operational alerts vs work | `priorityDisplay` / `priorityFloor` are **Proposed** |
+| **Manager** | Four-color dispatcher; any-color move + audit; reviewRequired | Operational alerts vs work | `displayPriority` / `originalSeverity` are **Proposed** names |
 | **Accountant** | Per-client task inbox for client-scoped work | Multi-client **read** hub (ADR-0022); single-tenant mutations; memberships ∪ ClientAccessGrant (PR #82 issue #4) | `ClientAccessGrant` **Accepted** name |
 | **Chef** | Production / recipe / stock / QA tasks | Recipes + production posting services already exist | Do not rename Recipe/ProductionBatch |
 | **Bar Manager** | Shared workflows + specialized risk tasks | ml inventory / risk ops → C-BO-05 after Notion | Specialty fields **Proposed** until Accept |
