@@ -42,15 +42,15 @@ LegalEntity is fiscal/legal — **not** part of menu inheritance.
 | **Facts out** | AccessGranted, ProfessionalClientAccessGranted/Revoked, DangerousOperationAuthorized (AUDIT) |
 | **Depends on** | Organization (scope targets) |
 
-### Task / Operations Dispatcher (Gate 0 / PR-T0 — Proposed only)
+### Task / Operations Dispatcher (ADR-0041 — Accept WITH DELTAS pending confirmation)
 
 | | |
 | --- | --- |
-| **Owns** | *(Proposed — not Accepted)* Task, TaskPriorityHistory, TaskAssignmentHistory, task audit/outbox; references to separate OwnerApprovalRequest / ComplianceSafetyIncident / OwnerEscalation channels |
-| **Does not own** | Inventory movements; Settlement/Payment/Fiscal satisfaction; approval of payments/recipes/refunds; POS `identity_approval_request` lifecycle (Channel B mapping OPEN) |
-| **Key concepts** | `displayPriority` (Manager may move any of RED/ORANGE/YELLOW/WHITE with audited reason) ≠ immutable `originalSeverity` ≠ domain gates; `reviewRequired`; idempotent `derivationKey`; manager-only notify + manual Owner escalate |
-| **Status** | **Proposed** — Gate 0 + PO delta 2026-10-13; ADR-0041 in PR-T0. No runtime. Do not treat as Accepted ADR. |
-| **Depends on** | Identity (authz), Organization (tenant/outlet scope), optional source-entity refs (Orders/Cash/…) |
+| **Owns** | *(ADR-0041)* Task, TaskPriorityHistory, assignments, reminders, task audit/outbox; Channel D OwnerEscalation linkage |
+| **Does not own** | Ledgers; Payment/Settlement/Fiscal satisfaction; recipe publish; Channel B/C aggregates (separate); POS `identity_approval_request` / POS PIN sessions |
+| **Key concepts** | `displayPriority` ≠ `originalSeverity` ≠ domain gates; `reviewRequired`; manager-only notify; manual Owner escalate; **OfficeSession** for first Manager Dispatcher vertical |
+| **Status** | ADR-0041 **ACCEPT WITH DELTAS** (PO 2026-10-13) — final text confirmation required before merge of PR #84. No runtime. |
+| **Depends on** | Identity (OfficeSession), Organization; optional source refs |
 
 ### Workforce
 
