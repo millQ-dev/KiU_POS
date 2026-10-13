@@ -4,49 +4,45 @@
 - **Date:** 2026-10-13
 - **Canonical Origin baseline:** `18316b8f8aa2da6d045b04aebbde3c5434ea046e`
 - **Branch:** `docs/backoffice-gate0-reconciliation`
-- **STOP:** No runtime, no migrations, no merge, no OFFICE1.1 Accept/merge, no Backoffice implementation without subsequent PO authorization.
+- **STOP:** No runtime, no migrations, no merge without separate PO merge authorization, no OFFICE1.1 Accept/merge, no Backoffice implementation without subsequent PO authorization.
+- **PO review (2026-10-13):** APPROVE WITH CHANGES — NOT MERGE AUTHORIZATION. See [`backoffice-gate0-po-delta-2026-10-13.md`](backoffice-gate0-po-delta-2026-10-13.md). Tip at review: `e545285…`.
 
 ---
 
-## 0. Execution status and Notion access blocker
+## 0. Execution status and Notion reconciliation
 
-### 0.1 Notion pages — inaccessible (login wall)
+### 0.1 Live Notion login
 
-Attempted URL (main index):  
-https://app.notion.com/p/3f721d5d34878197bab3c0f34c6b3867
+Browser session to Notion still hits a login wall. **Authoritative consumption for Gate 0 is the Markdown export** supplied under `Downloads/Private & Shared/` (not live Notion scraping).
 
-Browser result: Notion login modal for **«Илья Елизавета's Space»** (email / Google / Apple / Microsoft / Passkey / SSO). No authenticated session available to this agent. Background page content is blurred and unread.
+### 0.2 Export status (ten source pages)
 
-**Pages that could not be read (all required children):**
-
-| # | Page | Status |
+| Page | ID | Export |
 | --- | --- | --- |
-| 1 | Main index `3f721d5d34878197bab3c0f34c6b3867` | INACCESSIBLE — login wall |
-| 2 | 00 Handoff index | INACCESSIBLE (child of index; not reachable) |
-| 3 | Owner | INACCESSIBLE |
-| 4 | Manager | INACCESSIBLE |
-| 5 | Accountant | INACCESSIBLE |
-| 6 | Chef | INACCESSIBLE |
-| 7 | Bar Manager | INACCESSIBLE |
-| 8 | Engineering Contracts | INACCESSIBLE |
-| 9 | Implementation Roadmap | INACCESSIBLE |
+| Parent Index | `3f721d5d34878197bab3c0f34c6b3867` | Present |
+| 00 Handoff | `3f821d5d34878186b682d5db96ff591d` | Present |
+| Owner | `3f821d5d34878178b417e5e574d5e8d8` | Present |
+| Manager | `3f821d5d348781d09e3ad589f2c07726` | Present |
+| Accountant | `3f821d5d348781fb947fe08664edb8cc` | Present |
+| Chef | `3f821d5d3487810b9e86f82eb10159e1` | Present |
+| Bar Manager | `3f821d5d34878172b4c8c018180d50c5` | Present |
+| Engineering Contracts | `3f821d5d348781c49786ff2d638b94f6` | Present |
+| Implementation Roadmap | `3f821d5d3487811eaa15d7a947ef89a0` | Present |
+| Q Place + Q Card | `3f821d5d348781ed94e1e0c9dfbeb254` | **Absent** from folder — separate discovery; **not invented** |
 
-### 0.2 Exported handoff archive
+Matrix: [`backoffice-gate0-notion-origin-matrix.md`](backoffice-gate0-notion-origin-matrix.md). Preserve **ACCEPTED** vs **PROPOSED** vs **OPEN** from source pages.
 
-Searched local paths (`Downloads`, `Desktop`, `Documents`, MillQ tree, agent stores). **No** 13.10.2026 Backoffice handoff export (zip/md/html) found.
-
-**Gate:** Requirement-by-requirement classification against the PO-accepted Notion handoff **cannot** be completed until PO provides a readable export (or Notion access). This document **does not invent** Notion page requirements.
-
-### 0.3 What this Gate 0 *does* cover (allowed sources)
+### 0.3 Allowed sources
 
 | Source | Use |
 | --- | --- |
 | Origin `main` @ `18316b8…` | Runtime / migration / route / test inventory |
 | Accepted ADRs on main | Boundaries already decided |
-| Gate 0 brief (this task) §§3–5 | Explicit TaskService / Manager vertical / five-cabinet constraints — treated as **brief-stated** requirements, not Notion paraphrases |
-| Origin PR #82 (draft, tip `142adb26…`) | Preserve OFFICE1.1; record open review issues; **do not** Accept Amendment A / ADR-0040 |
+| Markdown export 00–07 + parent | PO-accepted Backoffice handoff 13.10.2026 |
+| PO delta 2026-10-13 | Required corrections (priority, channels, authz) |
+| Origin PR #82 (draft) | Preserve OFFICE1.1; **do not** Accept Amendment A / ADR-0040 |
 
-**Q Place / Q Card** remains a separate discovery stream (out of scope).
+**Q Place / Q Card** remains a separate discovery stream (out of five-cabinet delivery scope).
 
 ---
 
@@ -104,7 +100,7 @@ These remain **OPEN** on the OFFICE1.1 track. They are **inputs** to Backoffice 
 
 ### 2.2 Caveat (Notion)
 
-Rows below classify **Origin runtime vs Accepted ADRs + Gate 0 brief**. They are **not** a line-by-line Notion handoff matrix. After the export is available, each Notion requirement must be re-classified without changing Accepted ADR boundaries unless PO re-opens them.
+Section 2.3 remains the Origin module inventory. **Line-by-line Notion→Origin classification** lives in [`backoffice-gate0-notion-origin-matrix.md`](backoffice-gate0-notion-origin-matrix.md) (export-based). Q Place+Q Card page still absent from export → that stream stays PARTIAL/out-of-scope.
 
 ### 2.3 Domain matrix (Origin @ `18316b8`)
 
@@ -207,14 +203,16 @@ Rows below classify **Origin runtime vs Accepted ADRs + Gate 0 brief**. They are
 | Revenue basis / actual COGS / operating economics services | **PARTIAL** | `reporting/*` services + acceptance tests; no Owner/Accountant cabinet read hub HTTP |
 | Accountant multi-client read inbox | **MISSING** | ADR-0022 allows read aggregation; runtime absent |
 
-#### Task / Manager dispatcher (brief §§3–4)
+#### Task / Manager dispatcher (PO ACCEPTED Manager + PO delta)
 
 | Capability | Class | Evidence |
 | --- | --- | --- |
-| Four-color TaskService | **MISSING** / **LEVEL C** (new domain ADR) | Zero matches for TaskService/dispatcher in repo |
-| Manager overrides + immutable history | **MISSING** | ApprovalRequest is POS dangerous-op only — related pattern, not Task override |
-| Operational alerts vs Owner approval vs legal/safety vs escalation lanes | **MISSING** | Only `DANGEROUS_OPERATION_APPROVAL_REQUESTED` outbox type |
-| Priority bypass of safety/financial gates | **FORBIDDEN** (brief) | Must be encoded in TaskService ADR |
+| Four-color TaskService; Manager may move **any** color incl. RED→YELLOW | **MISSING** / **LEVEL C** (ADR-0041 / PR-T0) | No TaskService in runtime |
+| Manual priority change: reason + actor + from/to + time + immutable history | **MISSING** | — |
+| `displayPriority` ≠ `originalSeverity` ≠ domain gates | **LEVEL C** | PO delta withdraws `priorityFloor` as reclassification ban |
+| Channels A–D (Task / Owner ApprovalRequest / compliance / manual escalation) | **MISSING** | Must not collapse into one lifecycle |
+| Priority change never disables legal/financial/food-safety/operational gates | **FORBIDDEN to bypass** | Encode in TaskService ADR |
+| POS `identity_approval_request` | **EXISTS** (dangerous-op) | Separate from Ordinary Manager Task |
 
 #### Workforce / payroll
 
@@ -236,21 +234,23 @@ Rows below classify **Origin runtime vs Accepted ADRs + Gate 0 brief**. They are
 | **ADR-0022 Accepted vs no ClientAccessGrant tables** | Professional path decided; Accountant cabinet blocked on Identity runtime |
 | **PR #82 Proposed vs Gate 0** | Gate 0 must not Accept Amendment A / ADR-0040; Backoffice Identity depends on those OPEN decisions |
 | **POS ApprovalRequest ≠ TaskService** | Reuse patterns (idempotency, audit, outbox) carefully; do not overload `identity_approval_request` into four-color tasks |
-| **Display priority vs operational gates** | Brief forbids lowering display priority to bypass safety/financial gates — must be a hard invariant in Task ADR |
-| **Empty scope semantics** | PR #82 issue #3 + existing grant indexes: empty LE/Outlet must not mean tenant-wide — Task scopes must follow same fail-closed rule |
-| **DTO names vs Accepted ADRs** | Notion/Engineering Contracts names (unread) are **proposed labels** until Accept; do not rename Accepted ADR terms (`ClientAccessGrant`, `GlobalAccount`, PCE, etc.) |
+| **Display priority vs operational gates** | PO: Manager may reclassify any color with audit; reclassification must **never** disable gates; do **not** ban RED→YELLOW via `priorityFloor` |
+| **Empty scope semantics** | R82-3 + PO §4: empty LE/Outlet fail-closed; explicit tenant-wide needs authorized scope + confirmation + audit |
+| **DTO names vs Accepted ADRs** | Page 06 names are **PROPOSED**; do not rename Accepted ADR terms (`ClientAccessGrant`, `GlobalAccount`, PCE, etc.) |
+| **Four channels** | Task ≠ Owner ApprovalRequest ≠ compliance/safety ≠ manual Owner escalation |
 
 ### 3.2 Remaining Level C decisions (known without Notion)
 
 | ID | Decision | Blocks |
 | --- | --- | --- |
-| C-BO-01 | Consume / Accept Notion Backoffice handoff export (page-level requirements) | Full requirement matrix |
-| C-BO-02 | TaskService domain ADR (priorities, lanes, override, reviewRequired, idempotent derivation) | Manager vertical + all cabinets |
+| C-BO-01 | PO merge authorization for Gate 0 docs (#83) after delta | Merge of #83 only |
+| C-BO-02 | TaskService ADR Accept (PR-T0 / ADR-0041) — displayPriority, channels A–D, reviewRequired, idempotency | Manager vertical + cabinets |
 | C-BO-03 | OFFICE1.1 OPEN issues on PR #82 (OTP, trusted device, empty scope, unified hub, recovery) | Office Identity for cabinets |
-| C-BO-04 | Whether POS `identity_approval_request` remains a separate lane vs becomes a Task subtype | Avoid double models |
-| C-BO-05 | Bar ml-inventory / specialized risk ops (after Notion) | Bar Manager vertical |
+| C-BO-04 | Mapping POS `identity_approval_request` ↔ Owner ApprovalRequest channel B (keep separate lifecycles) | Avoid double models |
+| C-BO-05 | Bar ml-inventory / open-item floor / comps (ACCEPTED product; engineering detail OPEN) | Bar Manager vertical |
 | C-BO-06 | Fiscal production provider selection / legal | Live fiscal beyond Core staging |
-| C-BO-07 | Q Place / Q Card stream boundary confirmation | Keep separate |
+| C-BO-07 | Q Place / Q Card (export page missing; separate discovery) | Keep separate |
+| C-BO-08 | Reminder/escalation timing defaults; automation policy matrix | Config OPEN per page 06/07 |
 
 **Not Level C for first Manager vertical (brief §4):** Floor/Table, payroll, fiscal provider, biometrics, full Accounting.
 
@@ -269,41 +269,48 @@ Rows below classify **Origin runtime vs Accepted ADRs + Gate 0 brief**. They are
 ### 4.2 Core entities (proposed)
 
 ```text
-Task
+Task                              -- Channel A (Ordinary Manager Task)
   taskId, tenantId
-  outletId?                    -- null only if explicitly tenant-scoped grant allows; empty ≠ tenant-wide
-  priorityDisplay: RED|ORANGE|YELLOW|WHITE
-  priorityFloor: RED|ORANGE|YELLOW|WHITE   -- immutable min from derivation rules; display may raise, never lower below floor
-  lane: OPERATIONAL_ALERT | OWNER_APPROVAL | LEGAL_SAFETY | MANUAL_ESCALATION | WORK
+  outletId?                       -- empty/omitted ≠ tenant-wide (fail-closed)
+  displayPriority: RED|ORANGE|YELLOW|WHITE   -- Manager may move to ANY color
+  originalSeverity: RED|ORANGE|YELLOW|WHITE  -- immutable at create/derive; not a ban on display moves
   status: OPEN | IN_PROGRESS | COMPLETED | CANCELLED | REVOKED | SUPERSEDED
   reviewRequired: boolean
   reviewStatus?: PENDING_REVIEW | APPROVED | REJECTED
-  source: { type, id, eventId? }   -- contextual link
+  source: { type, id, eventId? }
   assignees: ActorRef[]
   deadlineAt?
   createdBy, createdAt
-  derivationKey?               -- for idempotent system-derived tasks
+  derivationKey?
   revokedAt?, revokeReason?
 
-TaskOverrideEvent              -- immutable
+TaskPriorityHistory             -- append-only
   taskId, actorId, at
-  fromPriorityDisplay, toPriorityDisplay
+  fromDisplayPriority, toDisplayPriority
   explanation (mandatory, non-empty)
-  -- REJECT if toPriorityDisplay < priorityFloor OR if override would skip a gate
+  -- ALLOW any four-color transition including RED→YELLOW
+  -- NEVER clears domain gates / ApprovalRequest / compliance holds
+
+-- Separate entities / lifecycles (not Task subtypes that complete into approvals):
+OwnerApprovalRequest            -- Channel B
+ComplianceSafetyIncident        -- Channel C
+OwnerEscalation                 -- Channel D (manual Manager → Owner)
 
 TaskComment / TaskAttachment / TaskReminder
-TaskAssignmentHistory          -- assign, reassign, revoke, stale
+TaskAssignmentHistory
 ```
 
-### 4.3 Invariants
+> Names above are **PROPOSED** engineering labels (page 06). Not Accepted ADR identifiers until PR-T0 Accept.
 
-1. **Priority floor:** system-derived `priorityFloor` cannot be reduced by Manager display override.
-2. **No gate bypass:** completing/overriding a Task must not mark fiscal/inventory/payment gates satisfied.
-3. **Idempotent derivation:** same `(tenantId, derivationKey)` → same Task (or SUPERSEDE with audit), safe under reconnect/retry.
-4. **Lane separation:** Owner approval requests and legal/safety events are not mixed into ordinary White work without explicit escalation rules.
-5. **Permissions:** create/assign/complete/review/override scoped by Tenant + Outlet + actor grants; fail closed on empty scope.
-6. **Audit:** every state change, override, review decision, revoke → immutable audit (extend or parallel `identity_audit_event` pattern; prefer task-owned audit table).
-7. **Stale assignment / revocation:** on membership revoke or outlet leave, open assignments become REVOKED or require reassign; no silent keep.
+### 4.3 Invariants (PO delta)
+
+1. **Four-color freedom:** Manager may change `displayPriority` to any of RED/ORANGE/YELLOW/WHITE with audited reason; **no** `priorityFloor` ban on RED→YELLOW.
+2. **Triple separation:** `displayPriority` ≠ `originalSeverity` ≠ backend legal/financial/food-safety/operational gates.
+3. **No gate bypass:** completing a Task or changing its color must not approve payments, recipe publish, refunds, or regulated ops; must not clear compliance holds.
+4. **Channel separation:** A/B/C/D remain distinct; Manager ops notify Manager only; Owner push only via B, C (where mandated), or D.
+5. **Idempotent derivation:** `(tenantId, derivationKey)` → same Task or SUPERSEDE+audit.
+6. **Permissions:** fail-closed empty LE/Outlet; explicit tenant-wide requires authorized scope + confirmation + audit; professional ≠ membership.
+7. **Audit + stale revoke:** append-only history; membership/outlet leave revokes or forces reassign.
 
 ### 4.4 API sketch (proposed)
 
@@ -317,8 +324,10 @@ POST   /api/v1/tasks/:taskId/comments
 POST   /api/v1/tasks/:taskId/attachments
 POST   /api/v1/tasks/:taskId/complete     -- if reviewRequired → PENDING_REVIEW
 POST   /api/v1/tasks/:taskId/review       -- approve/reject + explanation
-POST   /api/v1/tasks/:taskId/override-priority  -- mandatory explanation; floor checked
+POST   /api/v1/tasks/:taskId/priority          -- any four-color move; mandatory explanation; never clears gates
+POST   /api/v1/tasks/:taskId/escalate-owner    -- Channel D
 POST   /api/v1/tasks/:taskId/revoke
+-- Channels B/C use separate route families (OwnerApprovalRequest / ComplianceSafetyIncident)
 ```
 
 Audience: **OfficeSession** (future) or explicitly authorized Manager principal — **not** guest; POS session may only create derivation events via server-side ports, not full dispatcher.
@@ -406,34 +415,26 @@ Compatibility rule: one Task kernel; cabinet UIs are projections + permission pa
 ## 7. Dependency graph and small PR sequence
 
 ```text
-[GATE] Notion export readable
+PR-G0  Gate 0 + PO delta + Notion matrix (#83)     Level C docs  ── await PO merge auth
+        │
+        ├─► PR-82 OFFICE1.1 (independent)         Level C ── OPEN issues; no silent Accept
         │
         ▼
-PR-G0  Gate 0 reconciliation docs (this)          Level C docs  ── STOP for PO
-        │
-        ├─► PR-82 OFFICE1.1 Accept/merge          Level C ── only after OPEN issues closed by PO
-        │         │
-        │         ▼
-        │    PR-ID Office GlobalAccount runtime   Level B/C mix per ADR
+PR-T0  TaskService ADR-0041 (separate PR)         Level C docs  ── this next
         │
         ▼
-PR-T0  TaskService ADR (C-BO-02)                  Level C docs
+PR-T1  Task schema + permissions + audit          Level B (after ADR Accept)
         │
         ▼
-PR-T1  Task schema + permissions + audit          Level B
+PR-M1  Manager dispatcher API + minimal UI        Level B
         │
-        ▼
-PR-M1  Manager dispatcher API + minimal UI vertical Level B
-        │
-        ├─► PR-O1 Owner approval lane bindings
-        ├─► PR-A1 Accountant read hub (after Identity grants)
-        ├─► PR-C1 Chef task bindings to recipes/production
-        └─► PR-B1 Bar specialty (after C-BO-05)
+        ├─► Channel B/C engines (Owner approval / compliance)
+        ├─► PR-A1 Accountant hub (after Identity)
+        ├─► PR-C1 Chef bindings
+        └─► PR-B1 Bar specialty
 ```
 
-**Recommended next PR after this Gate 0:**  
-**Not** runtime. Either (a) PO delivers Notion export → Gate 0 addendum matrix PR, or (b) PO authorizes TaskService ADR draft PR (**PR-T0**) **after** confirming Notion-critical Manager requirements.  
-**Do not** start OFFICE1.1 runtime or Backoffice implementation without PO authorization.
+**Recommended next PR:** **PR-T0** TaskService ADR (separate docs-only PR; do not duplicate #83). Do **not** merge #83 until separate PO merge authorization. No runtime / migrations / #82 edits.
 
 ---
 
@@ -473,6 +474,7 @@ FinSec residual (binds to future TaskService ADR C-BO-02, not Gate 0 rewrite): m
 - [x] TaskService proposed contract + Manager vertical + five-cabinet notes
 - [x] Dependency graph + next PR recommendation
 - [x] Independent reviews completed in separate contexts (all APPROVE)
-- [ ] PO decision on G0-NOTION / G0-PO
+- [x] PO APPROVE WITH CHANGES recorded; delta + Notion matrix applied
+- [ ] Separate PO **merge authorization** for #83
 - **STOP** before runtime, migration, merge, OFFICE1.1 Accept
-- **Do not** arm merge-when-ready until PO records G0-PO (Level C)
+- **Do not** arm merge-when-ready until PO merge authorization (Level C)

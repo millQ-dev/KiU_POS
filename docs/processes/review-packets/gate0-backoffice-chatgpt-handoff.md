@@ -26,13 +26,11 @@ Copy the block below into the strategic ChatGPT thread. No secrets.
 - Notion handoff 13.10.2026 агенту недоступен (login wall «Илья Елизавета's Space»); локального export не найдено.
 
 4) Что сделано в этом блоке
-- Зафиксированы SHA + migration head.
-- PR #82 сохранён; 5 review issues вынесены отдельно (не Accepted).
-- Матрица EXISTS/PARTIAL/MISSING/LEVEL C/LEGAL по Origin + Accepted ADR + brief §§3–5 (НЕ полная Notion-матрица).
-- Proposed контракт TaskService (priorityFloor, lanes, reviewRequired, idempotent derivation).
-- Минимальный Manager vertical + совместимость пяти кабинетов.
-- Граф зависимостей и рекомендованный next PR.
-- Запрошены независимые Architecture / FinSec / Privacy ревью.
+- Зафиксированы SHA + migration head; PR #82 сохранён; 5 OPEN issues отдельно.
+- PO REVIEW: APPROVE WITH CHANGES — delta: any-color priority moves (нет ban RED→YELLOW), channels A–D, fail-closed scope.
+- Notion Markdown export 00–07 + parent потреблён; матрица Notion→Origin; Q Place+Q Card page отсутствует в папке.
+- TaskService Proposed (displayPriority ≠ originalSeverity ≠ gates); PR-T0 = отдельный ADR-0041.
+- Независимые ревью Architecture/FinSec/Privacy APPROVE (на tip до delta).
 
 5) Что сознательно НЕ сделано
 - Не прочитаны страницы Notion (недоступны) — требования со страниц не выдуманы.
