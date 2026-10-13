@@ -1,12 +1,14 @@
 # ADR-0041: TaskService & Manager Dispatcher (four-color tasks)
 
-- **Status:** **Proposed** (Level C — docs only; **not Accepted**; **not** runtime authorization)
+- **Status:** **Accepted WITH DELTAS** (PO 2026-10-13) — final ADR text on this PR tip pending targeted reviewer confirmation; **not** runtime authorization; **do not merge PR #84** until final text confirmed
 - **Date:** 2026-10-13
+- **Accepted (WITH DELTAS):** 2026-10-13
 - **Decision owners:** Product Owner and System Architect
 - **Autonomy:** Level **C**
-- **Related:** Architecture v1.3 / ADR-0008; ADR-0015; ADR-0022; ADR-0036 (POS ApprovalRequest — separate); ADR-0039; Gate 0 [`backoffice-gate0-po-delta-2026-10-13.md`](../architecture/backoffice-gate0-po-delta-2026-10-13.md) (PO APPROVE WITH CHANGES on #83); Notion handoff Manager + Engineering Contracts 13.10.2026
+- **Related:** Architecture v1.3 / ADR-0008; ADR-0015; ADR-0022; ADR-0036 (POS ApprovalRequest — separate); ADR-0039; Gate 0 merged via Origin PR #83 @ `16c026a…` / authorized tip `a4fbb0d…`; Notion handoff Manager + Engineering Contracts 13.10.2026
 - **This PR:** Docs only. **No** migrations, **no** runtime. Independent of OFFICE1.1 PR #82 (do not Accept Amendment A / ADR-0040 here).
-- **First implementation target (after Accept + separate runtime PRs):** narrow **Manager Dispatcher** vertical only.
+- **First implementation target (after final ADR confirmation + separate Level B authorization):** narrow **Manager Dispatcher** vertical only.
+- **PO deltas applied:** D1 Identity (OfficeSession), D2 ApprovalRequest non-substitution, D3 Manager absence reassignment, D4 no invented SLAs / no broad auto-derive defaults.
 
 ---
 
@@ -37,7 +39,9 @@ Introduce Core module **Task** (operations dispatcher):
 
 Manager operational notifications → **Manager only** by default. Owner receives B, mandated C, or D — not automatic dispatcher push.
 
-Mapping of existing POS `identity_approval_request` into Channel B (or keeping it POS-only beside Office Channel B) is **OPEN** for a follow-up Accept note; until then, **do not** overload `identity_approval_request` rows as four-color Tasks.
+**D2 — ApprovalRequest / domain SoT (Accepted WITH DELTAS):** TaskService **cannot** independently approve regulated or financial domain operations. Domain-specific authorization and source-of-truth state machines (Payments, Settlement, Fiscal, Recipe publish, inventory posting, POS dangerous-op ApprovalRequest, etc.) remain **authoritative**. Task completion, priority change, or review **never** substitutes for domain approval.
+
+Mapping of existing POS `identity_approval_request` into Office Channel B (or keeping it POS-only beside Office Channel B) remains **OPEN** for schema design; until then, **do not** overload `identity_approval_request` rows as four-color Tasks.
 
 ### 3. Priority model (PO ACCEPTED)
 
@@ -77,6 +81,7 @@ Reminders: on overdue and while AWAITING_REVIEW (exact timing defaults **OPEN** 
 - Every mutation server-checked; **denied by default**.
 - Empty LegalEntity/Outlet (or other scope dimensions) **fail-closed** — never silent tenant-wide.
 - Explicit tenant-wide grant: authorized capability + confirmation + audit.
+- Manager Dispatcher (M1) audience: **OfficeSession** principal + grants (D1). POS PIN session is not a substitute.
 - Proposed permission keys (modeling labels, not final strings): `task.dispatch`, `task.create`, `task.assign`, `task.complete`, `task.review`, `task.priority`, `task.escalate_owner`.
 - Professional `ClientAccessGrant` path remains independent of employee membership (ADR-0022).
 
@@ -123,11 +128,13 @@ Align with existing Identity notification pattern (`notification-port.ts` / `DAN
 - Attachment **bytes** (if any) follow Privacy Control Plane / retention rules (ADR-0015); Task row stores references + non-sensitive descriptors, not secrets.
 - This rule is **not optional** for Accept; exact retention TTLs remain OPEN for Level B schema.
 
-### 9. Manager absence, unavailable assignee, operational fallback
+### 9. Manager absence, unavailable assignee, operational fallback (**D3**)
 
-- If assignee unavailable (revoked grant, inactive, wrong outlet): **reassign** within Manager dispatch audience or leave OPEN unassigned with Manager-visible flag — **do not** silently notify Owner.
-- If Manager on duty absent: fallback to **other Managers with `task.dispatch` on same outlet scope** (or tenant-wide only if explicit grant). If none: Task remains visible in outlet dispatcher for next authorized Manager session; optional outlet-level escalation list is **OPEN** config — still **not** Owner auto-push.
-- Channel D remains the only Manager-initiated Owner path for ordinary operational Tasks.
+- If assignee unavailable (revoked grant, inactive, wrong outlet): **reassign** only to another **authorized** actor with the appropriate capability for that action, or leave OPEN unassigned with Manager-visible flag — **do not** silently notify Owner.
+- If Manager on duty absent: reassignment / fallback **only** to another authorized Manager with **`task.dispatch`** (and matching outlet/tenant scope; tenant-wide only if explicit grant). If none: Task remains visible in outlet dispatcher for the next authorized Manager session — **still not** Owner auto-push.
+- **No automatic Owner escalation** from the operational Manager Task channel (Channel A), including RED and Manager-absence cases.
+- Statutory, compliance, and safety notifications (Channel C) remain **independent** of Manager-absence fallback.
+- Channel D remains the only **manual** Manager-initiated Owner path for ordinary operational Tasks.
 - Permission **revalidation** on every mutate: cached UI grants are insufficient; server re-checks scope + capability at command time.
 
 ### 10. Event routing (role-aware, grant-enforced)
@@ -138,20 +145,24 @@ Align with existing Identity notification pattern (`notification-port.ts` / `DAN
 - Channel B/C use their own notification policies (Mobile Owner approve, statutory).
 - Cross-tenant notify/read/write: **denied**.
 
-### 11. First usable Manager vertical (runtime scope after Accept)
+### 11. First usable Manager vertical (runtime scope after Accept) — **D1 / D4**
+
+**D1 — Identity:** The first Manager Dispatcher vertical **requires an authorized `OfficeSession`**. POS PIN authentication (`identity_user` / TERMINAL/MOBILE sessions per ADR-0036/0039) **must remain separate** and must **not** be used as the Manager Dispatcher principal for this vertical. Future POS/Mobile **task commands** (e.g. employee complete-from-Mobile) need their **own explicit principal mapping and scope validation** — not silent reuse of POS PIN session as Office Manager.
+
+**D4 — Defaults:** Do **not** invent reminder SLA numeric defaults in this ADR. Do **not** enable broad automated task derivation by default. Initial runtime must use **explicitly approved** events and configurations only (allowlisted derive rules + configured reminder policies when Level B ships).
 
 **In:**
 
-1. Authorized manager context (existing tenant `identity_user` + grants **or** OfficeSession when OFFICE1.1 ships — dual-stack must be explicit, not silent forever).
+1. Authorized Manager via **OfficeSession** + `task.dispatch` (and related) grants on scoped outlet/tenant.
 2. Live dispatcher read model (four columns).
 3. Manual contextual Task create with sourceRef, assignee, deadline, displayPriority, reviewRequired.
 4. Priority change any color + history.
-5. Employee complete (+ optional review).
+5. Employee complete (+ optional review) via explicitly mapped principal (Office or future Mobile mapping — not POS PIN Manager session).
 6. Manual Owner escalation (Channel D stub OK if Owner inbox deferred).
 7. Immutable audit.
-8. Tests listed in §10.
+8. Tests listed in §13.
 
-**Out of first vertical:** Floor/Table, payroll, bank execution, biometry/selfie shift, fiscal provider, full Accounting, Chef/Bar specialty, OCR, Q Place/Q Card, automatic derivation from all domain events (optional thin derive from one existing signal later — not required for M1).
+**Out of first vertical:** Floor/Table, payroll, bank execution, biometry/selfie shift, fiscal provider, full Accounting, Chef/Bar specialty, OCR, Q Place/Q Card, **broad** automatic derivation, invented reminder SLAs, POS-PIN-as-Manager-Dispatcher.
 
 ### 12. Five-cabinet compatibility
 
@@ -170,22 +181,25 @@ One Task kernel; cabinets are projections + permission packs. Owner uses Channel
 
 ### 14. Acceptance consequences
 
-Accepting this ADR authorizes **design** of TaskService and subsequent Level B schema/API PRs under the above invariants. It does **not** authorize:
+**Accept WITH DELTAS** (this text, after targeted review confirmation) authorizes **design** of TaskService and subsequent Level B schema/API PRs under the above invariants. It does **not** authorize:
 
-- merge of Gate 0 #83 without separate PO merge auth;
-- OFFICE1.1 Accept;
+- TaskService **runtime** or migrations without a **separate Level B authorization**;
+- OFFICE1.1 Accept / merge of PR #82;
 - fiscal provider go-live;
-- inventing Q Place/Q Card requirements.
+- inventing Q Place/Q Card requirements;
+- merge of PR #84 until final ADR text is confirmed.
 
-### 15. Classification map (for PO decision)
+Gate 0 PR #83 is already merged on Origin (`16c026a…`).
+
+### 15. Classification map (post-delta)
 
 | Class | Items |
 | --- | --- |
-| **Already PO ACCEPTED behavior** | Four colors; Manager may move any color with reason+audit; display ≠ gates; manager-only ops notify; manual Owner escalate; reviewRequired workflow; empty scope fail-closed; Task complete ≠ regulated approve; food-safety/legal gates independent; Q Place/Q Card out of this delivery |
-| **Proposed technical choices** | Entity/DTO names; state enum; derivationKey composition; reminder keying; permission_key labels; HTTP shapes; SUPERSEDE rules; Manager-fallback to other `task.dispatch` holders; §8.1 safe display metadata (mandatory under ADR-0015) |
-| **Open Level C** | Reminder SLA defaults; OfficeSession vs POS principal; Channel B vs POS `identity_approval_request` table mapping; automation rule matrix; outlet escalation list when no Manager |
-| **Runtime blockers (before M1 ship)** | ADR Accept; schema+API PR; Identity grants for `task.*`; independent reviews+tests §13 |
-| **Deferrable** | Auto-derive from all domain events; Owner/Accountant/Chef/Bar full UIs; Floor/Table; payroll; bank; biometry; fiscal provider; OCR |
+| **PO ACCEPTED behavior (incl. D1–D4)** | Four colors; unrestricted manual reprioritization with reason + immutable history; `originalSeverity` ≠ `displayPriority` ≠ gates; channels A/B/C/D; fail-closed scopes; idempotency + audit; `reviewRequired`; Privacy §8.1; **OfficeSession** for first Manager Dispatcher; POS PIN separate; Task never substitutes domain approval; absence reassignment only to authorized `task.dispatch` Managers; no auto Owner escalate from Channel A; no invented reminder SLAs; no broad auto-derive by default |
+| **Proposed technical choices** | Entity/DTO names; state enum; derivationKey composition; reminder keying; permission_key labels; HTTP shapes; SUPERSEDE rules; Mobile/POS **future** task-command principal mapping (must be explicit when designed) |
+| **Open Level C / design** | Exact reminder SLA numbers (when configured); Channel B vs POS `identity_approval_request` table mapping; Mobile employee-complete principal mapping ADR note; allowlisted derive-event catalog for first ship |
+| **Runtime blockers (before M1 ship)** | Final ADR text confirmation + PR #84 merge; separate Level B auth; OfficeSession runtime (OFFICE1.1 path); schema+API; `task.*` grants; tests §13 |
+| **Deferrable** | Broad auto-derive; Owner/Accountant/Chef/Bar full UIs; Floor/Table; payroll; bank; biometry; fiscal provider; OCR |
 
 ## Alternatives considered
 
@@ -193,13 +207,15 @@ Accepting this ADR authorizes **design** of TaskService and subsequent Level B s
 - `priorityFloor` forbidding RED→YELLOW — **rejected** by PO 2026-10-13.
 - Auto-push all RED tasks to Owner — **rejected** (PO Manager policy).
 - Per-cabinet separate task databases — **rejected** (shared kernel).
-- Silent Owner notify on Manager absence — **rejected**.
+- Silent Owner notify on Manager absence — **rejected** (D3).
+- POS PIN session as Manager Dispatcher principal for M1 — **rejected** (D1).
+- Broad auto-derive / invented reminder SLAs by default — **rejected** (D4).
 
 ## OPEN (do not invent)
 
-- Exact reminder SLAs and automation rule matrix defaults.
+- Exact reminder SLA numeric values **when** a configured policy is later approved (D4 forbids inventing defaults now).
 - Final permission_key strings and HTTP paths.
-- OfficeSession vs POS principal binding for Manager cabinet.
+- Explicit Mobile/POS **task-command** principal mapping (future; not M1 Manager Dispatcher).
 - Channel B schema vs reuse/extend POS approval tables.
+- Allowlisted derive-event catalog for first Level B ship (empty/default = no auto-derive).
 - Selfie shift check-in retention (privacy) — out of M1.
-- Outlet-level on-call escalation list when zero Managers available.
