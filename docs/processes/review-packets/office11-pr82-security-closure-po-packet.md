@@ -5,7 +5,8 @@
 - **Autonomy:** Level **C**
 - **PR:** Origin #82 — `docs/office1.1-global-username-professional-access`
 - **Canonical main (do not re-review #83/#84):** `94f540ae64fc9c88bda50bf7c275ecec3f6f4909`
-- **Remediation HEAD: `6cb613be86b07ef105cf0de0aba62762f9a14938`
+- **Remediation HEAD:** `712df9817339163794312acbcb3ce5caca184388`
+- **FinSec-fix content:** `6cb613be86b07ef105cf0de0aba62762f9a14938`
 - **Prior preflight packet:** `office11-pr82-po-decision-packet.md` (2026-10-12) — still valid for Amendment A body; **O5 empty-scope and clients-strip-only are superseded** by this closure where flagged.
 
 ---
@@ -105,28 +106,28 @@ See remediation doc per item. Minimum gate set:
 
 | Review | Scope | Result |
 | --- | --- | --- |
-| Architecture | Remediation + ADR-0040 §5–§6–§9 + Amendment B + M1 sequencing | **APPROVE** @ `ccacece` (content `43b81e3`) |
-| FinSec / Identity-Security | OTP proof, TrustedDevice, recovery, fail-closed scope, no password-only | **REQUEST CHANGES** @ `ccacece` → **phone lost-path split + stale-proof invalidate remediated**; **re-review pending** on post-fix tip |
-| Privacy | Phone/OTP metadata, retirement, accountant hub labels (no PII expansion) | **APPROVE** @ `ccacece` |
+| Architecture | Remediation + ADR-0040 §5–§6–§9 + Amendment B + M1 sequencing | **APPROVE** @ `ccacece` (holds on additive FinSec recovery fix @ `712df98`) |
+| FinSec / Identity-Security | OTP proof, TrustedDevice, recovery, fail-closed scope, no password-only | **APPROVE** @ `712df98` (prior REQUEST CHANGES @ `ccacece` closed) |
+| Privacy | Phone/OTP metadata, retirement, accountant hub labels (no PII expansion) | **APPROVE** @ `ccacece` (holds; recovery split is privacy-positive) |
 
 Implementation agent must **not** self-approve. Review Agent: APPROVE or REQUEST CHANGES only.
 
-### FinSec REQUEST CHANGES (addressed in post-`ccacece` tip)
+### FinSec findings closed @ `6cb613b` / tip `712df98`
 
-1. **High:** Split in-possession phone change vs lost-phone recovery; reject password+TrustedDevice+attacker-new-phone alone.
-2. **Med:** Invalidate unconsumed `SIGNUP_AND_FIRST_SESSION` proofs when first OfficeSession minted by any MFA path.
-3. **Med:** Amendment A A2 Later logins now includes TrustedDevice in lockstep with B2.
-4. **Low:** Architecture §5.3 mutation wording aligned to ADR-0040 §6.
+1. **High closed:** In-possession vs lost-phone split; reject password+TrustedDevice+attacker-new-phone alone.
+2. **Med closed:** Invalidate unconsumed `SIGNUP_AND_FIRST_SESSION` proofs on first OfficeSession (any MFA).
+3. **Med closed:** Amendment A A2 Later logins includes TrustedDevice with B2.
+4. **Low closed:** Architecture §5.3 mutation wording aligned to ADR-0040 §6.
 
 ---
 
 ## 7. Remaining blockers
 
 1. PO decision on C1–C5 (especially **C1 hard** fail-closed supersession).
-2. Independent Architecture / FinSec / Privacy results on remediation HEAD.
+2. ~~Independent reviews~~ — Architecture / FinSec / Privacy **APPROVE** recorded; PO Accept still required.
 3. Amendment A still Proposed (phone-first) — required with B for coherent Accept.
-4. Runtime OPEN numerics (OTP TTL, retirement days, TrustedDevice max, break-glass) — may defer past docs Accept but block Identity Level B prod.
-5. **STOP:** no merge, no migrations, no runtime until PO MERGE GO after Accept + reviews.
+4. Runtime OPEN numerics (OTP TTL, retirement days, TrustedDevice max, delayed cutover, break-glass) — may defer past docs Accept but block Identity Level B prod.
+5. **STOP:** no merge, no migrations, no runtime until PO MERGE GO after Accept.
 
 ---
 
