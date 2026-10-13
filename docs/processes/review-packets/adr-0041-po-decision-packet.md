@@ -31,7 +31,7 @@ See ADR §15: **PO ACCEPTED** vs **Proposed technical** vs **Open Level C** vs *
 | --- | --- | --- |
 | Architecture | APPROVE @ `79b1073…` | `adr-0041-architecture-review.md` |
 | Financial Security | APPROVE @ `79b1073…` | `adr-0041-finsec-review.md` |
-| Privacy | REQUEST CHANGES @ `79b1073…` → remediation §8.1 on this tip; re-review PENDING | `adr-0041-privacy-review.md` |
+| Privacy | APPROVE @ `863d3df…` (re-review after §8.1) | `adr-0041-privacy-review.md` |
 
 ## Final HEAD
 
