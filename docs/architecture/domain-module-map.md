@@ -42,6 +42,16 @@ LegalEntity is fiscal/legal — **not** part of menu inheritance.
 | **Facts out** | AccessGranted, ProfessionalClientAccessGranted/Revoked, DangerousOperationAuthorized (AUDIT) |
 | **Depends on** | Organization (scope targets) |
 
+### Task / Operations Dispatcher (Gate 0 / PR-T0 — Proposed only)
+
+| | |
+| --- | --- |
+| **Owns** | *(Proposed — not Accepted)* Task, TaskPriorityHistory, TaskAssignmentHistory, task audit/outbox; references to separate OwnerApprovalRequest / ComplianceSafetyIncident / OwnerEscalation channels |
+| **Does not own** | Inventory movements; Settlement/Payment/Fiscal satisfaction; approval of payments/recipes/refunds; POS `identity_approval_request` lifecycle (Channel B mapping OPEN) |
+| **Key concepts** | `displayPriority` (Manager may move any of RED/ORANGE/YELLOW/WHITE with audited reason) ≠ immutable `originalSeverity` ≠ domain gates; `reviewRequired`; idempotent `derivationKey`; manager-only notify + manual Owner escalate |
+| **Status** | **Proposed** — Gate 0 + PO delta 2026-10-13; ADR-0041 in PR-T0. No runtime. Do not treat as Accepted ADR. |
+| **Depends on** | Identity (authz), Organization (tenant/outlet scope), optional source-entity refs (Orders/Cash/…) |
+
 ### Workforce
 
 | | |
