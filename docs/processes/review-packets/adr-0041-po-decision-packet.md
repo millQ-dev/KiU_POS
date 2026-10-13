@@ -34,7 +34,7 @@ See ADR §15 embedded below: **PO ACCEPTED** vs **Proposed technical** vs **Open
 
 ## Final HEAD
 
-_(set after push)_
+`1977443784848396dbba82617f946e3bf0ce62ab`
 
 ---
 
