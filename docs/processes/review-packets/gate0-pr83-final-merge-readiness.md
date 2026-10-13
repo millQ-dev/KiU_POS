@@ -9,7 +9,7 @@
 
 | Field | Value |
 | --- | --- |
-| Final HEAD SHA | _(set on commit)_ |
+| Final HEAD SHA | `a303fc0a5492d2fdaa26f6ef8e93ab9b2d70adb0` |
 | Diff vs `main` | docs paths only (verified) |
 
 ## Checklist before PO merge auth
