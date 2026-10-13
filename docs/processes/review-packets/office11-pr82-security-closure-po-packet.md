@@ -5,7 +5,7 @@
 - **Autonomy:** Level **C**
 - **PR:** Origin #82 — `docs/office1.1-global-username-professional-access`
 - **Canonical main (do not re-review #83/#84):** `94f540ae64fc9c88bda50bf7c275ecec3f6f4909`
-- **Remediation HEAD:** `43b81e3ddbac6dfe4fd1381551ab581a882e1fe8`
+- **Remediation HEAD: `6cb613be86b07ef105cf0de0aba62762f9a14938`
 - **Prior preflight packet:** `office11-pr82-po-decision-packet.md` (2026-10-12) — still valid for Amendment A body; **O5 empty-scope and clients-strip-only are superseded** by this closure where flagged.
 
 ---
