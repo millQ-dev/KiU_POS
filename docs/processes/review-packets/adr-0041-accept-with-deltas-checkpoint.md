@@ -18,6 +18,10 @@
 
 Four colors; unrestricted manual reprioritization with reason; immutable priority history; `originalSeverity` ≠ `displayPriority`; channels A/B/C/D; fail-closed scopes; idempotency + audit; `reviewRequired`; Privacy §8.1.
 
+## Post-delta HEAD
+
+`1a0e8c60a9b69a5431fc0f5fc6533b61a9d6549d`
+
 ## Targeted reviewer confirmation
 
 | Review | Focus | Verdict |
