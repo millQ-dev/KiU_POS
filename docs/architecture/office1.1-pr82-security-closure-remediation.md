@@ -32,6 +32,7 @@ Amendment A Accept; Amendment B Accept; Identity proof/challenge tables; Zalo ad
 3. Expired / phone mismatch / unbound PartialAuth → reject; new OTP.
 4. Concurrent consume → one winner.
 5. Proof alone or password alone → no OfficeSession.
+6. First session via alternate MFA invalidates unconsumed signup proofs.
 
 ### PO product conflict?
 
@@ -155,10 +156,11 @@ Username retirement table; phone quarantine; multi-factor re-bind; session revok
 ### Targeted tests
 
 1. Rename → old username unclaimable during quarantine; grants unchanged.
-2. Phone re-bind password-only → reject.
-3. Phone re-bind password + passkey/trusted-device + new Zalo OTP → success; old phone quarantine; sessions revoked.
-4. Recovery cannot change GlobalAccountId or move grants.
-5. No email on account → recovery still possible via phone factors / passkey / trusted-device (not email-mandatory).
+2. In-possession phone change: current-primary OTP required; TrustedDevice alone insufficient.
+3. Lost-phone: password + TrustedDevice + new-phone Zalo only → **reject** (device-theft path).
+4. Lost-phone: password + passkey + new-phone Zalo → success path (delayed cutover); sessions revoked; old phone quarantine.
+5. Recovery cannot change GlobalAccountId or move grants.
+6. No email on account → lost-phone still possible via password+passkey (not email-mandatory); support break-glass remains OPEN.
 
 ### PO product conflict?
 

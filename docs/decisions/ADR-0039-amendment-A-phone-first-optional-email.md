@@ -49,7 +49,7 @@ This amendment **updates contact/signup identifiers and first-factor delivery ch
 | Signup | phone Zalo OTP verify → create GlobalAccount + `@username` + password credential (no Tenant) |
 | Password success | **OfficePartialAuth only** (unchanged) |
 | First OfficeSession | password + **mandatory second factor**. Preferred: **phone OTP via Zalo ZBS** when phone is the verified primary contact. If a **verified email** exists, **email OTP remains an allowed second factor**. Never mint OfficeSession after password alone |
-| Later logins | password then **passkey** OR **trusted signed KiU mobile push** OR **phone OTP (Zalo)** OR **email OTP (only if email verified)** |
+| Later logins | password then **exactly one** of: **passkey** OR **TrustedDevice** OR **trusted signed KiU mobile push** OR **phone OTP (Zalo)** OR **email OTP (only if email verified)** — see Amendment B §B2; **never password-only** |
 | Passkey | Unchanged: optional; enroll after first OfficeSession; skip allowed; not passwordless |
 | Fail / cancel / expire / reject | Unchanged: never creates OfficeSession; never bypass |
 

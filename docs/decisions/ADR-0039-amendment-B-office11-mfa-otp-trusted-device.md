@@ -43,6 +43,7 @@ PhoneOtpSatisfactionProof
 4. Consuming the proof is **atomic** (row lock / unique consume): concurrent attempts → one winner; loser must start a new OTP challenge.
 5. If proof expired, revoked, phone changed, or PartialAuth unbound → **fail closed**; require a **new** OTP challenge (new charge allowed).
 6. Anti-replay: nonce + single consume + TTL; proof never stored client-side as a bearer equivalent to a session; never mint OfficeSession from proof alone (password + PartialAuth still required).
+7. When the GlobalAccount’s **first OfficeSession** is minted by **any** MFA path (satisfaction-proof consume, fresh Zalo OTP, verified-email OTP, passkey, push), **invalidate all unconsumed** `SIGNUP_AND_FIRST_SESSION` proofs for that account/draft. Stale proofs must not remain usable as a leftover second factor.
 
 **Preserved:** MFA before OfficeSession; never password-only; server-side challenge binding; single-use verification.
 
@@ -120,20 +121,34 @@ PhoneOtpSatisfactionProof
 ### Proposed ADR wording (Accept binds)
 
 1. Email remains **optional** (Amendment A). Recovery **must not** require email.
-2. **Phone re-bind** (lost phone): requires proof of GlobalAccount control via **at least two** of: password; enrolled passkey; enrolled trusted-device; active OfficeSession step-up; out-of-band support break-glass (**OPEN**, audited, dual-control — not silent default).
-3. New phone must complete **fresh Zalo OTP** verification before becoming primary contact; old phone enters cool-down quarantine (**OPEN** duration).
-4. Recovery never silently transfers TenantMemberships/ClientAccessGrants to a different GlobalAccountId.
-5. Support break-glass is **exceptional**, fully audited, and **OPEN** for legal/ops procedure — not an agent-invented default.
+2. **Split flows — do not conflate:**
+
+   **A. In-possession phone change** (caller still controls current primary phone):
+   - Require active OfficeSession **or** password → PartialAuth → step-up MFA where OTP/challenge destination is the **current primary phone** (TrustedDevice **alone is insufficient** — aligns B2 step-up on phone change).
+   - Then fresh Zalo OTP on the **new** phone.
+   - On success: old phone quarantine; revoke other sessions/PartialAuth; invalidate leftover signup proofs.
+
+   **B. Lost-phone recovery** (current primary unreachable):
+   - Password + TrustedDevice + new-phone Zalo **alone is insufficient** (device-theft takeover path — **rejected**).
+   - Require proof of GlobalAccount control via **stronger set**: password **and** enrolled **passkey** (preferred), **or** password + verified-email OTP (if email verified), **or** password + active OfficeSession established before loss + passkey enroll path, **or** audited dual-control support break-glass (**OPEN**, not default).
+   - TrustedDevice may count as **one** supporting factor only when combined with passkey or verified-email OTP — never as the sole second factor for lost-phone cutover.
+   - On Accept success: **delayed cutover** recommended (OPEN duration, propose notify-attempt to old phone / session revoke immediately, primary swap after delay); fresh Zalo on new phone; old phone quarantine; revoke all other sessions and TrustedDevices optionally forced re-enroll (**OPEN**).
+
+3. Recovery never silently transfers TenantMemberships/ClientAccessGrants to a different GlobalAccountId.
+4. Support break-glass is **exceptional**, fully audited, and **OPEN** for legal/ops procedure — not an agent-invented default.
 
 ### Security consequences
 
-Account takeover via SIM/phone recycle mitigated by multi-factor recovery + cool-down; no email mandate preserves PO phone-first product.
+In-possession change challenges the **current** primary. Lost-phone path blocks password+device+attacker-phone takeover. Cool-down + delayed cutover mitigate SIM recycle. No email mandate preserves PO phone-first product.
 
 ### Targeted tests
 
-1. Phone re-bind with password + passkey + new Zalo OTP → success; old phone quarantine.
-2. Phone re-bind with password only → reject.
-3. Recovery cannot change GlobalAccountId or silently move grants.
+1. In-possession: password + current-phone OTP + new-phone OTP → success; TrustedDevice alone insufficient for phone change.
+2. Lost-phone: password + TrustedDevice + new-phone Zalo only → **reject**.
+3. Lost-phone: password + passkey + new-phone Zalo (+ delayed cutover) → success; old phone quarantine; sessions revoked.
+4. Phone re-bind with password only → reject.
+5. Recovery cannot change GlobalAccountId or silently move grants.
+6. First session via passkey invalidates unconsumed signup satisfaction proofs.
 
 ---
 

@@ -209,7 +209,7 @@ Pairs with [Amendment B §B3](ADR-0039-amendment-B-office11-mfa-otp-trusted-devi
 | Username rename | Allowed; old normalized handle → `identity_username_retirement`; **never** transfers memberships/grants/invites/sessions |
 | Retirement cooldown | Recommend **90 days** before reclaim (**OPEN** exact); during quarantine, claim attempts fail closed |
 | Retire without rename | Owner may retire handle under policy; GlobalAccount must set a new unique active username in same transaction or enter `USERNAME_PENDING` (login by phone only until set) — **OPEN** exact status |
-| Phone loss | Multi-factor re-bind per Amendment B3; fresh Zalo OTP on new phone; old phone quarantine (recommend **30 days**) |
+| Phone change / loss | Split flows per Amendment B §B3: **in-possession** challenges current primary; **lost-phone** rejects password+TrustedDevice+new-phone alone; delayed cutover recommended; old phone quarantine (recommend **30 days**) |
 | No mandatory email | Recovery must work without email (phone-first product); email is optional alternate factor only when verified |
 | Takeover prevention | Recovery cannot change `GlobalAccountId`; cannot silently move TenantMembership or ClientAccessGrant; support break-glass **OPEN**, audited, dual-control — not default |
 

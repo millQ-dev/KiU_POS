@@ -213,7 +213,7 @@ POST /api/v1/office/tenants/{tenantId}/...
 # or OPEN: signed header X-MillQ-Tenant-Context: { tenantId, grantId?, membershipId? }
 ```
 
-Server rejects if session GlobalAccount lacks membership **or** professional grant for that tenant for the command class.
+Server rejects unless the selected command class is authorized: `MEMBERSHIP` requires ACTIVE accountant/employee membership for that tenant; `PROFESSIONAL` requires ACTIVE ClientAccessGrant for that tenant. Read-hub union (R82-4) does **not** authorize mutations.
 
 ---
 

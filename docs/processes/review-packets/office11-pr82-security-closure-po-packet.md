@@ -47,7 +47,7 @@ Accountant clients/inbox **may union** accountant-class TenantMembership and Cli
 
 ### 1.5 R82-5 — Recovery / retirement
 
-Username retirement quarantine (recommend 90d); phone re-bind multi-factor + new Zalo OTP + old phone quarantine (recommend 30d); no mandatory email; never change GlobalAccountId or silently move grants; support break-glass OPEN.
+Username retirement quarantine (recommend 90d). **In-possession phone change** challenges current primary (TrustedDevice alone insufficient). **Lost-phone** rejects password+TrustedDevice+new-phone alone; requires password+passkey (or verified-email OTP / break-glass); delayed cutover recommended; old phone quarantine (recommend 30d); no mandatory email; never change GlobalAccountId or silently move grants; support break-glass OPEN.
 
 ### 1.6 R82-M1 — OfficeSession employee complete
 
@@ -105,11 +105,18 @@ See remediation doc per item. Minimum gate set:
 
 | Review | Scope | Result |
 | --- | --- | --- |
-| Architecture | Remediation + ADR-0040 §5–§6–§9 + Amendment B + M1 sequencing | _pending_ |
-| FinSec / Identity-Security | OTP proof, TrustedDevice, recovery, fail-closed scope, no password-only | _pending_ |
-| Privacy | Phone/OTP metadata, retirement, accountant hub labels (no PII expansion) | _pending_ |
+| Architecture | Remediation + ADR-0040 §5–§6–§9 + Amendment B + M1 sequencing | **APPROVE** @ `ccacece` (content `43b81e3`) |
+| FinSec / Identity-Security | OTP proof, TrustedDevice, recovery, fail-closed scope, no password-only | **REQUEST CHANGES** @ `ccacece` → **phone lost-path split + stale-proof invalidate remediated**; **re-review pending** on post-fix tip |
+| Privacy | Phone/OTP metadata, retirement, accountant hub labels (no PII expansion) | **APPROVE** @ `ccacece` |
 
 Implementation agent must **not** self-approve. Review Agent: APPROVE or REQUEST CHANGES only.
+
+### FinSec REQUEST CHANGES (addressed in post-`ccacece` tip)
+
+1. **High:** Split in-possession phone change vs lost-phone recovery; reject password+TrustedDevice+attacker-new-phone alone.
+2. **Med:** Invalidate unconsumed `SIGNUP_AND_FIRST_SESSION` proofs when first OfficeSession minted by any MFA path.
+3. **Med:** Amendment A A2 Later logins now includes TrustedDevice in lockstep with B2.
+4. **Low:** Architecture §5.3 mutation wording aligned to ADR-0040 §6.
 
 ---
 
