@@ -11,30 +11,31 @@
 | Ref | Path / note |
 | --- | --- |
 | No TaskService runtime | confirmed absent on `main` |
-| POS ApprovalRequest (separate) | `apps/api/migrations/027_identity_access_foundation.sql` (`identity_approval_request`); `apps/api/src/modules/identity/login-challenge-service.ts`; ADR-0036 |
-| Permission pattern | `IdentityService.assertPermission` — `apps/api/src/modules/identity/identity-service.ts` |
-| Notification outbox pattern | `apps/api/src/modules/identity/notification-port.ts`; `identity_notification_outbox` |
-| Audit pattern | `identity_audit_event` in mig `027` |
-| FISC1.1 Core (gates must not be bypassed by Task) | `apps/api/src/modules/fiscalization/`; mig `032`; ADR-0014 |
+| POS ApprovalRequest (separate) | mig `027` `identity_approval_request`; `login-challenge-service.ts`; ADR-0036 |
+| Permission pattern | `IdentityService.assertPermission` |
+| Notification outbox safe-metadata pattern | `notification-port.ts`; `identity_notification_outbox` |
+| Audit pattern | `identity_audit_event` mig `027` |
+| FISC1.1 Core (non-bypass) | `modules/fiscalization/`; mig `032`; ADR-0014 |
 | Professional access | ADR-0022 Accepted |
-| Gate 0 PO delta (priority/channels) | PR #83 docs (separate); durable handoff snapshot on #83 |
-| OFFICE1.1 | PR #82 draft — independent; do not Accept here |
+| Privacy | ADR-0015; §8.1 safe display metadata mandatory |
+| Gate 0 PO delta | PR #83 (separate merge auth) |
+| OFFICE1.1 | PR #82 draft — independent |
 
 ## Classification summary
 
-See ADR §15 embedded below: **PO ACCEPTED** vs **Proposed technical** vs **Open Level C** vs **Runtime blockers** vs **Deferrable**.
+See ADR §15: **PO ACCEPTED** vs **Proposed technical** vs **Open Level C** vs **Runtime blockers** vs **Deferrable**.
 
 ## Independent reviews
 
 | Review | Verdict | Packet |
 | --- | --- | --- |
-| Architecture | PENDING | `adr-0041-architecture-review.md` |
-| Financial Security | PENDING | `adr-0041-finsec-review.md` |
-| Privacy | PENDING | `adr-0041-privacy-review.md` |
+| Architecture | APPROVE @ `79b1073…` | `adr-0041-architecture-review.md` |
+| Financial Security | APPROVE @ `79b1073…` | `adr-0041-finsec-review.md` |
+| Privacy | REQUEST CHANGES @ `79b1073…` → remediation §8.1 on this tip; re-review PENDING | `adr-0041-privacy-review.md` |
 
 ## Final HEAD
 
-`1977443784848396dbba82617f946e3bf0ce62ab`
+_(set after push)_
 
 ---
 
@@ -156,6 +157,15 @@ OPEN
 - Notification failure **must not** mutate Task status or clear gates; must not escalate to Owner as a side effect of Channel A delivery failure.
 - Reminders **stop** once Task is terminal (§6). Exact SLA timings remain **OPEN**.
 
+### 8.1 Safe display metadata (ADR-0015 — mandatory)
+
+Align with existing Identity notification pattern (`notification-port.ts` / `DANGEROUS_OPERATION_APPROVAL_REQUESTED`):
+
+- Task outbox events, Channel D escalation payloads, reminder pushes, and Task comment/attachment **metadata** must carry **safe display fields only**.
+- **Forbidden** in payloads: PIN, session tokens, password hashes, OTP codes, raw payment credentials, private e-sign keys, unrestricted PII dumps.
+- Attachment **bytes** (if any) follow Privacy Control Plane / retention rules (ADR-0015); Task row stores references + non-sensitive descriptors, not secrets.
+- This rule is **not optional** for Accept; exact retention TTLs remain OPEN for Level B schema.
+
 ### 9. Manager absence, unavailable assignee, operational fallback
 
 - If assignee unavailable (revoked grant, inactive, wrong outlet): **reassign** within Manager dispatch audience or leave OPEN unassigned with Manager-visible flag — **do not** silently notify Owner.
@@ -215,7 +225,7 @@ Accepting this ADR authorizes **design** of TaskService and subsequent Level B s
 | Class | Items |
 | --- | --- |
 | **Already PO ACCEPTED behavior** | Four colors; Manager may move any color with reason+audit; display ≠ gates; manager-only ops notify; manual Owner escalate; reviewRequired workflow; empty scope fail-closed; Task complete ≠ regulated approve; food-safety/legal gates independent; Q Place/Q Card out of this delivery |
-| **Proposed technical choices** | Entity/DTO names; state enum; derivationKey composition; reminder keying; permission_key labels; HTTP shapes; SUPERSEDE rules; Manager-fallback to other `task.dispatch` holders |
+| **Proposed technical choices** | Entity/DTO names; state enum; derivationKey composition; reminder keying; permission_key labels; HTTP shapes; SUPERSEDE rules; Manager-fallback to other `task.dispatch` holders; §8.1 safe display metadata (mandatory under ADR-0015) |
 | **Open Level C** | Reminder SLA defaults; OfficeSession vs POS principal; Channel B vs POS `identity_approval_request` table mapping; automation rule matrix; outlet escalation list when no Manager |
 | **Runtime blockers (before M1 ship)** | ADR Accept; schema+API PR; Identity grants for `task.*`; independent reviews+tests §13 |
 | **Deferrable** | Auto-derive from all domain events; Owner/Accountant/Chef/Bar full UIs; Floor/Table; payroll; bank; biometry; fiscal provider; OCR |
