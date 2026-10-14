@@ -1,14 +1,14 @@
 # ADR-0040: Office Username, Invitations & Professional Client Grants
 
-- **Status:** **Proposed** (OFFICE1.1 Level C preflight — **not Accepted**)
-- **Date:** 2026-10-12
+- **Status:** **Accepted WITH DELTAS** (OFFICE1.1 PR #82)
+- **Accepted:** 2026-10-13 — PO **ACCEPT WITH DELTAS**; docs merge `e83a02b8933947a80d4ceb0cf50d84e44c5aaf0f` (PR #82). **O5** (`empty LE/Outlet = tenant-wide`) is **revoked**; §5 fail-closed `scope_mode` binds.
+- **Date (authored):** 2026-10-12
 - **Decision owners:** Product Owner and System Architect
-- **Related:** ADR-0015 (**Accepted**); ADR-0022 (**Accepted**); ADR-0039 (**Accepted**); Proposed [ADR-0039 Amendment A](ADR-0039-amendment-A-phone-first-optional-email.md)
-- **Autonomy:** Level **C** (docs only). **STOP BEFORE RUNTIME / migrations.**
-- **Canonical baseline:** `94f540ae64fc9c88bda50bf7c275ecec3f6f4909` (Origin `main` after Gate 0 #83 + ADR-0041 #84)
-- **Related amendments:** Proposed [ADR-0039 Amendment B](ADR-0039-amendment-B-office11-mfa-otp-trusted-device.md) (OTP satisfaction / trusted device / recovery)
+- **Related:** ADR-0015 (**Accepted**); ADR-0022 (**Accepted**); ADR-0039 (**Accepted**); [Amendment A](ADR-0039-amendment-A-phone-first-optional-email.md) (**Accepted WITH DELTAS**); [Amendment B](ADR-0039-amendment-B-office11-mfa-otp-trusted-device.md) (**Accepted WITH DELTAS**)
+- **Autonomy:** Level **C** design Accept. **STOP BEFORE RUNTIME / migrations / production activation** until separate **Level B** authorization (IDENTITY-B1+). Schema/API from this ADR ship only under Level B GO slices.
+- **Canonical Accept merge:** `e83a02b8933947a80d4ceb0cf50d84e44c5aaf0f`
 - **Notion:** PO pages behind login for agent; bindings use **PO ACCEPTED PRODUCT CONTRACT** from OFFICE1.1 preflight brief.
-- **Security closure (2026-10-13):** §5 empty-scope fail-closed, §6 accountant read hub union, §9 recovery — see Remediation R82-3/4/5. Prior draft “empty = tenant-policy default OPEN” is **superseded by Proposed Accept wording below** (conflict flagged vs earlier PR #82 packet O5).
+- **Security closure (binding):** §5 empty-scope fail-closed; §6 accountant read hub union; §9 recovery. Prior draft “empty = tenant-policy default OPEN” / packet O5 is **superseded**.
 
 ---
 
@@ -25,7 +25,7 @@ ADR-0039 introduced Office GlobalAccount + MFA + owner bootstrap. ADR-0022 froze
 
 ---
 
-## Decision (Proposed)
+## Decision (Accepted WITH DELTAS)
 
 ### 1. Username
 
@@ -104,7 +104,7 @@ ClientAccessGrant
   permissions[]             OPTIONAL fine-grained; else role expands server-side
 ```
 
-**Proposed Accept wording (binds R82-3):**
+**Accept wording (binds R82-3):**
 
 1. **Empty or omitted** `legal_entity_ids` / `outlet_ids` **never** means tenant-wide authority.
 2. Tenant-wide access requires **`scope_mode = TENANT_WIDE`** set by an **explicit authorized selection** at invite/grant time (inviter must choose it; UI must not default silently).

@@ -1,12 +1,13 @@
 # ADR-0039 Amendment B: Signup OTP Satisfaction, Trusted Device & Recovery (OFFICE1.1)
 
-- **Status:** **Proposed** (OFFICE1.1 Level C security closure — **not Accepted**)
-- **Date:** 2026-10-13
+- **Status:** **Accepted WITH DELTAS** (OFFICE1.1 PR #82 security closure)
+- **Accepted:** 2026-10-13 — PO **ACCEPT WITH DELTAS**; docs merge `e83a02b8933947a80d4ceb0cf50d84e44c5aaf0f` (PR #82)
+- **Date (authored):** 2026-10-13
 - **Decision owners:** Product Owner and System Architect
-- **Amends:** [ADR-0039](ADR-0039-office-global-account-mfa-owner-bootstrap.md) (**Accepted**); [Amendment A](ADR-0039-amendment-A-phone-first-optional-email.md) (**Proposed**)
-- **Related:** ADR-0015; Proposed [ADR-0040](ADR-0040-office-username-invites-professional-grants.md); Accepted ADR-0041 (TaskService M1 OfficeSession)
-- **Autonomy:** Level **C** (docs only). **STOP BEFORE RUNTIME / merge until PO Accept.**
-- **Canonical baseline:** `94f540ae64fc9c88bda50bf7c275ecec3f6f4909`
+- **Amends:** [ADR-0039](ADR-0039-office-global-account-mfa-owner-bootstrap.md) (**Accepted**); [Amendment A](ADR-0039-amendment-A-phone-first-optional-email.md) (**Accepted WITH DELTAS**)
+- **Related:** ADR-0015; [ADR-0040](ADR-0040-office-username-invites-professional-grants.md) (**Accepted WITH DELTAS**); ADR-0041 (**Accepted**)
+- **Autonomy:** Level **C** design Accept. **STOP BEFORE RUNTIME / migrations / production activation** until separate **Level B** authorization. Open numeric MFA/recovery policies remain production blockers (see IDENTITY-B1 security parameter table).
+- **Canonical Accept merge:** `e83a02b8933947a80d4ceb0cf50d84e44c5aaf0f`
 
 ---
 
@@ -20,7 +21,7 @@ This amendment does **not** remove ADR-0039 mandatory MFA, PartialAuth ≠ Sessi
 
 ## B1. Single Zalo OTP satisfaction for signup → first OfficeSession (R82-1)
 
-### Proposed ADR wording (Accept binds)
+### Accept wording (binds)
 
 ```text
 PhoneOtpSatisfactionProof
@@ -81,7 +82,7 @@ PhoneOtpSatisfactionProof
 | Later logins: password then passkey **OR** trusted signed KiU mobile push **OR** email OTP | Later logins: password → `OfficePartialAuth` → **exactly one** of: **passkey** \| **trusted-device attestation** \| **trusted signed KiU mobile push** \| **phone OTP (Zalo)** \| **email OTP (verified email only)** |
 | (OPEN) OfficeSession TTL / remembered device | **Trusted device** becomes an explicit second-factor class (below) — not “remember me = skip MFA” |
 
-### Proposed ADR wording (Accept binds)
+### Accept wording (binds)
 
 1. **Password alone never yields OfficeSession** (ADR-0039 unchanged).
 2. After first successful OfficeSession, user **may enroll**:
@@ -118,7 +119,7 @@ PhoneOtpSatisfactionProof
 
 ## B3. Phone loss / recovery without mandatory email (pairs with ADR-0040 R82-5)
 
-### Proposed ADR wording (Accept binds)
+### Accept wording (binds)
 
 1. Email remains **optional** (Amendment A). Recovery **must not** require email.
 2. **Split flows — do not conflate:**
