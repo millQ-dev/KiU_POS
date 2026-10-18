@@ -1,10 +1,12 @@
 # INTEGRATIONS-0 — PO Decision Packet
 
-- **STATUS:** Level **C** research gate — **MERGE HOLD** / **STOP BEFORE RUNTIME**
+- **STATUS:** Level **C** research gate — **MERGE HOLD** (awaiting PO docs-only MERGE GO) / **STOP BEFORE RUNTIME**
 - **Date:** 2026-10-18
 - **PO prior:** ACCEPT DIRECTION / REVIEW GO / MERGE HOLD
 - **Origin main:** `973deb878c977535fa35e921d73fc689fe358530`
-- **Authorized review candidate (pre-remediation):** `13da636739b5df54f8f369c5743ad8f4cb9e18cb`
+- **Authorized candidate (pre-remediation):** `13da636739b5df54f8f369c5743ad8f4cb9e18cb`
+- **Review tip (current):** `28eff26b4aadae24de53b11623b779ff62e4798c`
+- **Independent reviews @ tip:** Architecture **APPROVE** · FinSec **APPROVE** · Privacy **APPROVE**
 - **Authority doc:** `docs/architecture/integrations-0-vietnam-provider-onboarding-gate.md`
 - **Identity:** PR #87 independent — do not modify
 
