@@ -190,12 +190,13 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 
 | | |
 | --- | --- |
-| **Owns** | Provider adapters, external IDs, sync cursors, inbound/outbound integration payloads |
-| **Does not own** | Core orders/inventory ledgers |
-| **Key concepts** | IntegrationConnector, ExternalOrderLink |
+| **Owns** | Provider adapters, external IDs, sync cursors, inbound/outbound integration payloads; LE-scoped provider bindings (Proposed INTEGRATIONS-0) |
+| **Does not own** | Core orders/inventory ledgers; Fiscal Core semantics; Payment lifecycle truth |
+| **Key concepts** | IntegrationConnector, ExternalOrderLink; FiscalProviderAdapter / PaymentRailAdapter at edge |
 | **Commands in** | ImportExternalOrder, PushPublication |
 | **Facts out** | INTEGRATION facts (e.g. GrabOrderImported) |
-| **Depends on** | Orders, Channel Menu, Organization |
+| **Depends on** | Orders, Channel Menu, Organization; Privacy Egress Gate (ADR-0015) |
+| **Runtime (2026-10-18)** | **No** unified Integration Gateway module yet; fiscal adapter interface + unavailable default exist; production providers gated (INTEGRATIONS-0 / G2) |
 
 ### Audit & Risk
 
