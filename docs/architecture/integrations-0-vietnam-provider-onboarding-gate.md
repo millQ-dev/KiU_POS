@@ -15,6 +15,13 @@ Evidence labels: **VERIFIED OFFICIAL FACT** · **PROVIDER DOC FACT** · **REPO F
 
 **Privacy (ADR-0015):** Uncleared third-party calls (including **sandbox**) → **synthetic data only** or **blocked**. Real buyer/merchant PII requires Egress Gate record + vault credential path before I2/I3 sandbox with live merchant data.
 
+### Outbound data categories (minimum inventory — collect before I2/I3 live)
+
+| Provider | Likely outbound categories | Certainty | Gate |
+| --- | --- | --- | --- |
+| **Viettel S-Invoice** | Seller tax code / LE identity; invoice line goods/services; amounts/tax; buyer name, MST, address, phone/email when supplied; serial/template metadata; digital-signature material refs (not raw private keys in app DB) | **PARTIAL** — typical e-invoice payloads; exact V2 field set **UNKNOWN** until commercial pack | Synthetic sandbox OK; live merchant → Egress Gate + category record; minimize buyer PII |
+| **VietQR** | Merchant bank account identifiers; QR amount/currency; `orderId` / content; callback fields (`bankaccount`, `amount`, `transType`, `content`, txn ids/times/refs); merchant KYC docs at onboarding (sales channel, not runtime) | **PARTIAL** — public Sync fields; full KYC/subprocessor map **UNKNOWN / SALES** | Synthetic sandbox OK; live → Egress Gate + residency/subprocessors diligence |
+
 ---
 
 ## 1. Integration readiness matrix (Origin modules)
@@ -263,7 +270,9 @@ Uncleared third-party → **synthetic only or blocked** (ADR-0015).
 6. Retry policy alignment (≤10) — **KiU tests**.
 7. MDR / fees / NAPAS path / credential ownership — **SALES UNKNOWN**.
 8. Distinguish vietqr.vn aggregator vs NAPAS VietQRPay ISV — do not conflate.
-9. **No** C0 fiscal PCE from VietQR until §2A Level C Accept.
+9. **Egress Gate** record for VietQR/bank endpoints + outbound data categories (intro inventory); data residency / subprocessors — **diligence Must**.
+10. Minimize runtime PII (prefer opaque order refs over buyer identity in QR content).
+11. **No** C0 fiscal PCE from VietQR until §2A Level C Accept.
 
 ### 5.3 Production criteria (separate from sandbox)
 

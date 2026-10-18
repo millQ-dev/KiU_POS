@@ -20,6 +20,8 @@
 | SLA | Uptime, support hours, incident RTO/RPO — **SALES** | Should |
 | Business authorization | Tax registration of serials/templates; who files với CQT | Must |
 | Data residency / subprocessors | For ADR-0015 Egress Gate | Must |
+| Outbound data categories | Exact buyer/seller/line fields sent on issue/adjust/replace; retention | Must |
+| Vault / rotate / revoke | Webservice user rotation; LE isolation for multi-outlet | Must |
 
 ## KiU engineering prerequisites
 

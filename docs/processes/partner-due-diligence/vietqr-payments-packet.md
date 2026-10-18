@@ -20,6 +20,9 @@
 | Banks / modes | List banks and integration modes with **verifiable** transaction confirmation for KiU | Must — **OPEN** |
 | Callback verification | Document verify-before-state-change contract; retry ≤10 semantics | Must |
 | Costs / MDR | Per-txn, monthly, NAPAS fees; SaaS vs merchant credential pricing — **SALES** | Must — **OPEN** |
+| Data residency / subprocessors | Where callback payloads and KYC rest; subprocessors; cross-border — for ADR-0015 Egress Gate | Must |
+| Outbound data categories | Confirm runtime fields beyond public Sync table; merchant KYC vs payment callback split; retention | Must |
+| Vault / rotate / revoke | How partner secrets are issued, rotated, revoked; LE isolation support | Must |
 | SLA | Callback latency, retry, support | Should |
 | Business authorization | Merchant of record; multi-outlet `terminalCode` mapping | Must |
 | VietQRGlobal | Tourist rails — separate commercial confirm | Later |
