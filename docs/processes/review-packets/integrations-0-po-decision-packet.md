@@ -1,37 +1,47 @@
 # INTEGRATIONS-0 — PO Decision Packet
 
-- **STATUS:** Level **C** research gate — **STOP BEFORE RUNTIME**
+- **STATUS:** Level **C** research gate — **MERGE HOLD** / **STOP BEFORE RUNTIME**
 - **Date:** 2026-10-18
-- **Origin HEAD:** `973deb878c977535fa35e921d73fc689fe358530`
-- **Backup ancestor:** `e83a02b…`
+- **PO prior:** ACCEPT DIRECTION / REVIEW GO / MERGE HOLD
+- **Origin main:** `973deb878c977535fa35e921d73fc689fe358530`
+- **Authorized review candidate (pre-remediation):** `13da636739b5df54f8f369c5743ad8f4cb9e18cb`
 - **Authority doc:** `docs/architecture/integrations-0-vietnam-provider-onboarding-gate.md`
+- **Identity:** PR #87 independent — do not modify
 
 ---
 
 ## Ask of PO
 
-1. Accept INTEGRATIONS-0 as the **provider onboarding gate** (docs only).
-2. Confirm **Viettel S-Invoice** as first fiscal adapter candidate (sandbox only until **G2**).
-3. Confirm **VietQR host2host-class** (or name alternate bank path) as first payments QR candidate — non-custodial preserved.
-4. Authorize sales to run due-diligence packets:
+1. Accept INTEGRATIONS-0 as the **provider onboarding gate** (docs only) after Arch/FinSec/Privacy re-APPROVE on remediated tip.
+2. Confirm ownership split: Integrations = LE bindings + future gateway/transport; Fiscalization = `FiscalProviderAdapter` port; Payments = lifecycle + future `PaymentRailAdapter`.
+3. Confirm **Viettel S-Invoice** as first fiscal adapter **candidate** (sandbox only until **G2**; synthetic data until egress GO).
+4. Confirm **VietQR host2host-class** (or name alternate) as first payments QR **candidate** — non-custodial; **not** C0 fiscal-ready (§2A).
+5. Authorize sales to run due-diligence packets (updated OPEN items):
    - `docs/processes/partner-due-diligence/viettel-s-invoice-packet.md`
    - `docs/processes/partner-due-diligence/vietqr-payments-packet.md`
-5. Confirm migration sources priority P1–P4 with **no unsupported API claims**.
-6. Confirm VFA / BHXH I-VAN remain **later gated** (read vs filing split).
-7. Confirm Identity work is **not** blocked by this track.
+6. Authorize next implement slice as **I0 Level B foundations only** (registry, vault credential_ref, egress hook, auditable attempts/outbox) — **not** vendor adapters.
+7. Confirm migration sources priority P1–P4 with **no unsupported API claims**.
+8. Confirm VFA / BHXH I-VAN remain **later gated**.
+9. Confirm Identity work is **not** blocked.
 
 ## Non-asks / STOP
 
 - No vendor production connection
 - No secrets in repo
-- No migrations / runtime PR
+- No migrations / runtime without separate PO GO
 - No LEGAL GATE G2
-- No merge of this PR as implementation authorization
+- No VietQR → fiscal C0 claim from Payment Core
+- No merge of this PR as implementation authorization until reviews APPROVE + explicit docs-only MERGE GO
 
-## Review before any I2/I3 runtime
+## Sandbox vs production (short)
 
-Architecture · FinSec · Privacy (independent) on adapter PRs.
+| | Sandbox | Production |
+| --- | --- | --- |
+| Data | Synthetic default; live merchant only with Egress Gate | Real + vault + egress |
+| Fiscal SATISFIED | Forbidden without G2 | G2 required |
+| VietQR | Payment lifecycle tests only | FinSec APPROVE + contracts |
+| BANK→fiscal | Out of scope | Requires §2A Level C Accept |
 
-## Recommended next after Accept
+## Recommended next after docs MERGE GO
 
-Sales due diligence → I1 vault/binding design → sandbox adapters (I2/I3) → G2 package (I4).
+Sales diligence → I0-B foundations → I2/I3 sandbox adapters → §2A Level C (if bank fiscal needed) → G2 (I4).

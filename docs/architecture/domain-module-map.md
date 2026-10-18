@@ -190,13 +190,13 @@ Costing writes **only derived revisions**, never invents inventory movements (AD
 
 | | |
 | --- | --- |
-| **Owns** | Provider adapters, external IDs, sync cursors, inbound/outbound integration payloads; LE-scoped provider bindings (Proposed INTEGRATIONS-0) |
-| **Does not own** | Core orders/inventory ledgers; Fiscal Core semantics; Payment lifecycle truth |
-| **Key concepts** | IntegrationConnector, ExternalOrderLink; FiscalProviderAdapter / PaymentRailAdapter at edge |
+| **Owns** | LE-scoped provider **bindings** / credential refs (Proposed INTEGRATIONS-0); Integration Gateway transport/registry (future); external IDs, sync cursors, channel/migration inbound-outbound payloads |
+| **Does not own** | `FiscalProviderAdapter` **port** (Fiscalization / ADR-0014); Payment lifecycle / `PaymentRailAdapter` port (Payments); Core ledgers; Fiscal Core semantics |
+| **Key concepts** | IntegrationConnector, ExternalOrderLink; provider binding + egress-gated transport |
 | **Commands in** | ImportExternalOrder, PushPublication |
 | **Facts out** | INTEGRATION facts (e.g. GrabOrderImported) |
-| **Depends on** | Orders, Channel Menu, Organization; Privacy Egress Gate (ADR-0015) |
-| **Runtime (2026-10-18)** | **No** unified Integration Gateway module yet; fiscal adapter interface + unavailable default exist; production providers gated (INTEGRATIONS-0 / G2) |
+| **Depends on** | Orders, Channel Menu, Organization; Privacy Egress Gate (ADR-0015); Fiscalization/Payments ports for fiscal/pay calls |
+| **Runtime (2026-10-18)** | **No** Integration Gateway module; Fiscalization owns adapter interface + unavailable default; production providers gated (INTEGRATIONS-0 / G2) |
 
 ### Audit & Risk
 
