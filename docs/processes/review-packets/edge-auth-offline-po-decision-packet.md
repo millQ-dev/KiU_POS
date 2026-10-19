@@ -10,6 +10,8 @@
 - **Origin main (baseline):** `33dad072e014158c6658546abcda5de38e87f4b2`
 - **Reviewed content (pre-Accept):** `b9c6fa43c560a164c9e8572209cc5ed5faf2e3b0`
 - **Tip at Accept decision:** `7c506bc8451b123e44131fbf3da4d8349342fc84`
+- **Revised content HEAD (deltas closed):** `b87c0c48efdaf0084c8753396c7c1bded62c8469`
+- **Re-reviews @ content HEAD:** Architecture **APPROVE** · FinSec **APPROVE** · Privacy **APPROVE**
 - **Authority:** `docs/architecture/edge-auth-offline-financial-policy.md`
 - **ADRs:** ADR-0043 / ADR-0044 / ADR-0045 — **Accepted WITH DELTAS** (aliases OFFLINE-001/002/003)
 - **Identity:** PR #87 / ADR-0042 independent — do not modify
