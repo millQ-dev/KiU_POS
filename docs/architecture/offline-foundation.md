@@ -3,7 +3,7 @@
 - **Status:** Foundation reference (Architecture v1.3 aware)
 - **Date:** 2026-08-19
 - **Updated:** 2026-10-19
-- **Related:** ADR-0001, ADR-0003, ADR-0008, ADR-0018 (Accepted); Proposed Hybrid Edge Level C package `edge-auth-offline-financial-policy.md` + ADR-0043/0044/0045 (OFFLINE-001/002/003 aliases) — **not** Accepted until PO decision; PROJECT_CHARTER.md
+- **Related:** ADR-0001, ADR-0003, ADR-0008, ADR-0018 (Accepted); Hybrid Edge package `edge-auth-offline-financial-policy.md` + ADR-0043/0044/0045 (OFFLINE-001/002/003) — **Accepted WITH DELTAS** (OFF-01 / PR #90); ADR-0038 A4 offline CASH remains OPEN; “Queue payment fact” ≠ authoritative PCE; PROJECT_CHARTER.md
 
 ## 1. Requirement
 

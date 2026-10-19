@@ -30,7 +30,7 @@
 | --- | --- | --- |
 | ADR-0018 | Accepted | Boundaries only; no Edge enrollment / writer / offline PIN |
 | `offline-foundation.md` | Foundation | Employee sign-in deferred; fiscal offline deferred |
-| ADR-OFFLINE-001/002/003 files | **Missing** | This package introduces aliases via ADR-0043/44/45 |
+| ADR-OFFLINE-001/002/003 files | Introduced as ADR-0043/44/45 | **Accepted WITH DELTAS** (OFF-01) |
 | DeviceIdentity runtime | Deferred | Terminal ≠ DeviceIdentity |
 | Sync Local Store / Outbox / Inbox | Concepts only | Only `identity_notification_outbox` exists |
 | Edge packaging | Missing | `apps/api` + `apps/web` only |
@@ -111,7 +111,7 @@ Shared domain code; differentiated **deployment profile** and **offline promise*
 | No LAN terminal→Edge auth | N/A | OFFLINE-002 |
 | No sync outbox/inbox/cursor | Notification outbox only | OFFLINE-002 + OFF-03+ |
 | CompleteOrder = fiscal-gated L3 | Runtime gate | OFFLINE-003 (0045) L1/L3 split — **Accept required** |
-| Offline CASH OPEN (ADR-0038 A4) | Fail-closed tendency | OFFLINE-003 D3 Accept or reject |
+| Offline CASH OPEN (ADR-0038 A4) | **A4 remains OPEN** (PO delta) | OfflineCashEvidence ≠ PCE; no cash production GO |
 | Card/VietQR fabricate ban | Docs + missing adapters | OFFLINE-003 + INTEGRATIONS |
 | Edge packaging / local Postgres | Missing | OFF-02+ |
 | VN offline fiscal counsel | OPEN | OFFLINE-003 D5 + G2 |
@@ -186,7 +186,7 @@ Shared domain code; differentiated **deployment profile** and **offline promise*
 | **OFF-05** | B | WriterEpoch / fencing + LAN terminal auth | OFF-01, OFF-02, **OFF-03** |
 | **OFF-06** | B | Sync outbox/inbox/cursor + idempotent ingest | OFF-05 |
 | **OFF-07** | B | OperationalClose (L1) + keep CompleteOrder gate | OFF-01 Accept 0045 |
-| **OFF-08** | B | EdgeReceiveCash + sync dedupe (if D3 Accepted) | OFF-04, OFF-06, 0045 |
+| **OFF-08** | B | **OfflineCashEvidence** sync/dedupe only (≠ PCE). Authoritative `EdgeReceiveCash → PCE` **blocked** until ADR-0038 **A4 closed** + separate **OFFLINE CASH PRODUCTION GO** | OFF-04, OFF-06, 0045 |
 | **OFF-09** | C/B | Fiscal queue/reconcile UX; still no fabricate; G2 separate | OFF-06, counsel |
 | **OFF-10** | B | Adversarial suite **1–24** + chaos reconnect | OFF-06–09 |
 

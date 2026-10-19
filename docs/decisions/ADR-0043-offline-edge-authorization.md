@@ -23,7 +23,7 @@ Cloud-only and Edge are **differentiated product tiers**. One shared domain impl
 
 ADR-0018 Accepted offline multi-platform **boundaries** but did not freeze Edge enrollment, offline PIN, signed grants, or Edge POS session. ADR-0036 Session / LoginChallenge / ApprovalRequest are **cloud-online** aggregates and must **not** be reused as offline unlock or standing privilege. PIN pepper + lockout today are server-side (`identity_pin_credential` + API pepper). DeviceIdentity is Accepted in ADR-0018 / ADR-0036 text but **runtime deferred**.
 
-## Decision (Proposed)
+## Decision (Accepted WITH DELTAS)
 
 ### D1. Authority chain
 

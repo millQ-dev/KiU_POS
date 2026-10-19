@@ -14,7 +14,7 @@ ADR-0018: server remains authoritative **after synchronization**; reject univers
 
 Hybrid Edge needs a **single authoritative writer** for an Outlet/site partition during WAN outage, with authenticated LAN terminals and safe recovery — without automatic Cloud takeover while a disconnected Edge may still process operations.
 
-## Decision (Proposed)
+## Decision (Accepted WITH DELTAS)
 
 ### D1. One authoritative Edge writer
 
