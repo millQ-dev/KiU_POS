@@ -1,12 +1,24 @@
 # Edge Auth & Offline Financial Policy — Level C Package
 
-- **Status:** Level **C** proposal — **STOP BEFORE RUNTIME / migrations / merge-as-GO**
+- **Status:** Level **C** — **ACCEPT WITH DELTAS** (PO 2026-10-19) — **MERGE HOLD** until re-review; **STOP BEFORE RUNTIME**
 - **Date:** 2026-10-19
 - **Priority:** P0
-- **Origin main (verified):** `33dad072e014158c6658546abcda5de38e87f4b2`
-- **Note:** Historical audit snapshot equals current main at verification time; always re-fetch Origin before implement.
-- **ADRs:** Proposed ADR-0043 (OFFLINE-001) · ADR-0044 (OFFLINE-002) · ADR-0045 (OFFLINE-003)
-- **Identity #87 / ADR-0042:** Independent; Proposed only on PR branch — **not** on main; offline QR not required for first Edge release
+- **Origin main (baseline):** `33dad072e014158c6658546abcda5de38e87f4b2`
+- **Reviewed content (pre-Accept):** `b9c6fa43c560a164c9e8572209cc5ed5faf2e3b0`
+- **ADRs:** ADR-0043 / ADR-0044 / ADR-0045 — **Accepted WITH DELTAS** (OFFLINE-001/002/003)
+- **LEVEL B GO / OFFLINE CASH PROD GO / G2:** **NOT ISSUED**
+- **Identity #87 / ADR-0042:** Independent; offline QR not required for first Edge release
+- **PO packet:** `docs/processes/review-packets/edge-auth-offline-po-decision-packet.md`
+
+### Binding PO deltas (closed in this revision)
+
+1. CheckoutOrchestrator fiscal gate **preserved**  
+2. ADR-0038 offline CASH **A4 remains OPEN**  
+3. OfflineCashEvidence **≠** authoritative PCE / fiscal chronology  
+4. Manual recovery + **old-writer quarantine** (ADR-0044 D4.1)  
+5. Grant/session expiry, rollback, isolation revocation limits (ADR-0043 D4.1)  
+6. Vietnam counsel **OPEN**  
+7. LEGAL GATE **G2** independent / not issued
 
 ---
 

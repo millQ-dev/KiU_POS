@@ -1,11 +1,12 @@
 # ADR-0043: Offline Edge Authorization (ADR-OFFLINE-001)
 
-- **Status:** **Proposed** (Level C — docs only)
+- **Status:** **Accepted WITH DELTAS** (PO 2026-10-19) — Level C docs only
 - **Alias:** ADR-OFFLINE-001
 - **Date:** 2026-10-19
 - **Origin main reconciled:** `33dad072e014158c6658546abcda5de38e87f4b2`
-- **Related:** ADR-0015, ADR-0018, ADR-0036, ADR-0039/0040/0041; Proposed ADR-0042 on Identity PR #87 (not on main); `offline-foundation.md`
-- **STOP:** No runtime, migrations, secrets, or merge-as-implement
+- **Related:** ADR-0015, ADR-0018, ADR-0036, ADR-0039/0040/0041; Proposed ADR-0042 on Identity PR #87 (not on main); `offline-foundation.md`; OFF-01 PR #90
+- **LEVEL B GO:** **NOT ISSUED**
+- **STOP:** No runtime, migrations, secrets, or merge-as-implement from this Accept alone
 
 ## Context
 
@@ -60,29 +61,41 @@ When WAN is available, Cloud (or Edge acting as enrolled agent with Cloud) must:
 4. **Forbidden offline:** new employee enrollment; broader permission changes; Professional cross-client mutation (ADR-0018 §9); minting Cloud Session.
 5. **KiU Mobile QR login** remains independent (ADR-0036; Proposed ADR-0042 on #87). **Offline QR is not required** for first Edge release.
 
-### D4. Numerical proposals (PO proposals until Arch/FinSec/Privacy APPROVE)
+### D4. Grant / session TTL and revocation (Accepted WITH DELTAS)
 
-| Parameter | Proposed value |
+| Parameter | Binding value |
 | --- | --- |
-| Signed offline-grant validity | Up to **72 hours** since last **trusted** policy refresh |
+| Signed offline-grant validity | Up to **72 hours** since last **trusted** policy refresh (configurable downward only without new Level C) |
 | Local Edge POS session max | **12 hours**, and **never** beyond grant expiry |
 | Remote revocation | Enforced on **next successful synchronization** |
 | Local suspension | **Immediate** on Edge |
 | Grace via clock rollback / reinstall / restart / restored backup | **None** — automatic extension forbidden |
 
-### D5. Rate limits, PIN lifecycle, storage, encryption
+#### D4.1 Total network isolation (PO delta #5)
 
-| Topic | Proposed rule |
+Under **complete WAN isolation** (Edge cannot reach Cloud):
+
+1. **Remote emergency revocation cannot be guaranteed** to take effect until connectivity returns.  
+2. Residual exposure ≤ remaining grant TTL (capped by 72h policy); **no** offline grant renewal or permission expansion.  
+3. Local suspend / logout / session expiry still apply using Edge trusted clock.  
+4. Operator docs and threat model **must** state this isolation limitation explicitly (honest residual risk).  
+5. On reconnect: pull revoke set + `policyVersion` + JWKS; terminate sessions for revoked grants immediately.
+
+### D5. Rate limits, PIN lifecycle, storage, encryption, trusted time
+
+| Topic | Binding rule |
 | --- | --- |
 | Rate limit / lockout | Persisted on Edge (durable); progressive backoff; lockout survives restart; sync may tighten but not silently clear without Cloud authority |
-| PIN lifecycle | Enroll / rotate / revoke only when online (or via constrained recovery procedure — separate Level C); offline verify-only |
+| PIN lifecycle | Enroll / rotate / revoke only when online (or via constrained recovery — separate Level C); offline verify-only; **not** Cloud PIN hash/pepper/Session/LoginChallenge |
 | Credential storage | Offline verifier material in TPM/keystore or certified software vault; encrypted at rest; never plaintext PIN |
-| Session revocation | Local logout/suspend immediate; Cloud revoke → next sync; session ≤ grant expiry |
-| Clock rollback protection | Monotonic Edge security clock / last-seen trusted time; rollback fails closed for grant/session validity (no extension) |
-| Forward clock skew | Edge-affirmed business times / `collected_at` must lie within policy skew of last trusted Cloud time + monotonic Edge clock; **unbounded future** timestamps → reject |
-| Backup restore | Restored older DB snapshot must not extend grants; detect generation/epoch mismatch → require re-enrollment |
-| One-time offline grants | If used for dangerous ops: bind to exact op fingerprint, single consume, amount/ceiling, actor, expiry, audit; **not** standing privilege; replay → deny |
-| Sync egress (ADR-0015) | Edge↔Cloud sync is third-party/cross-host data movement relative to Cloud residency policy — classify purpose, categories, retention under Egress Gate **or** mark **UNKNOWN + collect before OFF-06 live**; synthetic/fixtures until cleared |
+| Session revocation | Local logout/suspend immediate; Cloud revoke → next sync (see D4.1 isolation limit); session ≤ grant expiry |
+| Clock rollback protection | Monotonic Edge security clock / last-seen trusted time; rollback → **fail-closed** for grant/session validity (no extension) |
+| Forward clock skew | Binding bound **±300 seconds** vs trusted watermark; unbounded future → reject |
+| Reboot | Persist watermark, lockout, grants, sessions; **TTL does not reset** |
+| Time source unavailable | Deny **new** session; no renewal; existing session continues only until absolute `sessionExp` if already minted |
+| Backup restore | Restored older DB snapshot must not extend grants; generation/epoch mismatch → re-enrollment |
+| One-time offline grants | Bind to exact op fingerprint, single consume, amount/ceiling, actor, expiry, audit; **not** standing privilege; replay → deny |
+| Sync egress (ADR-0015) | Classify under Egress Gate **or** **UNKNOWN + collect before OFF-06 live**; synthetic/fixtures until cleared |
 
 ### D6. Non-reuse of ADR-0036 aggregates
 
@@ -95,7 +108,7 @@ When WAN is available, Cloud (or Edge acting as enrolled agent with Cloud) must:
 
 ### D7. Acceptance scope
 
-Accepting this ADR freezes **Edge auth architecture**. It does **not** implement enrollment, TPM, sync, or sessions.
+**Accepted WITH DELTAS** freezes **Edge auth architecture** (including D4.1 isolation honesty). It does **not** implement enrollment, TPM, sync, or sessions. Level B requires separate PO GO (OFF-03 / OFF-04 separately).
 
 ## Consequences
 

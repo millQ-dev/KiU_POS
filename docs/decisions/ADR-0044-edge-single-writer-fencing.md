@@ -1,11 +1,12 @@
 # ADR-0044: Edge / Cloud Single-Writer & Fencing (ADR-OFFLINE-002)
 
-- **Status:** **Proposed** (Level C — docs only)
+- **Status:** **Accepted WITH DELTAS** (PO 2026-10-19) — Level C docs only
 - **Alias:** ADR-OFFLINE-002
 - **Date:** 2026-10-19
 - **Origin main reconciled:** `33dad072e014158c6658546abcda5de38e87f4b2`
-- **Related:** ADR-0003, ADR-0010, ADR-0018, Proposed ADR-0043; `offline-foundation.md`
-- **STOP:** No runtime, migrations, or merge-as-implement
+- **Related:** ADR-0003, ADR-0010, ADR-0018, ADR-0043; `offline-foundation.md`; OFF-01 PR #90
+- **LEVEL B GO:** **NOT ISSUED**
+- **STOP:** No runtime, migrations, or merge-as-implement from this Accept alone
 
 ## Context
 
@@ -81,6 +82,16 @@ Rules:
 | **Backup restore** | Restored Edge must not resume old epoch; requires Cloud re-issue of WriterEpoch |
 
 Lease expiry may trigger **alerts** and **read-only Cloud views**; it must **not** alone authorize Cloud writes that conflict with possible Edge progress.
+
+#### D4.1 Safe manual recovery & old-writer quarantine (PO delta #4)
+
+1. **Manual recovery only** — no automatic Cloud takeover; human/operator (or audited support procedure) initiates D4 transfer.  
+2. **Old-writer quarantine:** when a new `WriterEpoch` is issued for a partition, any prior epoch’s fencing token is **QUARANTINED**:
+   - Cloud **rejects** mutating ingest signed with quarantined tokens;
+   - Edge holding a quarantined epoch must **refuse new financial mutations** and may only drain read-only / upload already-buffered outbox under Cloud quarantine rules;
+   - Quarantined writers cannot be silently “un-quarantined” by lease timers.  
+3. **Reconciliation:** after transfer, reconcile by business chronology + idempotency + domain uniqueness — **never** universal LWW. Duplicate cash/stock/order/fiscal effects remain forbidden.  
+4. **Attestation record:** recovery path, actor, partition, old epoch id, new epoch id, reason — append-only audit.
 
 ### D5. LAN transport
 

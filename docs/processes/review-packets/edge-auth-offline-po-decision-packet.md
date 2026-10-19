@@ -1,57 +1,68 @@
-# Edge Auth & Offline Financial Policy — PO Decision Packet
+# Edge Auth & Offline Financial Policy — PO Decision Packet (OFF-01 / PR #90)
 
-- **STATUS:** Level **C** — **Proposed** — **STOP BEFORE RUNTIME / MERGE-AS-GO** (awaiting PO ACCEPT / ACCEPT WITH DELTAS / REJECT)
+- **STATUS:** Level **C** — **ACCEPT WITH DELTAS** (PO 2026-10-19) — **docs only**
+- **MERGE:** **HOLD** until deltas applied + independent re-review APPROVE + separate docs-merge permission
+- **LEVEL B GO:** **NOT ISSUED**
+- **OFFLINE CASH PRODUCTION GO:** **NOT ISSUED**
+- **LEGAL GATE G2:** **NOT ISSUED**
 - **Date:** 2026-10-19
 - **Priority:** P0
-- **Origin main (verified):** `33dad072e014158c6658546abcda5de38e87f4b2`
-- **PR tip (reviews):** `b9c6fa43c560a164c9e8572209cc5ed5faf2e3b0`
-- **Independent reviews:** Architecture **APPROVE** · FinSec **APPROVE** · Privacy **APPROVE**
+- **Origin main (baseline):** `33dad072e014158c6658546abcda5de38e87f4b2`
+- **Reviewed content (pre-Accept):** `b9c6fa43c560a164c9e8572209cc5ed5faf2e3b0`
+- **Tip at Accept decision:** `7c506bc8451b123e44131fbf3da4d8349342fc84`
 - **Authority:** `docs/architecture/edge-auth-offline-financial-policy.md`
-- **ADRs:** Proposed ADR-0043 (OFFLINE-001) · ADR-0044 (OFFLINE-002) · ADR-0045 (OFFLINE-003)
-- **Identity:** PR #87 / ADR-0042 independent — do not modify in this track
+- **ADRs:** ADR-0043 / ADR-0044 / ADR-0045 — **Accepted WITH DELTAS** (aliases OFFLINE-001/002/003)
+- **Identity:** PR #87 / ADR-0042 independent — do not modify
 
 ---
 
-## Ask of PO
+## PO verdict
 
-Choose one:
+**ACCEPT WITH DELTAS — Level C / docs only**
 
-| Verdict | Meaning |
-| --- | --- |
-| **ACCEPT** | Accept ADR-0043/44/45 as written (including numerical grant/session TTLs and L1/L3 split) |
-| **ACCEPT WITH DELTAS** | Accept with listed deltas (record below) |
-| **REJECT** | Keep C0 online-only; Edge auth/ops deferred |
+### Accepted architectural direction
 
-### Specific decisions required
+- ADR-0043 — Edge Auth / signed grants  
+- ADR-0044 — single-writer / fencing  
+- ADR-0045 — offline operational and financial boundaries  
+- `OperationalClose` **L1** distinct from `CompleteOrder` **L3**  
+- No fabricated payment or fiscal SUCCESS  
+- No automatic Cloud writer takeover after lease expiry  
 
-1. **Product tiers** — confirm Cloud-only vs Edge differentiation and shared domain (no fork).
-2. **Numerical TTLs** — 72h grant / 12h session / revoke-on-sync / local suspend immediate / no clock-rollback grace — Accept or alter.
-3. **Offline CASH (ADR-0045 D3)** — Accept EdgeReceiveCash closing ADR-0038 A4 OPEN, or keep fail-closed until server accept.
-4. **CompleteOrder** — Accept `OperationalClose` (L1) beside unchanged L3 fiscal-gated `CompleteOrder` (do **not** remove CheckoutOrchestrator gate).
-5. **Authority partition** — Tenant+LE+Outlet default; Hub multi-partition OK.
-6. **No automatic Cloud takeover** on lease expiry alone — Accept. Lease `expires_at` is alert-only; Cloud writes for an Edge-owned partition require explicit D4 recovery transfer even after lease expiry.
-7. **Counsel** — authorize Vietnamese fiscal counsel package on offline cash + delayed e-invoice (G2 still separate).
-8. **OFF-01…OFF-10** — acknowledge sequence; authorize only OFF-01 Accept now (docs); later slices need separate GO.
-9. Confirm offline QR **not** in first release; Mobile QR remains online/#87 track.
+### Binding PO deltas (must be closed in docs before docs-merge)
 
-## Non-asks / STOP
+| # | Delta | Closure location |
+| --- | --- | --- |
+| 1 | Preserve existing CheckoutOrchestrator fiscal gate | ADR-0045 D1 / package §1.4 |
+| 2 | Keep ADR-0038 offline CASH **A4 OPEN** | ADR-0045 D3 |
+| 3 | Distinguish offline cash **evidence** from authoritative PCE + fiscal chronology | ADR-0045 D3–D4 |
+| 4 | Safe manual recovery, fencing, **old-writer quarantine** | ADR-0044 D4 |
+| 5 | Grant/session expiry, rollback, revocation limits under **total isolation** | ADR-0043 D4–D5 |
+| 6 | Vietnam counsel clearance **OPEN** for offline cash + delayed e-invoice | ADR-0045 D5 |
+| 7 | Independent **LEGAL GATE G2** preserved | ADR-0045 D5 / package |
 
-- No runtime, migrations, secrets, Edge binary ship, G2, VietQR C0 PCE
-- No merge of this PR as implementation authorization
-- Do not treat INTEGRATIONS-0 Proposed items as Accepted by this packet
+---
+
+## Explicit non-authorization
+
+- No Level B implementation GO  
+- No offline cash production GO  
+- No G2  
+- No runtime / migrations / Identity #87 / vendor integrations / financial logic changes  
+- Do **not** merge PR #90 or PR #91 until their respective gates are satisfied  
+- Docs merge ≠ implementation authorization  
 
 ## Preserve
 
 - VietQR / BANK_TRANSFER ≠ C0 PCE  
-- C0 PCE = CASH \| CARD  
-- No production fiscal SATISFIED without G2  
+- C0 PCE kinds = CASH \| CARD only when authoritative path exists  
+- CheckoutOrchestrator fiscal gate not removed  
 - No fabricate card/bank/fiscal SUCCESS  
-- CheckoutOrchestrator fiscal gate not silently removed  
 
-## Independent reviews (required before Accept stamp)
+## Independent re-review (required after delta edits)
 
-Architecture · Financial Security · Privacy — verdicts recorded under `docs/processes/review-packets/edge-auth-offline-*-review.md` when obtained.
+Architecture · Financial Security · Privacy — focused on modified substance; stamps under `docs/processes/review-packets/edge-auth-offline-*-review.md`.
 
-## Recommended next after Accept
+## Recommended next after docs-merge of #90
 
-Counsel kickoff → OFF-02 packaging skeleton (separate Level B GO) → OFF-03/04 auth → OFF-05/06 writer/sync → OFF-07 OperationalClose → OFF-08 cash if D3 Accepted.
+Counsel kickoff (OPEN) → OFF-02 / OFF-03 / OFF-04 as **separate** Level B GOs → OFF-05 fencing → OFF-07 OperationalClose → OFF-08 cash only if A4 closed by future Accept + production GO.

@@ -114,4 +114,4 @@ Offline sync uses **DOMAIN** (and necessary AUDIT) command/facts — not UI TELE
 - Fiscal offline queue behavior (Vietnam)
 - Full encryption at rest on device
 
-**Hybrid Edge (2026-10-19):** Employee offline sign-in, single-writer fencing, OperationalClose vs CompleteOrder, and offline CASH evidence are proposed in ADR-0043/0044/0045 — see `edge-auth-offline-financial-policy.md`. Until Accept, Cloud-only C0 remain online-only fail-closed for CompleteOrder / fiscal gate.
+**Hybrid Edge (2026-10-19):** ADR-0043/0044/0045 **Accepted WITH DELTAS** (OFF-01 / PR #90) — see `edge-auth-offline-financial-policy.md`. CheckoutOrchestrator fiscal gate preserved; ADR-0038 A4 offline CASH remains OPEN; OfflineCashEvidence ≠ PCE; Level B / cash production / G2 **not** issued.
