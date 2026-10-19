@@ -2,8 +2,8 @@
 
 - **Status:** Foundation reference (Architecture v1.3 aware)
 - **Date:** 2026-08-19
-- **Updated:** 2026-09-04
-- **Related:** ADR-0001, ADR-0003, ADR-0008, ADR-0018 (Proposed multi-platform runtime), PROJECT_CHARTER.md
+- **Updated:** 2026-10-19
+- **Related:** ADR-0001, ADR-0003, ADR-0008, ADR-0018 (Accepted); Proposed Hybrid Edge Level C package `edge-auth-offline-financial-policy.md` + ADR-0043/0044/0045 (OFFLINE-001/002/003 aliases) — **not** Accepted until PO decision; PROJECT_CHARTER.md
 
 ## 1. Requirement
 
@@ -113,3 +113,5 @@ Offline sync uses **DOMAIN** (and necessary AUDIT) command/facts — not UI TELE
 - CRDT vs last-write-wins for specific entities
 - Fiscal offline queue behavior (Vietnam)
 - Full encryption at rest on device
+
+**Hybrid Edge (2026-10-19):** Employee offline sign-in, single-writer fencing, OperationalClose vs CompleteOrder, and offline CASH evidence are proposed in ADR-0043/0044/0045 — see `edge-auth-offline-financial-policy.md`. Until Accept, Cloud-only C0 remain online-only fail-closed for CompleteOrder / fiscal gate.
