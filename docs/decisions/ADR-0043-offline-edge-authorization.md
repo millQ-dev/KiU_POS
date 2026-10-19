@@ -49,7 +49,8 @@ When WAN is available, Cloud (or Edge acting as enrolled agent with Cloud) must:
    - Prefer **TPM / secure keystore** where available;
    - Restricted support for **certified hardware without TPM** (software-isolated keystore + stronger re-enrollment / shorter grant TTL — Product + FinSec).
 5. Sync **signed, versioned permission snapshots** with explicit `expiresAt` and `policyVersion`.
-6. Preserve **audit** of enroll/rotate/revoke and **independent device revocation** (DeviceIdentity / EdgeInstallation revoke ≠ Terminal UUID).
+6. **Minimization (ADR-0015):** grant snapshots carry **permission/scope codes**, EdgeInstallation id, LE/Outlet/Terminal scope, `policyVersion`, expiry — **not** unnecessary employee PII, customer PII, full AccessGrant graphs, or Cloud Session secrets.
+7. Preserve **audit** of enroll/rotate/revoke and **independent device revocation** (DeviceIdentity / EdgeInstallation revoke ≠ Terminal UUID).
 
 ### D3. Offline login
 
@@ -78,7 +79,10 @@ When WAN is available, Cloud (or Edge acting as enrolled agent with Cloud) must:
 | Credential storage | Offline verifier material in TPM/keystore or certified software vault; encrypted at rest; never plaintext PIN |
 | Session revocation | Local logout/suspend immediate; Cloud revoke → next sync; session ≤ grant expiry |
 | Clock rollback protection | Monotonic Edge security clock / last-seen trusted time; rollback fails closed for grant/session validity (no extension) |
+| Forward clock skew | Edge-affirmed business times / `collected_at` must lie within policy skew of last trusted Cloud time + monotonic Edge clock; **unbounded future** timestamps → reject |
 | Backup restore | Restored older DB snapshot must not extend grants; detect generation/epoch mismatch → require re-enrollment |
+| One-time offline grants | If used for dangerous ops: bind to exact op fingerprint, single consume, amount/ceiling, actor, expiry, audit; **not** standing privilege; replay → deny |
+| Sync egress (ADR-0015) | Edge↔Cloud sync is third-party/cross-host data movement relative to Cloud residency policy — classify purpose, categories, retention under Egress Gate **or** mark **UNKNOWN + collect before OFF-06 live**; synthetic/fixtures until cleared |
 
 ### D6. Non-reuse of ADR-0036 aggregates
 

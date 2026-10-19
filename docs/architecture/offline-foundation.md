@@ -22,7 +22,7 @@ These must work on the device without server connectivity:
 | Apply known menu/prices | From last synced catalog/menu/pricing snapshot |
 | Record payment (cash) | Queue payment fact |
 | Kitchen ticket display | From local order state; routing snapshot from last sync |
-| Inventory write-off trigger | Queue command; valuation may be provisional offline |
+| Inventory write-off trigger | Queue command; valuation may be provisional offline; **≠** CompleteOrder / L3 finalization (see Proposed ADR-0045) |
 | Employee sign-in | Last-known credential/session policy (deferred) |
 
 Orders must work **without** a table assignment (takeaway / corner / delivery).

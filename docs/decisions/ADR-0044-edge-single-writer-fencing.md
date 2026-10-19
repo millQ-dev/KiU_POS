@@ -40,7 +40,9 @@ EdgeWritePartition =
 | Embedded POS Edge (single terminal) | Partition writer = that EdgeInstallation |
 | Customer PC Edge | Same as Embedded unless Hub-certified multi-terminal |
 
-Cloud does **not** independently accept **conflicting authoritative writes** for an Edge-owned partition while a non-expired Writer Epoch is acknowledged, except via explicit **recovery authority transfer** (D4).
+Cloud does **not** independently accept **conflicting authoritative writes** for an Edge-owned partition **until an explicit recovery authority transfer** (D4) completes (graceful handback / confirmed Edge death / split-brain resolution / Cloud re-issue of WriterEpoch).
+
+`WriterEpoch.expires_at` is a **lease hint for alerts and operator workflows only**. Lease expiry **never by itself** authorizes Cloud write authority for that partition — even if the epoch is “expired” — while a disconnected Edge could still be processing (see D4).
 
 ### D3. Writer epochs / fencing tokens
 
@@ -63,7 +65,7 @@ Rules:
 2. Stale epoch → reject (`WRITER_EPOCH_STALE`).
 3. Cloud ingestion of Edge outbox validates fencing token / epoch continuity.
 4. **No universal LWW.**
-5. **No duplicate** cash, stock, order, or fiscal effects after replay — idempotency `{terminalId}:{clientCommandId}` + semantic fingerprint (offline-foundation) + domain uniqueness (CashShift, PCE, inventory posting).
+5. **No duplicate** cash, stock, order, or fiscal effects after replay — idempotency key **must** be `{terminalId}:{clientCommandId}` **plus** semantic fingerprint (offline-foundation §4) + domain uniqueness (CashShift, PCE, inventory posting). Bare opaque keys without terminal scope are insufficient.
 
 ### D4. Failover / recovery — no automatic Cloud takeover on lease expiry alone
 

@@ -149,6 +149,17 @@ Shared domain code; differentiated **deployment profile** and **offline promise*
 | 18 | Edge server/DB fails | Local fail closed; no silent Cloud dual-write |
 | 19 | KDS/print local | No double tickets on replay |
 | 20 | Reconnect | Replay, reconcile, compensate per domain; audit |
+| 21 | Forward clock skew on business_time / collected_at | Reject unbounded future |
+| 22 | Grant forgery / signature rollback | Deny; audit |
+| 23 | One-time offline grant replay | Deny second consume |
+| 24 | L1 OperationalClose without L2/L3 | No revenue/fiscal finalization side effects |
+
+### Sync egress categories (minimum — UNKNOWN until OFF-06)
+
+| Direction | Likely categories | Certainty |
+| --- | --- | --- |
+| Cloud → Edge grants | Permission/scope codes, installation ids, policyVersion, expiry | PARTIAL — minimize per ADR-0043 |
+| Edge → Cloud sync | Order/payment/cash/shift/inventory command facts; actor/terminal ids; business chronology; **not** Cloud PIN material | PARTIAL — Egress Gate or UNKNOWN+collect before live |
 
 ---
 
@@ -160,7 +171,7 @@ Shared domain code; differentiated **deployment profile** and **offline promise*
 | **OFF-02** | B | Edge Runtime packaging skeleton + local Postgres migrate profile (no prod) | OFF-01 |
 | **OFF-03** | B | DeviceIdentity / EdgeInstallation + enrollment APIs | OFF-01 |
 | **OFF-04** | B | Offline PIN verifier + signed grants sync + Edge session | OFF-01, OFF-03 |
-| **OFF-05** | B | WriterEpoch / fencing + LAN terminal auth | OFF-01, OFF-02 |
+| **OFF-05** | B | WriterEpoch / fencing + LAN terminal auth | OFF-01, OFF-02, **OFF-03** |
 | **OFF-06** | B | Sync outbox/inbox/cursor + idempotent ingest | OFF-05 |
 | **OFF-07** | B | OperationalClose (L1) + keep CompleteOrder gate | OFF-01 Accept 0045 |
 | **OFF-08** | B | EdgeReceiveCash + sync dedupe (if D3 Accepted) | OFF-04, OFF-06, 0045 |

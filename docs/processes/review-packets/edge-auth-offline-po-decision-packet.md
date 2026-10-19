@@ -27,7 +27,7 @@ Choose one:
 3. **Offline CASH (ADR-0045 D3)** — Accept EdgeReceiveCash closing ADR-0038 A4 OPEN, or keep fail-closed until server accept.
 4. **CompleteOrder** — Accept `OperationalClose` (L1) beside unchanged L3 fiscal-gated `CompleteOrder` (do **not** remove CheckoutOrchestrator gate).
 5. **Authority partition** — Tenant+LE+Outlet default; Hub multi-partition OK.
-6. **No automatic Cloud takeover** on lease expiry alone — Accept.
+6. **No automatic Cloud takeover** on lease expiry alone — Accept. Lease `expires_at` is alert-only; Cloud writes for an Edge-owned partition require explicit D4 recovery transfer even after lease expiry.
 7. **Counsel** — authorize Vietnamese fiscal counsel package on offline cash + delayed e-invoice (G2 still separate).
 8. **OFF-01…OFF-10** — acknowledge sequence; authorize only OFF-01 Accept now (docs); later slices need separate GO.
 9. Confirm offline QR **not** in first release; Mobile QR remains online/#87 track.

@@ -77,17 +77,31 @@ ADR-0038 A4: late/offline cash **RELEASE-BLOCKING OPEN**; default proposal was f
 ```text
 EdgeReceiveCash {
   actor_id, cash_shift_id, terminal_id, edge_installation_id,
-  amount, currency, business_time (Edge trusted clock rules),
-  idempotency_key, evidence_hash, writer_epoch, fencing_token
+  legal_entity_id, settlement_check_or_payment_binding,
+  -- ADR-0038 Money parity (server/Edge domain compute — not bare client amount alone):
+  amount_due, amount_tendered, change_computed,
+  currency,
+  humanConfirmation,   -- required (ADR-0038 A3.2); operator attestation
+  business_time,       -- Edge trusted clock: rollback + forward-skew bounds (ADR-0043)
+  idempotency_key = {terminalId}:{clientCommandId},
+  semantic_fingerprint,
+  evidence_hash, writer_epoch, fencing_token
 }
-→ local Payment + CASH_RECEIVE PCE candidate
-→ collected_at = Edge-affirmed collection business time under clock-rollback policy
-→ sync to Cloud: idempotent; duplicate ACK-safe (scenarios 11–12)
+→ local Payment + CASH_RECEIVE PCE candidate (kinds unchanged until Accept)
+→ collected_at = Edge-affirmed collection business time under clock policy
+→ sync to Cloud ingest (must validate all of):
+   fencing/epoch continuity, OPEN shift, LE/Check binding,
+   Money parity, humanConfirmation present, fingerprint match,
+   idempotent dedupe (scenarios 11–12)
 ```
 
 Cloud must **not** invent a second cash effect on replay. Client-supplied `collected_at` remains forbidden on Cloud-only ReceiveCash path (runtime today).
 
+**Revocation window honesty:** With revoke-on-next-sync, a remote revoke may leave up to grant TTL of local CASH possible — Product Accept of 72h must acknowledge this residual risk (scenario 3).
+
 **Fiscal:** Local CASH PCE does **not** imply FiscalCheckoutGate SATISFIED offline. Fiscal remains queued / pending until provider evidence (and G2 for production).
+
+**Inventory / write-off:** Offline stock/production posting remains ADR-0010-disciplined. `offline-foundation.md` “queue write-off” does **not** imply L3 CompleteOrder or revenue finalization — L1 OperationalClose ≠ L3.
 
 ### D4. Payment / fiscal state machine (offline-aware)
 
