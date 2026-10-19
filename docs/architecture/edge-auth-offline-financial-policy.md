@@ -176,7 +176,7 @@ Shared domain code; differentiated **deployment profile** and **offline promise*
 | **OFF-07** | B | OperationalClose (L1) + keep CompleteOrder gate | OFF-01 Accept 0045 |
 | **OFF-08** | B | EdgeReceiveCash + sync dedupe (if D3 Accepted) | OFF-04, OFF-06, 0045 |
 | **OFF-09** | C/B | Fiscal queue/reconcile UX; still no fabricate; G2 separate | OFF-06, counsel |
-| **OFF-10** | B | Adversarial suite 1–20 + chaos reconnect | OFF-06–09 |
+| **OFF-10** | B | Adversarial suite **1–24** + chaos reconnect | OFF-06–09 |
 
 Each implement PR: independent Architecture · FinSec · Privacy. **STOP** until PO GO per slice.
 

@@ -1,9 +1,11 @@
 # Edge Auth & Offline Financial Policy — PO Decision Packet
 
-- **STATUS:** Level **C** — **Proposed** — **STOP BEFORE RUNTIME / MERGE-AS-GO**
+- **STATUS:** Level **C** — **Proposed** — **STOP BEFORE RUNTIME / MERGE-AS-GO** (awaiting PO ACCEPT / ACCEPT WITH DELTAS / REJECT)
 - **Date:** 2026-10-19
 - **Priority:** P0
 - **Origin main (verified):** `33dad072e014158c6658546abcda5de38e87f4b2`
+- **PR tip (reviews):** `b9c6fa43c560a164c9e8572209cc5ed5faf2e3b0`
+- **Independent reviews:** Architecture **APPROVE** · FinSec **APPROVE** · Privacy **APPROVE**
 - **Authority:** `docs/architecture/edge-auth-offline-financial-policy.md`
 - **ADRs:** Proposed ADR-0043 (OFFLINE-001) · ADR-0044 (OFFLINE-002) · ADR-0045 (OFFLINE-003)
 - **Identity:** PR #87 / ADR-0042 independent — do not modify in this track
