@@ -2,8 +2,8 @@
 
 - **Status:** Foundation reference (Architecture v1.3 aware)
 - **Date:** 2026-08-19
-- **Updated:** 2026-09-04
-- **Related:** ADR-0001, ADR-0003, ADR-0008, ADR-0018 (Proposed multi-platform runtime), PROJECT_CHARTER.md
+- **Updated:** 2026-10-19
+- **Related:** ADR-0001, ADR-0003, ADR-0008, ADR-0018 (Accepted); Hybrid Edge package `edge-auth-offline-financial-policy.md` + ADR-0043/0044/0045 (OFFLINE-001/002/003) — **Accepted WITH DELTAS** (OFF-01 / PR #90); ADR-0038 A4 offline CASH remains OPEN; “Queue payment fact” ≠ authoritative PCE; PROJECT_CHARTER.md
 
 ## 1. Requirement
 
@@ -22,7 +22,7 @@ These must work on the device without server connectivity:
 | Apply known menu/prices | From last synced catalog/menu/pricing snapshot |
 | Record payment (cash) | Queue payment fact |
 | Kitchen ticket display | From local order state; routing snapshot from last sync |
-| Inventory write-off trigger | Queue command; valuation may be provisional offline |
+| Inventory write-off trigger | Queue command; valuation may be provisional offline; **≠** CompleteOrder / L3 finalization (see Proposed ADR-0045) |
 | Employee sign-in | Last-known credential/session policy (deferred) |
 
 Orders must work **without** a table assignment (takeaway / corner / delivery).
@@ -113,3 +113,5 @@ Offline sync uses **DOMAIN** (and necessary AUDIT) command/facts — not UI TELE
 - CRDT vs last-write-wins for specific entities
 - Fiscal offline queue behavior (Vietnam)
 - Full encryption at rest on device
+
+**Hybrid Edge (2026-10-19):** ADR-0043/0044/0045 **Accepted WITH DELTAS** (OFF-01 / PR #90) — see `edge-auth-offline-financial-policy.md`. CheckoutOrchestrator fiscal gate preserved; ADR-0038 A4 offline CASH remains OPEN; OfflineCashEvidence ≠ PCE; Level B / cash production / G2 **not** issued.
