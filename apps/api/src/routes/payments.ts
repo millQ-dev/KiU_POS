@@ -394,8 +394,8 @@ export async function registerPaymentRoutes(
         receiveIdempotencyKey: body.receiveIdempotencyKey,
         amountTenderedMinor: body.amountTenderedMinor,
         humanConfirmation: body.humanConfirmation,
-        tipAmountMinor: body.tipAmountMinor,
-        collectedAt: body.collectedAt,
+        ...(body.tipAmountMinor !== undefined ? { tipAmountMinor: body.tipAmountMinor } : {}),
+        ...(body.collectedAt !== undefined ? { collectedAt: body.collectedAt } : {}),
       });
     } catch (err) {
       const mapped = mapPaymentError(err);
