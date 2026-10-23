@@ -17,8 +17,15 @@ import {
 } from './migrate.js';
 
 const DATABASE_URL = process.env.DATABASE_URL ?? '';
+/**
+ * Destructive cleanup (DROP schema_migrations / migrate_probe) is allowed only on
+ * explicitly disposable DBs whose name starts with millq_migrate_runner.
+ * Never millq_dev, staging, production, or a shared acceptance URL.
+ */
 const RUN_DISPOSABLE =
-  Boolean(DATABASE_URL) && !/\/millq_dev(\?|$)/.test(DATABASE_URL);
+  Boolean(DATABASE_URL) &&
+  !/\/millq_dev(\?|$)/.test(DATABASE_URL) &&
+  /\/millq_migrate_runner(?:_[A-Za-z0-9]+)?(\?|$)/.test(DATABASE_URL);
 const describeRunner = RUN_DISPOSABLE ? describe : describe.skip;
 
 const repoMigrationsDir = join(dirname(fileURLToPath(import.meta.url)), '../../migrations');
