@@ -324,9 +324,11 @@ export async function registerPosRoutes(
           message: 'Authoritative payment/settlement fields are not caller-settable',
         });
       }
+      // Authoritative actor = authenticated principal (ignore client actorId).
       const order = await orders.openOrder({
         ...(req.body as object),
         tenantId: principal.tenantId,
+        actorId: principal.userId,
       });
       return reply.code(201).send(await enrichOrderLines(pool, order));
     } catch (err) {
@@ -386,15 +388,17 @@ export async function registerPosRoutes(
 
   app.post<{ Params: { orderId: string } }>('/api/v1/orders/:orderId/cancel', async (req, reply) => {
     try {
-      await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
-      const body = (req.body ?? {}) as { reason?: string; actorId?: string };
+      const { principal } = await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
+      const body = (req.body ?? {}) as { reason?: string; actorId?: string; deviceId?: string };
       if (!body.reason || body.reason.trim().length === 0) {
         return reply.code(400).send({ error: 'VALIDATION', message: 'reason required' });
       }
+      // Authoritative actor = authenticated principal; deviceId remains client device identity.
       const order = await orders.cancelOrder({
         orderId: req.params.orderId,
         reason: body.reason,
-        ...(body.actorId ? { actorId: body.actorId } : {}),
+        actorId: principal.userId,
+        ...(body.deviceId ? { deviceId: body.deviceId } : {}),
       });
       return await enrichOrderLines(pool, order);
     } catch (err) {
@@ -463,7 +467,7 @@ export async function registerPosRoutes(
     '/api/v1/orders/:orderId/calculate-and-accept-commercial-terms',
     async (req, reply) => {
       try {
-        await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
+        const { principal } = await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
         const body = (req.body ?? {}) as {
           salesContext?: unknown;
           idempotencyKey?: string;
@@ -480,7 +484,7 @@ export async function registerPosRoutes(
           orderId: req.params.orderId,
           salesContext: body.salesContext,
           idempotencyKey: body.idempotencyKey,
-          ...(body.actorId ? { actorId: body.actorId } : {}),
+          actorId: principal.userId,
           ...(body.deviceId ? { deviceId: body.deviceId } : {}),
         });
       } catch (err) {
@@ -494,7 +498,7 @@ export async function registerPosRoutes(
     '/api/v1/orders/:orderId/reprice-and-accept-commercial-terms',
     async (req, reply) => {
       try {
-        await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
+        const { principal } = await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
         const body = (req.body ?? {}) as {
           salesContext?: unknown;
           idempotencyKey?: string;
@@ -512,7 +516,7 @@ export async function registerPosRoutes(
           orderId: req.params.orderId,
           salesContext: body.salesContext,
           idempotencyKey: body.idempotencyKey,
-          ...(body.actorId ? { actorId: body.actorId } : {}),
+          actorId: principal.userId,
           ...(body.deviceId ? { deviceId: body.deviceId } : {}),
         });
       } catch (err) {
@@ -562,7 +566,7 @@ export async function registerPosRoutes(
     '/api/v1/orders/:orderId/open-settlement',
     async (req, reply) => {
       try {
-        await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
+        const { principal } = await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
         const body = (req.body ?? {}) as {
           idempotencyKey?: string;
           actorId?: string;
@@ -582,7 +586,7 @@ export async function registerPosRoutes(
         return await settlements.openSettlement({
           orderId: req.params.orderId,
           idempotencyKey: body.idempotencyKey,
-          actorId: body.actorId ?? null,
+          actorId: principal.userId,
           deviceId: body.deviceId ?? null,
         });
       } catch (err) {
@@ -705,7 +709,12 @@ export async function registerPosRoutes(
     '/api/v1/settlements/:settlementGroupId/advance-checkout',
     async (req, reply) => {
       try {
-        await requireSettlementPrincipal(req, finAuth, pool, req.params.settlementGroupId);
+        const { principal } = await requireSettlementPrincipal(
+          req,
+          finAuth,
+          pool,
+          req.params.settlementGroupId,
+        );
         const body = (req.body ?? {}) as {
           completeIdempotencyKey?: string;
           businessDate?: string;
@@ -742,7 +751,7 @@ export async function registerPosRoutes(
           businessDate: body.businessDate,
           businessOrder: body.businessOrder,
           businessTime: body.businessTime ?? null,
-          actorId: body.actorId ?? null,
+          actorId: principal.userId,
           deviceId: body.deviceId ?? null,
         });
       } catch (err) {
