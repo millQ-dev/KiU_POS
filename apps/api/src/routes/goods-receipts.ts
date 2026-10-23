@@ -85,9 +85,11 @@ export async function registerGoodsReceiptRoutes(
         principal,
         typeof body.tenantId === 'string' ? body.tenantId : undefined,
       );
+      // Authoritative actor = authenticated principal (ignore client actorId).
       const doc = await service.createDraft({
         ...body,
         tenantId: principal.tenantId,
+        actorId: principal.userId,
       });
       return reply.code(201).send(doc);
     } catch (err) {
@@ -122,7 +124,10 @@ export async function registerGoodsReceiptRoutes(
         principal,
         typeof body.tenantId === 'string' ? body.tenantId : undefined,
       );
-      const doc = await service.updateDraft(req.params.id, body);
+      const doc = await service.updateDraft(req.params.id, {
+        ...body,
+        actorId: principal.userId,
+      });
       return doc;
     } catch (err) {
       const mapped = mapError(err);
@@ -151,7 +156,11 @@ export async function registerGoodsReceiptRoutes(
       if (!existing || existing.tenantId !== principal.tenantId) {
         return reply.code(404).send({ error: 'NOT_FOUND' });
       }
-      const result = await service.post(req.params.id, req.body);
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const result = await service.post(req.params.id, {
+        ...body,
+        actorId: principal.userId,
+      });
       return reply.code(200).send(result);
     } catch (err) {
       const mapped = mapError(err);
@@ -170,10 +179,10 @@ export async function registerGoodsReceiptRoutes(
       if (!body.idempotencyKey) {
         return reply.code(400).send({ error: 'VALIDATION', message: 'idempotencyKey required' });
       }
-      // actorId semantics unchanged (Accepted domain contract) — not rewritten to principal here.
+      // Authoritative actor = authenticated principal (ignore client actorId).
       return await service.reverse(req.params.id, {
         idempotencyKey: body.idempotencyKey,
-        ...(body.actorId ? { actorId: body.actorId } : {}),
+        actorId: principal.userId,
         ...(body.reason ? { reason: body.reason } : {}),
       });
     } catch (err) {

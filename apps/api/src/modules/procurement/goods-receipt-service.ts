@@ -116,7 +116,14 @@ export class GoodsReceiptService {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query(
+      const lock = await client.query<{ status: string }>(
+        `SELECT status FROM goods_receipt WHERE goods_receipt_id = $1 FOR UPDATE`,
+        [id],
+      );
+      if (!lock.rowCount || lock.rows[0]?.status !== 'DRAFT') {
+        throw new PostedImmutableError();
+      }
+      const upd = await client.query(
         `UPDATE goods_receipt SET
           supplier_document_number = COALESCE($2, supplier_document_number),
           business_date = COALESCE($3, business_date),
@@ -133,6 +140,9 @@ export class GoodsReceiptService {
           input.businessOrder ?? null,
         ],
       );
+      if (!upd.rowCount) {
+        throw new PostedImmutableError();
+      }
       if (input.lines) {
         for (const line of input.lines) {
           await this.validateLine(
@@ -174,85 +184,91 @@ export class GoodsReceiptService {
 
   async post(id: string, raw: unknown) {
     const cmd = postCommandSchema.parse(raw);
-    const existing = await this.get(id);
-    if (!existing) throw new NotFoundError(`Goods receipt ${id} not found`);
-
-    if (existing.status === 'POSTED') {
-      if (existing.postIdempotencyKey === cmd.idempotencyKey) {
-        const fp = fingerprintFromDraft(
-          {
-            goodsReceiptId: existing.goodsReceiptId,
-            legalEntityId: existing.legalEntityId,
-            warehouseId: existing.warehouseId,
-            supplierId: existing.supplierId,
-            supplierDocumentNumber: existing.supplierDocumentNumber,
-            currencyCode: existing.currencyCode,
-            minorUnitExponent: existing.minorUnitExponent,
-            businessDate: existing.businessDate,
-            businessTime: existing.businessTime,
-            businessOrder: existing.businessOrder,
-          },
-          existing.lines,
-        );
-        if (fp === existing.postSemanticFingerprint) {
-          return { status: 'duplicate' as const, receipt: existing };
-        }
-        throw new IdempotencyConflictError(cmd.idempotencyKey);
-      }
-      throw new PostedImmutableError('Already POSTED with a different idempotency key');
-    }
-    if (existing.status !== 'DRAFT') {
-      throw new DomainValidationError('INVALID_STATUS', `Cannot post from status ${existing.status}`);
-    }
-
-    await this.validate(id);
-    const fp = fingerprintFromDraft(
-      {
-        goodsReceiptId: existing.goodsReceiptId,
-        legalEntityId: existing.legalEntityId,
-        warehouseId: existing.warehouseId,
-        supplierId: existing.supplierId,
-        supplierDocumentNumber: existing.supplierDocumentNumber,
-        currencyCode: existing.currencyCode,
-        minorUnitExponent: existing.minorUnitExponent,
-        businessDate: existing.businessDate,
-        businessTime: existing.businessTime,
-        businessOrder: existing.businessOrder,
-      },
-      existing.lines,
-    );
-
-    // Conflict if same key was used on another document in this legal entity
-    const conflict = await this.pool.query(
-      `SELECT goods_receipt_id, post_semantic_fingerprint, status FROM goods_receipt
-       WHERE legal_entity_id = $1 AND post_idempotency_key = $2`,
-      [existing.legalEntityId, cmd.idempotencyKey],
-    );
-    if (conflict.rowCount && conflict.rows[0]) {
-      const row = conflict.rows[0] as {
-        goods_receipt_id: string;
-        post_semantic_fingerprint: string;
-        status: string;
-      };
-      if (row.goods_receipt_id !== id) {
-        throw new IdempotencyConflictError(cmd.idempotencyKey, 'Idempotency key already used by another receipt');
-      }
-    }
 
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
 
-      const lock = await client.query(
-        `SELECT status FROM goods_receipt WHERE goods_receipt_id = $1 FOR UPDATE`,
+      // Lock header first, then reload lines — never post from a pre-lock stale draft snapshot.
+      const lock = await client.query(`SELECT * FROM goods_receipt WHERE goods_receipt_id = $1 FOR UPDATE`, [
+        id,
+      ]);
+      const header = (lock.rows[0] as Record<string, unknown> | undefined) ?? null;
+      if (!header) throw new NotFoundError(`Goods receipt ${id} not found`);
+
+      const linesRes = await client.query(
+        `SELECT * FROM goods_receipt_line WHERE goods_receipt_id = $1 ORDER BY line_number`,
         [id],
       );
-      if (lock.rows[0]?.status !== 'DRAFT') {
-        throw new PostedImmutableError();
+      const existing = this.mapDoc(header, linesRes.rows);
+
+      if (existing.status === 'POSTED') {
+        if (existing.postIdempotencyKey === cmd.idempotencyKey) {
+          const fp = fingerprintFromDraft(
+            {
+              goodsReceiptId: existing.goodsReceiptId,
+              legalEntityId: existing.legalEntityId,
+              warehouseId: existing.warehouseId,
+              supplierId: existing.supplierId,
+              supplierDocumentNumber: existing.supplierDocumentNumber,
+              currencyCode: existing.currencyCode,
+              minorUnitExponent: existing.minorUnitExponent,
+              businessDate: existing.businessDate,
+              businessTime: existing.businessTime,
+              businessOrder: existing.businessOrder,
+            },
+            existing.lines,
+          );
+          if (fp === existing.postSemanticFingerprint) {
+            await client.query('COMMIT');
+            return { status: 'duplicate' as const, receipt: existing };
+          }
+          throw new IdempotencyConflictError(cmd.idempotencyKey);
+        }
+        throw new PostedImmutableError('Already POSTED with a different idempotency key');
+      }
+      if (existing.status !== 'DRAFT') {
+        throw new DomainValidationError('INVALID_STATUS', `Cannot post from status ${existing.status}`);
+      }
+
+      await this.validateBoundary(existing.legalEntityId, existing.warehouseId, existing.tenantId);
+      for (const line of existing.lines) {
+        await this.validateLine(line, existing.currencyCode, existing.minorUnitExponent, existing.tenantId);
+      }
+
+      const fp = fingerprintFromDraft(
+        {
+          goodsReceiptId: existing.goodsReceiptId,
+          legalEntityId: existing.legalEntityId,
+          warehouseId: existing.warehouseId,
+          supplierId: existing.supplierId,
+          supplierDocumentNumber: existing.supplierDocumentNumber,
+          currencyCode: existing.currencyCode,
+          minorUnitExponent: existing.minorUnitExponent,
+          businessDate: existing.businessDate,
+          businessTime: existing.businessTime,
+          businessOrder: existing.businessOrder,
+        },
+        existing.lines,
+      );
+
+      const conflict = await client.query(
+        `SELECT goods_receipt_id FROM goods_receipt
+         WHERE legal_entity_id = $1 AND post_idempotency_key = $2`,
+        [existing.legalEntityId, cmd.idempotencyKey],
+      );
+      if (conflict.rowCount && conflict.rows[0]) {
+        const row = conflict.rows[0] as { goods_receipt_id: string };
+        if (row.goods_receipt_id !== id) {
+          throw new IdempotencyConflictError(
+            cmd.idempotencyKey,
+            'Idempotency key already used by another receipt',
+          );
+        }
       }
 
       const postedAt = new Date().toISOString();
-      await client.query(
+      const upd = await client.query(
         `UPDATE goods_receipt SET
           status = 'POSTED',
           posted_at = $2,
@@ -260,9 +276,12 @@ export class GoodsReceiptService {
           post_semantic_fingerprint = $4,
           actor_id = COALESCE($5, actor_id),
           recorded_at = NOW()
-         WHERE goods_receipt_id = $1`,
+         WHERE goods_receipt_id = $1 AND status = 'DRAFT'`,
         [id, postedAt, cmd.idempotencyKey, fp, cmd.actorId ?? null],
       );
+      if (!upd.rowCount) {
+        throw new PostedImmutableError();
+      }
 
       for (const line of existing.lines) {
         const movementId = randomUUID();
@@ -296,7 +315,6 @@ export class GoodsReceiptService {
         );
       }
 
-      // Replay cost streams for all affected items (chronology-correct)
       const itemIds = [...new Set(existing.lines.map((l) => l.catalogItemId))].sort();
       for (const catalogItemId of itemIds) {
         await lockValuationStream(
@@ -339,30 +357,61 @@ export class GoodsReceiptService {
   }
 
   async reverse(id: string, input: { idempotencyKey: string; actorId?: string; reason?: string }) {
-    const existing = await this.get(id);
-    if (!existing) throw new NotFoundError(`Goods receipt ${id} not found`);
-    if (existing.status !== 'POSTED') {
-      throw new DomainValidationError('INVALID_STATUS', 'Only POSTED receipts can be reversed');
-    }
-
     const reverseKey = `reverse:${input.idempotencyKey}`;
-    const existingReverse = await this.pool.query(
-      `SELECT goods_receipt_id FROM goods_receipt WHERE reverses_goods_receipt_id = $1 AND status = 'POSTED'`,
-      [id],
-    );
-    if (existingReverse.rowCount && existingReverse.rowCount > 0) {
-      return { status: 'duplicate' as const, receipt: await this.get(id) };
-    }
-
     const reverseId = randomUUID();
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query(
+
+      const lock = await client.query(`SELECT * FROM goods_receipt WHERE goods_receipt_id = $1 FOR UPDATE`, [
+        id,
+      ]);
+      const header = (lock.rows[0] as Record<string, unknown> | undefined) ?? null;
+      if (!header) throw new NotFoundError(`Goods receipt ${id} not found`);
+
+      const linesRes = await client.query(
+        `SELECT * FROM goods_receipt_line WHERE goods_receipt_id = $1 ORDER BY line_number`,
+        [id],
+      );
+      const existing = this.mapDoc(header, linesRes.rows);
+
+      if (existing.status === 'REVERSED') {
+        const prior = await client.query<{ goods_receipt_id: string; post_idempotency_key: string | null }>(
+          `SELECT goods_receipt_id, post_idempotency_key FROM goods_receipt
+           WHERE reverses_goods_receipt_id = $1 AND status = 'POSTED'
+           ORDER BY posted_at ASC NULLS LAST
+           LIMIT 1`,
+          [id],
+        );
+        if (prior.rowCount && prior.rows[0]) {
+          await client.query('COMMIT');
+          return { status: 'duplicate' as const, receipt: existing };
+        }
+        throw new DomainValidationError('INVALID_STATUS', 'Only POSTED receipts can be reversed');
+      }
+      if (existing.status !== 'POSTED') {
+        throw new DomainValidationError('INVALID_STATUS', 'Only POSTED receipts can be reversed');
+      }
+
+      const priorReverse = await client.query(
+        `SELECT goods_receipt_id FROM goods_receipt WHERE reverses_goods_receipt_id = $1 AND status = 'POSTED'`,
+        [id],
+      );
+      if (priorReverse.rowCount && priorReverse.rowCount > 0) {
+        await client.query('COMMIT');
+        return { status: 'duplicate' as const, receipt: existing };
+      }
+
+      const upd = await client.query(
         `UPDATE goods_receipt SET status = 'REVERSED', reversed_at = NOW(), recorded_at = NOW()
          WHERE goods_receipt_id = $1 AND status = 'POSTED'`,
         [id],
       );
+      if (!upd.rowCount) {
+        // Lost race after lock release edge / status change — do not create a second economic reverse.
+        throw new DomainValidationError('INVALID_STATUS', 'Only POSTED receipts can be reversed');
+      }
+
       await client.query(
         `INSERT INTO goods_receipt (
           goods_receipt_id, tenant_id, legal_entity_id, warehouse_id, supplier_id,
