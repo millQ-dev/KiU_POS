@@ -2,13 +2,15 @@
  * P0 POS/Orders/Settlement HTTP actor attribution.
  * Requires a disposable DATABASE_URL (never shared millq_dev).
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import pg from 'pg';
 import { resolvePinPepper } from '../config.js';
 import { runMigrations } from '../db/migrate.js';
+import { CheckoutOrchestrator } from '../modules/checkout/checkout-orchestrator.js';
+import { BaseCommercialAcceptanceService } from '../modules/commercial-rounding/base-commercial-acceptance.js';
 import { IdentityService } from '../modules/identity/index.js';
 import { GoodsIssueService } from '../modules/inventory/goods-issue-service.js';
 import { OrdersService } from '../modules/orders/orders-service.js';
@@ -246,6 +248,199 @@ describe('POS HTTP actor integrity (P0)', () => {
       [orderId],
     );
     expect(row.rows[0]?.actor_id).toBe(authenticatedUserId);
+    await app.close();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * Commercial + advance-checkout: mock downstream to capture actor at HTTP boundary
+   * without menu/fiscal Golden paths. Auth + order/settlement shell still use disposable DB.
+   */
+  it('calculate/reprice commercial HTTP: spoofed actorId → principal; absent → principal', async () => {
+    const captured: Array<{ actorId?: string; idempotencyKey: string }> = [];
+    vi.spyOn(
+      BaseCommercialAcceptanceService.prototype,
+      'calculateAndAcceptBaseCommercialTerms',
+    ).mockImplementation(async (input) => {
+      captured.push({
+        ...(input.actorId !== undefined ? { actorId: input.actorId } : {}),
+        idempotencyKey: input.idempotencyKey,
+      });
+      return {
+        calculated: { lines: [] },
+        accepted: true,
+        commercialStatus: { state: 'ACCEPTED' },
+      } as never;
+    });
+
+    const app = await buildApp();
+    const token = await loginPosSession(app, pool, fx);
+    const open = await app.inject({
+      method: 'POST',
+      url: '/api/v1/orders',
+      headers: authInjectHeaders(token),
+      payload: {
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        outletId: fx.outletId,
+        channel: 'DIRECT',
+      },
+    });
+    const orderId = (open.json() as { orderId: string }).orderId;
+    const spoof = randomUUID();
+    const salesContext = { channel: 'DIRECT', priceListId: randomUUID() };
+
+    const calc = await app.inject({
+      method: 'POST',
+      url: `/api/v1/orders/${orderId}/calculate-and-accept-commercial-terms`,
+      headers: authInjectHeaders(token),
+      payload: {
+        salesContext,
+        idempotencyKey: 'comm-spoof-1',
+        actorId: spoof,
+      },
+    });
+    expect(calc.statusCode).toBe(200);
+    expect(captured[0]?.actorId).toBe(authenticatedUserId);
+    expect(captured[0]?.actorId).not.toBe(spoof);
+
+    const reprice = await app.inject({
+      method: 'POST',
+      url: `/api/v1/orders/${orderId}/reprice-and-accept-commercial-terms`,
+      headers: authInjectHeaders(token),
+      payload: {
+        salesContext,
+        idempotencyKey: 'comm-spoof-2',
+        actorId: spoof,
+      },
+    });
+    expect(reprice.statusCode).toBe(200);
+    expect(captured[1]?.actorId).toBe(authenticatedUserId);
+
+    const noActor = await app.inject({
+      method: 'POST',
+      url: `/api/v1/orders/${orderId}/calculate-and-accept-commercial-terms`,
+      headers: authInjectHeaders(token),
+      payload: { salesContext, idempotencyKey: 'comm-no-actor' },
+    });
+    expect(noActor.statusCode).toBe(200);
+    expect(captured[2]?.actorId).toBe(authenticatedUserId);
+
+    // Access / validation gates not bypassed
+    const noKey = await app.inject({
+      method: 'POST',
+      url: `/api/v1/orders/${orderId}/calculate-and-accept-commercial-terms`,
+      headers: authInjectHeaders(token),
+      payload: { salesContext },
+    });
+    expect(noKey.statusCode).toBe(400);
+    const noSession = await app.inject({
+      method: 'POST',
+      url: `/api/v1/orders/${orderId}/calculate-and-accept-commercial-terms`,
+      headers: { origin: TEST_ORIGIN },
+      payload: { salesContext, idempotencyKey: 'x' },
+    });
+    expect(noSession.statusCode).toBe(401);
+
+    await app.close();
+  });
+
+  it('advance-checkout HTTP: spoofed actorId → principal; fiscal mass-assignment still blocked', async () => {
+    const captured: Array<{ actorId?: string | null }> = [];
+    vi.spyOn(CheckoutOrchestrator.prototype, 'tryAdvanceCheckout').mockImplementation(
+      async (input) => {
+        captured.push({ actorId: input.actorId ?? null });
+        return {
+          settlement: { settlementGroupId: input.settlementGroupId, state: 'SATISFIED' },
+          fiscal: { status: 'NOT_REQUIRED' },
+          completion: { status: 'COMPLETED' },
+        } as never;
+      },
+    );
+
+    const app = await buildApp();
+    const token = await loginPosSession(app, pool, fx);
+    const open = await app.inject({
+      method: 'POST',
+      url: '/api/v1/orders',
+      headers: authInjectHeaders(token),
+      payload: {
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        outletId: fx.outletId,
+        channel: 'DIRECT',
+      },
+    });
+    const orderId = (open.json() as { orderId: string }).orderId;
+    const orders = new OrdersService(pool, { saleWriteOffPort: new GoodsIssueService(pool) });
+    await orders.addOrderLine({
+      orderId,
+      catalogItemId: fx.eggItemId,
+      quantity: '1',
+      unit: 'ea',
+      dimension: 'COUNT',
+    });
+    await acceptFinalMerchandiseTerms(orders, orderId, {
+      idempotencyKey: randomUUID(),
+      defaultGrossMinor: '5000',
+    });
+    const settle = await app.inject({
+      method: 'POST',
+      url: `/api/v1/orders/${orderId}/open-settlement`,
+      headers: authInjectHeaders(token),
+      payload: { idempotencyKey: randomUUID() },
+    });
+    expect(settle.statusCode).toBe(200);
+    const sg = (settle.json() as { settlementGroupId: string }).settlementGroupId;
+
+    const spoof = randomUUID();
+    const adv = await app.inject({
+      method: 'POST',
+      url: `/api/v1/settlements/${sg}/advance-checkout`,
+      headers: authInjectHeaders(token),
+      payload: {
+        completeIdempotencyKey: randomUUID(),
+        businessDate: '2026-10-23',
+        businessOrder: 1,
+        actorId: spoof,
+      },
+    });
+    expect(adv.statusCode).toBe(200);
+    expect(captured[0]?.actorId).toBe(authenticatedUserId);
+    expect(captured[0]?.actorId).not.toBe(spoof);
+
+    const noActor = await app.inject({
+      method: 'POST',
+      url: `/api/v1/settlements/${sg}/advance-checkout`,
+      headers: authInjectHeaders(token),
+      payload: {
+        completeIdempotencyKey: randomUUID(),
+        businessDate: '2026-10-23',
+        businessOrder: 2,
+      },
+    });
+    expect(noActor.statusCode).toBe(200);
+    expect(captured[1]?.actorId).toBe(authenticatedUserId);
+
+    // Fiscal / completion gate fields still rejected before orchestrator
+    const mass = await app.inject({
+      method: 'POST',
+      url: `/api/v1/settlements/${sg}/advance-checkout`,
+      headers: authInjectHeaders(token),
+      payload: {
+        completeIdempotencyKey: randomUUID(),
+        businessDate: '2026-10-23',
+        businessOrder: 3,
+        fiscalAccepted: true,
+        paid: true,
+      },
+    });
+    expect(mass.statusCode).toBe(400);
+    expect(captured.length).toBe(2);
+
     await app.close();
   });
 });
