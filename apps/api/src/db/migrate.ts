@@ -69,15 +69,19 @@ export function stripSqlComments(sql: string): string {
  */
 export function assertNoConcurrentIndex(sql: string, filename: string): void {
   const code = stripSqlComments(sql);
+  // PostgreSQL grammar: CREATE/DROP INDEX CONCURRENTLY …;
+  // REINDEX {INDEX|TABLE|…} CONCURRENTLY name; REINDEX (CONCURRENTLY) …;
+  // REFRESH MATERIALIZED VIEW CONCURRENTLY …
   const concurrentDdl =
     /\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\b/i.test(code) ||
     /\bDROP\s+INDEX\s+CONCURRENTLY\b/i.test(code) ||
-    /\bREINDEX\s+CONCURRENTLY\b/i.test(code) ||
-    /\bREINDEX\s+(?:TABLE|INDEX|SCHEMA|DATABASE|SYSTEM)\s+\S+\s+CONCURRENTLY\b/i.test(code);
+    /\bREINDEX\s*\(\s*CONCURRENTLY\s*\)/i.test(code) ||
+    /\bREINDEX\s+(?:TABLE|INDEX|SCHEMA|DATABASE|SYSTEM)\s+CONCURRENTLY\b/i.test(code) ||
+    /\bREFRESH\s+MATERIALIZED\s+VIEW\s+CONCURRENTLY\b/i.test(code);
 
   if (concurrentDdl) {
     throw new Error(
-      `Migration ${filename}: CREATE/DROP INDEX CONCURRENTLY (or REINDEX CONCURRENTLY) is not supported by the transactional migrate runner; use a separate online-migration mechanism`,
+      `Migration ${filename}: CREATE/DROP INDEX CONCURRENTLY (or REINDEX/REFRESH … CONCURRENTLY) is not supported by the transactional migrate runner; use a separate online-migration mechanism`,
     );
   }
 }

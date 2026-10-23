@@ -69,6 +69,15 @@ describe('migrate runner CONCURRENTLY guard (no DB)', () => {
     ).toThrow(/CONCURRENTLY/);
   });
 
+  it('rejects canonical REINDEX INDEX CONCURRENTLY DDL', () => {
+    expect(() =>
+      assertNoConcurrentIndex(`REINDEX INDEX CONCURRENTLY migrate_probe_idx;`, 'reindex.sql'),
+    ).toThrow(/CONCURRENTLY/);
+    expect(() =>
+      assertNoConcurrentIndex(`REINDEX (CONCURRENTLY) TABLE migrate_probe;`, 'reindex_opt.sql'),
+    ).toThrow(/CONCURRENTLY/);
+  });
+
   it('existing repo migrations do not trip the CONCURRENTLY guard', async () => {
     const files = (await readdir(repoMigrationsDir)).filter((f) => f.endsWith('.sql')).sort();
     expect(files.length).toBeGreaterThan(0);
