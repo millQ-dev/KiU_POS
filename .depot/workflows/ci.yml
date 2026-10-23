@@ -156,6 +156,9 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
+      # Fresh CI checkout has no package dist/; POS suite imports @millq/domain via package exports.
+      - name: Build workspace packages required by API tests
+        run: pnpm --filter @millq/domain --filter @millq/contracts run build
       - name: Fail-closed assertion script unit tests
         run: bash tests/scripts/assert-vitest-no-skips.test.sh
       - name: Wait for disposable PostgreSQL
