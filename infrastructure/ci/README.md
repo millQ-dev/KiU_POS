@@ -6,6 +6,12 @@
 
 Merge also still requires independent Origin review and the Origin ruleset.
 
+### Disposable PostgreSQL acceptance job
+
+Job `disposable-pg-acceptance` runs POS P0 actor + migrate-runner suites on per-run databases (`millq_ci_pos_<run>` / `millq_migrate_runner_<run>`). It uses Vitest JSON output plus `scripts/ci/assert-vitest-no-skips.mjs` (fail on skip / wrong pass count / bad report). Local credentials are job-scoped only; never `millq_dev`, staging, or production.
+
+**Required-check status:** listing the job in the workflow does **not** by itself make it a required Origin merge check. Attaching/requiring the Depot check in the Origin ruleset is a separate owner/platform GO.
+
 Do not treat GitHub Actions as the Origin approval path.
 
 ## GitHub Actions (dormant / backup-compatible)

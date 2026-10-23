@@ -27,11 +27,14 @@ import { registerPosRoutes } from './pos.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { isDisposableDatabaseUrl } from '../test/disposable-database-url.js';
 
 const DATABASE_URL = process.env.DATABASE_URL ?? '';
-/** Skip (do not throw) when CI/default points at shared millq_dev or URL unset. */
-const RUN_DISPOSABLE_DB =
-  Boolean(DATABASE_URL) && !/\/millq_dev(\?|$)/.test(DATABASE_URL);
+/**
+ * Positive allowlist only (millq_ci_pos_* / millq_migrate_runner_*).
+ * Skip (do not throw) when URL unset, millq_dev, or any non-allowlisted DB.
+ */
+const RUN_DISPOSABLE_DB = isDisposableDatabaseUrl(DATABASE_URL);
 const describeP0 = RUN_DISPOSABLE_DB ? describe : describe.skip;
 
 const PEPPER = resolvePinPepper({
