@@ -43,6 +43,8 @@ jobs:
         run: pnpm test
       - name: Backup script auth tests
         run: bash tests/scripts/backup-origin-to-github.test.sh
+      - name: Disposable CI assertion script tests
+        run: bash tests/scripts/assert-vitest-no-skips.test.sh
       - name: Build
         run: pnpm build
       - name: Migrate (idempotent smoke)
@@ -67,3 +69,155 @@ jobs:
           assert data.get('checks', {}).get('database') == 'up', data
           print('health ok')
           PY
+  disposable-pg-acceptance:
+    name: Disposable PostgreSQL P0 + migrator
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Isolated service for this job only — not millq_dev / staging / production.
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: millq_ci
+          POSTGRES_PASSWORD: millq_ci_local_only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U millq_ci -d postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      NODE_ENV: test
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: millq_ci
+      PGPASSWORD: millq_ci_local_only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      # Fresh CI checkout has no package dist/; POS suite imports @millq/domain via package exports.
+      - name: Build workspace packages required by API tests
+        run: pnpm --filter @millq/domain --filter @millq/contracts run build
+      - name: Fail-closed assertion script unit tests
+        run: bash tests/scripts/assert-vitest-no-skips.test.sh
+      - name: Wait for disposable PostgreSQL
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if pg_isready -h 127.0.0.1 -p 5432 -U millq_ci -d postgres \
+              || docker run --rm --network host postgres:16-alpine \
+                   pg_isready -h 127.0.0.1 -p 5432 -U millq_ci -d postgres; then
+              echo "disposable PostgreSQL ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "disposable PostgreSQL did not become ready" >&2
+          exit 1
+      - name: Create per-run databases
+        id: dbs
+        run: |
+          set -euo pipefail
+          psql_ci() {
+            if command -v psql >/dev/null 2>&1; then
+              PGPASSWORD=millq_ci_local_only psql -h 127.0.0.1 -U millq_ci -d postgres -v ON_ERROR_STOP=1 "$@"
+            else
+              docker run --rm --network host -e PGPASSWORD=millq_ci_local_only postgres:16-alpine \
+                psql -h 127.0.0.1 -U millq_ci -d postgres -v ON_ERROR_STOP=1 "$@"
+            fi
+          }
+          RUN_SUFFIX="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          MIGRATE_DB="millq_migrate_runner_${RUN_SUFFIX}"
+          POS_DB="millq_ci_pos_${RUN_SUFFIX}"
+          psql_ci -c "CREATE DATABASE \"${MIGRATE_DB}\" OWNER millq_ci;"
+          psql_ci -c "CREATE DATABASE \"${POS_DB}\" OWNER millq_ci;"
+          MIGRATE_URL="postgresql://millq_ci:millq_ci_local_only@127.0.0.1:5432/${MIGRATE_DB}"
+          POS_URL="postgresql://millq_ci:millq_ci_local_only@127.0.0.1:5432/${POS_DB}"
+          echo "migrate_db=${MIGRATE_DB}" >> "$GITHUB_OUTPUT"
+          echo "pos_db=${POS_DB}" >> "$GITHUB_OUTPUT"
+          echo "migrate_url=${MIGRATE_URL}" >> "$GITHUB_OUTPUT"
+          echo "pos_url=${POS_URL}" >> "$GITHUB_OUTPUT"
+          node scripts/ci/assert-disposable-database-url.mjs "$MIGRATE_URL"
+          node scripts/ci/assert-disposable-database-url.mjs "$POS_URL"
+      - name: Migrate POS disposable database
+        run: |
+          set -euo pipefail
+          POS_DB="${{ steps.dbs.outputs.pos_db }}"
+          export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${POS_DB}"
+          node scripts/ci/assert-disposable-database-url.mjs "$DATABASE_URL"
+          pnpm --filter @millq/api run migrate
+      - name: POS P0 actor acceptance (fail-closed)
+        env:
+          DATABASE_URL: ${{ steps.dbs.outputs.pos_url }}
+        run: |
+          set -euo pipefail
+          # Reconstruct URL from job-local PG* + DB name (avoid GITHUB_OUTPUT URL edge cases).
+          POS_DB="${{ steps.dbs.outputs.pos_db }}"
+          export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${POS_DB}"
+          node scripts/ci/assert-disposable-database-url.mjs "$DATABASE_URL"
+          node -e 'const u=process.env.DATABASE_URL||""; const n=u.split("/").pop()?.split("?")[0]||""; if(!n.startsWith("millq_ci_pos_")) process.exit(1); console.log("pos_db_name="+n);'
+          REPORT=/tmp/vitest-pos-p0.json
+          set +e
+          pnpm --filter @millq/api exec vitest run \
+            src/routes/pos-actor-http.p0.acceptance.test.ts \
+            --reporter=verbose \
+            --reporter=json \
+            --outputFile="$REPORT"
+          VITEST_EC=$?
+          set -e
+          node scripts/ci/print-vitest-summary.mjs "$REPORT" || true
+          if [[ "$VITEST_EC" -ne 0 ]]; then
+            echo "vitest exited with code ${VITEST_EC}" >&2
+            exit "$VITEST_EC"
+          fi
+          node scripts/ci/assert-vitest-no-skips.mjs "$REPORT" --min-passed=7 --label=pos-p0
+      - name: Migrate runner acceptance (fail-closed)
+        env:
+          DATABASE_URL: ${{ steps.dbs.outputs.migrate_url }}
+        run: |
+          set -euo pipefail
+          MIGRATE_DB="${{ steps.dbs.outputs.migrate_db }}"
+          export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${MIGRATE_DB}"
+          node scripts/ci/assert-disposable-database-url.mjs "$DATABASE_URL"
+          node -e 'const u=process.env.DATABASE_URL||""; const n=u.split("/").pop()?.split("?")[0]||""; if(!n.startsWith("millq_migrate_runner_")) process.exit(1); console.log("migrate_db_name="+n);'
+          REPORT=/tmp/vitest-migrate-runner.json
+          set +e
+          pnpm --filter @millq/api exec vitest run \
+            src/db/migrate.runner.acceptance.test.ts \
+            --reporter=verbose \
+            --reporter=json \
+            --outputFile="$REPORT"
+          VITEST_EC=$?
+          set -e
+          node scripts/ci/print-vitest-summary.mjs "$REPORT" || true
+          if [[ "$VITEST_EC" -ne 0 ]]; then
+            echo "vitest exited with code ${VITEST_EC}" >&2
+            exit "$VITEST_EC"
+          fi
+          node scripts/ci/assert-vitest-no-skips.mjs "$REPORT" --min-passed=10 --label=migrate-runner
+      - name: Drop per-run databases
+        if: always()
+        run: |
+          set -euo pipefail
+          psql_ci() {
+            if command -v psql >/dev/null 2>&1; then
+              PGPASSWORD=millq_ci_local_only psql -h 127.0.0.1 -U millq_ci -d postgres -v ON_ERROR_STOP=1 "$@"
+            else
+              docker run --rm --network host -e PGPASSWORD=millq_ci_local_only postgres:16-alpine \
+                psql -h 127.0.0.1 -U millq_ci -d postgres -v ON_ERROR_STOP=1 "$@"
+            fi
+          }
+          MIGRATE_DB="${{ steps.dbs.outputs.migrate_db }}"
+          POS_DB="${{ steps.dbs.outputs.pos_db }}"
+          if [[ -n "${MIGRATE_DB}" ]]; then
+            psql_ci -c "DROP DATABASE IF EXISTS \"${MIGRATE_DB}\" WITH (FORCE);" || true
+          fi
+          if [[ -n "${POS_DB}" ]]; then
+            psql_ci -c "DROP DATABASE IF EXISTS \"${POS_DB}\" WITH (FORCE);" || true
+          fi
