@@ -1,18 +1,14 @@
-# Depot CI Migration
-# Source: .github/workflows/ci.yml
-#
-# Changes made:
-# - Changed GitHub runs-on labels to their Depot equivalents
-
 name: CI
+
 on:
   pull_request:
   push:
     branches: [main, 'feature/**', 'fix/**', 'chore/**']
+
 jobs:
   foundation:
     name: Typecheck, test, build
-    runs-on: depot-ubuntu-latest # was: ubuntu-latest. Mapped standard GitHub runner to Depot equivalent.
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:16-alpine
@@ -23,7 +19,10 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U millq -d millq_dev" --health-interval 5s --health-timeout 5s --health-retries 10
+          --health-cmd "pg_isready -U millq -d millq_dev"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       DATABASE_URL: postgresql://millq:millq@localhost:5432/millq_dev
       NODE_ENV: test
@@ -48,74 +47,21 @@ jobs:
         run: bash tests/scripts/assert-vitest-no-skips.test.sh
       - name: Build
         run: pnpm build
-      - name: Wait for PostgreSQL
-        run: |
-          set -euo pipefail
-          echo "Waiting for PostgreSQL at 127.0.0.1:5432..."
-          probe() {
-            if command -v pg_isready >/dev/null 2>&1; then
-              pg_isready -h 127.0.0.1 -p 5432 -U millq -d millq_dev
-            else
-              docker run --rm --network host postgres:16-alpine \
-                pg_isready -h 127.0.0.1 -p 5432 -U millq -d millq_dev
-            fi
-          }
-          for i in $(seq 1 60); do
-            if probe; then
-              echo "PostgreSQL is ready"
-              exit 0
-            fi
-            echo "PostgreSQL not ready yet (attempt ${i}/60)"
-            sleep 1
-          done
-          echo "PostgreSQL did not become ready within 60s" >&2
-          exit 1
       - name: Migrate (idempotent smoke)
         run: |
           pnpm --filter @millq/api run migrate
           pnpm --filter @millq/api run migrate
       - name: API health with live PostgreSQL
         run: |
-          set -euo pipefail
-          API_LOG=/tmp/millq-api.log
-          HEALTH_JSON=/tmp/health.json
-          rm -f "$HEALTH_JSON"
-          {
-            echo "Starting @millq/api (node dist/index.js) on 127.0.0.1:3000"
-            echo "NODE_ENV=${NODE_ENV-}"
-            echo "PORT=${PORT-}"
-          } > "$API_LOG"
-          pnpm --filter @millq/api run start >> "$API_LOG" 2>&1 &
+          pnpm --filter @millq/api run start &
           API_PID=$!
-          dump_api_log() {
-            echo "----- millq-api log -----" >&2
-            cat "$API_LOG" >&2 || true
-            echo "----- end millq-api log -----" >&2
-          }
-          reachable=0
           for i in $(seq 1 30); do
-            if ! kill -0 "$API_PID" 2>/dev/null; then
-              echo "API process exited before /health became reachable" >&2
-              wait "$API_PID" || true
-              dump_api_log
-              exit 1
-            fi
-            if curl -sf http://127.0.0.1:3000/health -o "$HEALTH_JSON"; then
-              reachable=1
+            if curl -sf http://127.0.0.1:3000/health | tee /tmp/health.json; then
               break
             fi
-            echo "health not reachable yet (attempt ${i}/30)"
             sleep 1
           done
-          if [ "$reachable" -ne 1 ]; then
-            echo "curl http://127.0.0.1:3000/health did not succeed within 30s" >&2
-            dump_api_log
-            kill "$API_PID" || true
-            wait "$API_PID" || true
-            exit 1
-          fi
-          kill "$API_PID" || true
-          wait "$API_PID" || true
+          kill $API_PID || true
           python3 - <<'PY'
           import json, sys
           data = json.load(open('/tmp/health.json'))
@@ -123,10 +69,9 @@ jobs:
           assert data.get('checks', {}).get('database') == 'up', data
           print('health ok')
           PY
-
   disposable-pg-acceptance:
     name: Disposable PostgreSQL P0 + migrator
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     services:
       postgres:
         # Isolated service for this job only — not millq_dev / staging / production.
