@@ -21,3 +21,7 @@
 ## Pepper
 
 - `IDENTITY_PIN_PEPPER` env (required in production, min 32 chars). Never in DB/client.
+
+## LoginChallenge confirm denial audit (F05)
+
+Failed `confirmChallenge` paths (`NOT_FOUND`, `SCOPE_MISMATCH`, `EXPIRED`, `REUSE`) **COMMIT** `LOGIN_CHALLENGE_CONFIRM_FAILED` (and the optional `EXPIRED` status mark) before throwing, so denial audit is not lost to the outer `ROLLBACK` of an unsuccessful confirmation. Successful confirm remains atomic: `CONFIRMED` status + `LOGIN_CHALLENGE_CONFIRMED` in one transaction. Confirm never creates a cashier Session. Destructive proof: `login-challenge-denial-audit.acceptance.test.ts` on `millq_ci_pos_*` only.

@@ -122,6 +122,13 @@ export class LoginChallengeService {
 
     const hash = sha256Hex(cmd.qrToken);
     const client = await this.pool.connect();
+    /**
+     * Denial paths COMMIT audit (+ optional EXPIRED mark) before throwing so
+     * LOGIN_CHALLENGE_CONFIRM_FAILED survives independently of a failed confirm.
+     * Success path keeps CONFIRMED status + LOGIN_CHALLENGE_CONFIRMED atomic.
+     * Never create a cashier Session here (success or denial).
+     */
+    let committed = false;
     try {
       await client.query('BEGIN');
       const res = await client.query<{
@@ -145,6 +152,8 @@ export class LoginChallengeService {
           actorUserId: mobilePrincipal.userId,
           payload: { reason: 'NOT_FOUND' },
         });
+        await client.query('COMMIT');
+        committed = true;
         throw new IdentityDomainError('CHALLENGE_INVALID', 'Challenge invalid or expired');
       }
       const row = res.rows[0]!;
@@ -156,6 +165,8 @@ export class LoginChallengeService {
           subjectRef: row.login_challenge_id,
           payload: { reason: 'SCOPE_MISMATCH' },
         });
+        await client.query('COMMIT');
+        committed = true;
         throw new IdentityDomainError('CHALLENGE_INVALID', 'Challenge invalid or expired');
       }
       if (row.status !== 'PENDING' || row.expires_at <= new Date()) {
@@ -171,6 +182,8 @@ export class LoginChallengeService {
           subjectRef: row.login_challenge_id,
           payload: { reason: row.status === 'PENDING' ? 'EXPIRED' : 'REUSE' },
         });
+        await client.query('COMMIT');
+        committed = true;
         throw new IdentityDomainError('CHALLENGE_INVALID', 'Challenge invalid or expired');
       }
 
@@ -187,10 +200,13 @@ export class LoginChallengeService {
         subjectRef: row.login_challenge_id,
       });
       await client.query('COMMIT');
+      committed = true;
       // Does NOT create a cashier Session — existing terminal session remains.
       return { confirmed: true };
     } catch (e) {
-      await client.query('ROLLBACK');
+      if (!committed) {
+        await client.query('ROLLBACK');
+      }
       throw e;
     } finally {
       client.release();
