@@ -289,9 +289,21 @@ describe('FISC1.1 ReceiveCash adversarial (PO close-out)', () => {
     const app = await buildApp();
     try {
       await openShiftForCashier();
-      await pool.query(`UPDATE cash_shift SET status = 'CLOSED' WHERE terminal_id = $1`, [
-        terminalId,
-      ]);
+      // CASH1.2 / ADR-0046: CLOSED requires coherent close evidence (not bare status flip).
+      await pool.query(
+        `UPDATE cash_shift SET
+           status = 'CLOSED',
+           closed_at = NOW(),
+           closed_by_user_id = opened_by_user_id,
+           actual_amount_minor = opening_amount_minor,
+           expected_amount_minor = opening_amount_minor,
+           difference_minor = '0',
+           variance_kind = 'BALANCED',
+           close_idempotency_key = $2,
+           expected_source_refs = '[]'::jsonb
+         WHERE terminal_id = $1 AND status = 'OPEN'`,
+        [terminalId, `fisc-fixture-close-${randomUUID()}`],
+      );
       const check = await openCollectingCheck('50000');
       const token = await loginPosSession(app, pool, fx, CASHIER_PIN);
       const res = await app.inject({
