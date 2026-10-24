@@ -20,6 +20,10 @@ export class CompanyIdentityError extends Error {
 
 export const PERMISSION_CASH_SHIFT_OPEN = 'cash_shift.open' as const;
 export const PERMISSION_CASH_SHIFT_OPEN_APPROVE = 'cash_shift.open.approve' as const;
+/** Close CashShift when balanced or surplus (composed with pos.operate) — ADR-0046. */
+export const PERMISSION_CASH_SHIFT_CLOSE = 'cash_shift.close' as const;
+/** Close CashShift with shortage — Manager/Owner only; no cashier bypass — ADR-0046. */
+export const PERMISSION_CASH_SHIFT_CLOSE_SHORTAGE = 'cash_shift.close.shortage' as const;
 /** POS / financial HTTP operations (Orders, Payments, Settlement) — SEC-0 / ADR-0036. */
 export const PERMISSION_POS_OPERATE = 'pos.operate' as const;
 /**

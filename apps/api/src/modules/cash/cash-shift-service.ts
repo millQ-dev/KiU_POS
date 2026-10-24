@@ -5,6 +5,8 @@ import {
   audit,
   type AuthenticatedPrincipal,
   type IdentityService,
+  PERMISSION_CASH_SHIFT_CLOSE,
+  PERMISSION_CASH_SHIFT_CLOSE_SHORTAGE,
   PERMISSION_CASH_SHIFT_OPEN,
   PERMISSION_POS_OPERATE,
 } from '../identity/index.js';
@@ -17,6 +19,8 @@ import {
 } from './open-fingerprint.js';
 
 const uuid = z.string().uuid();
+
+export type CashShiftVarianceKind = 'BALANCED' | 'SURPLUS' | 'SHORTAGE';
 
 export type CashShiftProjection = {
   cashShiftId: string;
@@ -33,6 +37,16 @@ export type CashShiftProjection = {
   approvalRequestId: string | null;
   loginChallengeId: string | null;
   openedAt: string;
+  closedAt: string | null;
+  closedByUserId: string | null;
+  closedByEmployeeId: string | null;
+  actualAmountMinor: string | null;
+  expectedAmountMinor: string | null;
+  differenceMinor: string | null;
+  varianceKind: CashShiftVarianceKind | null;
+  closeReasonText: string | null;
+  closeIdempotencyKey: string | null;
+  expectedSourceRefs: string[] | null;
 };
 
 type CashShiftRow = {
@@ -50,7 +64,24 @@ type CashShiftRow = {
   approval_request_id: string | null;
   login_challenge_id: string | null;
   opened_at: Date;
+  closed_at: Date | null;
+  closed_by_user_id: string | null;
+  closed_by_employee_id: string | null;
+  actual_amount_minor: string | null;
+  expected_amount_minor: string | null;
+  difference_minor: string | null;
+  variance_kind: CashShiftVarianceKind | null;
+  close_reason_text: string | null;
+  close_idempotency_key: string | null;
+  expected_source_refs: unknown;
 };
+
+function parseSourceRefs(raw: unknown): string[] | null {
+  if (raw == null) return null;
+  const arr = typeof raw === 'string' ? (JSON.parse(raw) as unknown) : raw;
+  if (!Array.isArray(arr)) return null;
+  return arr.map((x) => String(x));
+}
 
 function mapRow(r: CashShiftRow): CashShiftProjection {
   return {
@@ -68,13 +99,42 @@ function mapRow(r: CashShiftRow): CashShiftProjection {
     approvalRequestId: r.approval_request_id,
     loginChallengeId: r.login_challenge_id,
     openedAt: r.opened_at.toISOString(),
+    closedAt: r.closed_at ? r.closed_at.toISOString() : null,
+    closedByUserId: r.closed_by_user_id,
+    closedByEmployeeId: r.closed_by_employee_id,
+    actualAmountMinor: r.actual_amount_minor,
+    expectedAmountMinor: r.expected_amount_minor,
+    differenceMinor: r.difference_minor,
+    varianceKind: r.variance_kind,
+    closeReasonText: r.close_reason_text,
+    closeIdempotencyKey: r.close_idempotency_key,
+    expectedSourceRefs: parseSourceRefs(r.expected_source_refs),
   };
 }
 
+function assertNonNegativeMinor(amountMinor: string, field: string): void {
+  if (!/^[0-9]+$/.test(amountMinor)) {
+    throw new CashDomainError('INVALID_ACTUAL_CASH', `${field} must be a non-negative integer string`);
+  }
+}
+
+function signedDifferenceMinor(actual: string, expected: string): string {
+  const diff = BigInt(actual) - BigInt(expected);
+  return diff.toString();
+}
+
+function varianceFromDifference(differenceMinor: string): CashShiftVarianceKind {
+  const d = BigInt(differenceMinor);
+  if (d === 0n) return 'BALANCED';
+  if (d > 0n) return 'SURPLUS';
+  return 'SHORTAGE';
+}
+
 /**
- * Cash owns CashShift. CASH1.1: OpenCashShift only.
+ * Cash owns CashShift. CASH1.1 Open + CASH1.2 Close (ADR-0046).
  * Authorization evidence from Identity (Session / AccessGrant / ApprovalRequest / optional LoginChallenge).
- * Permission composition (SEC-0): pos.operate AND (cash_shift.open | APPROVAL path).
+ * Open permission composition (SEC-0): pos.operate AND (cash_shift.open | APPROVAL path).
+ * Close: balanced/surplus → pos.operate + cash_shift.close; shortage → cash_shift.close.shortage only.
  */
 export class CashShiftService {
   constructor(
@@ -409,6 +469,317 @@ export class CashShiftService {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * CloseCashShift (ADR-0046 / CASH1.2).
+   * Server-authoritative expected from opening + Σ CASH PCE amount_collected_minor.
+   * Locks cash_shift FOR UPDATE (ReceiveCash uses FOR SHARE on OPEN shift).
+   */
+  async closeShift(principal: AuthenticatedPrincipal, raw: unknown): Promise<CashShiftProjection> {
+    const cmd = z
+      .object({
+        cashShiftId: uuid,
+        closeIdempotencyKey: z.string().min(8).max(128),
+        actualAmountMinor: z.string(),
+        currencyCode: z.string(),
+        minorUnitExponent: z.number().int(),
+        reasonText: z.string().max(2000).optional(),
+        expectedAmountMinor: z.string().optional(),
+      })
+      .strict()
+      .parse(raw);
+
+    assertNonNegativeMinor(cmd.actualAmountMinor, 'actualAmountMinor');
+    if (cmd.expectedAmountMinor !== undefined) {
+      assertNonNegativeMinor(cmd.expectedAmountMinor, 'expectedAmountMinor');
+    }
+    if (!/^[A-Z]{3}$/.test(cmd.currencyCode)) {
+      throw new CashDomainError('INVALID_ACTUAL_CASH', 'currencyCode must be ISO-4217 alpha-3');
+    }
+    if (cmd.minorUnitExponent < 0 || cmd.minorUnitExponent > 4) {
+      throw new CashDomainError('INVALID_ACTUAL_CASH', 'minorUnitExponent out of range');
+    }
+
+    const reasonTrimmed =
+      cmd.reasonText !== undefined ? cmd.reasonText.trim() : undefined;
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      await client.query(
+        `SELECT pg_advisory_xact_lock(
+           hashtextextended($1 || chr(31) || $2, 0)
+         )`,
+        [principal.tenantId, `close:${cmd.closeIdempotencyKey}`],
+      );
+
+      const byKey = await client.query<CashShiftRow>(
+        `SELECT * FROM cash_shift
+         WHERE tenant_id = $1 AND close_idempotency_key = $2
+         FOR UPDATE`,
+        [principal.tenantId, cmd.closeIdempotencyKey],
+      );
+      if (byKey.rows[0]) {
+        const row = byKey.rows[0];
+        const same =
+          row.cash_shift_id === cmd.cashShiftId &&
+          row.actual_amount_minor === cmd.actualAmountMinor &&
+          row.currency_code === cmd.currencyCode &&
+          row.minor_unit_exponent === cmd.minorUnitExponent &&
+          row.closed_by_user_id === principal.userId &&
+          (row.close_reason_text ?? null) === (reasonTrimmed && reasonTrimmed.length > 0 ? reasonTrimmed : null);
+        if (!same) {
+          throw new CashDomainError(
+            'IDEMPOTENCY_CONFLICT',
+            'closeIdempotencyKey reused with different semantics',
+          );
+        }
+        await client.query('COMMIT');
+        return mapRow(row);
+      }
+
+      const locked = await client.query<CashShiftRow>(
+        `SELECT * FROM cash_shift
+         WHERE cash_shift_id = $1 AND tenant_id = $2
+         FOR UPDATE`,
+        [cmd.cashShiftId, principal.tenantId],
+      );
+      const shift = locked.rows[0];
+      if (!shift) {
+        throw new CashDomainError('NOT_FOUND', 'CashShift not found');
+      }
+      if (shift.status === 'CLOSED') {
+        throw new CashDomainError('CASH_SHIFT_ALREADY_CLOSED', 'CashShift already closed');
+      }
+      if (shift.status !== 'OPEN') {
+        throw new CashDomainError('INVALID_STATE', `CashShift status ${shift.status} cannot close`);
+      }
+
+      if (
+        shift.currency_code !== cmd.currencyCode ||
+        shift.minor_unit_exponent !== cmd.minorUnitExponent
+      ) {
+        throw new CashDomainError(
+          'CURRENCY_MISMATCH',
+          'Close currency/exponent must match OPEN CashShift',
+        );
+      }
+
+      const expected = await this.computeExpectedFromCashPce(client, shift);
+      if (
+        cmd.expectedAmountMinor !== undefined &&
+        cmd.expectedAmountMinor !== expected.expectedAmountMinor
+      ) {
+        throw new CashDomainError(
+          'EXPECTED_MISMATCH',
+          'Client expectedAmountMinor does not match server expected',
+        );
+      }
+
+      const differenceMinor = signedDifferenceMinor(
+        cmd.actualAmountMinor,
+        expected.expectedAmountMinor,
+      );
+      const varianceKind = varianceFromDifference(differenceMinor);
+      const reasonText =
+        reasonTrimmed && reasonTrimmed.length > 0 ? reasonTrimmed : null;
+
+      if (varianceKind !== 'BALANCED' && !reasonText) {
+        throw new CashDomainError(
+          'REASON_REQUIRED',
+          'reasonText is required when actual differs from expected',
+        );
+      }
+
+      if (varianceKind === 'SHORTAGE') {
+        const ok = await this.identity.hasPermission(
+          client,
+          principal.tenantId,
+          principal.userId,
+          PERMISSION_CASH_SHIFT_CLOSE_SHORTAGE,
+          shift.outlet_id,
+          shift.terminal_id,
+        );
+        if (!ok) {
+          throw new CashDomainError('FORBIDDEN', 'Shortage close requires cash_shift.close.shortage');
+        }
+      } else {
+        const posOk = await this.identity.hasPermission(
+          client,
+          principal.tenantId,
+          principal.userId,
+          PERMISSION_POS_OPERATE,
+          shift.outlet_id,
+          shift.terminal_id,
+        );
+        const closeOk = await this.identity.hasPermission(
+          client,
+          principal.tenantId,
+          principal.userId,
+          PERMISSION_CASH_SHIFT_CLOSE,
+          shift.outlet_id,
+          shift.terminal_id,
+        );
+        if (!posOk || !closeOk) {
+          throw new CashDomainError('FORBIDDEN', 'Permission denied');
+        }
+      }
+
+      await client.query('SAVEPOINT cash_shift_close');
+      try {
+        await client.query(
+          `UPDATE cash_shift SET
+             status = 'CLOSED',
+             closed_at = NOW(),
+             closed_by_user_id = $2,
+             closed_by_employee_id = $3,
+             actual_amount_minor = $4,
+             expected_amount_minor = $5,
+             difference_minor = $6,
+             variance_kind = $7,
+             close_reason_text = $8,
+             close_idempotency_key = $9,
+             expected_source_refs = $10::jsonb
+           WHERE cash_shift_id = $1 AND status = 'OPEN'`,
+          [
+            cmd.cashShiftId,
+            principal.userId,
+            principal.employeeId,
+            cmd.actualAmountMinor,
+            expected.expectedAmountMinor,
+            differenceMinor,
+            varianceKind,
+            reasonText,
+            cmd.closeIdempotencyKey,
+            JSON.stringify(expected.sourceRefs),
+          ],
+        );
+      } catch (err) {
+        const pgErr = err as { code?: unknown; constraint?: unknown };
+        const code = pgErr.code != null ? String(pgErr.code) : '';
+        if (code === '23505') {
+          await client.query('ROLLBACK TO SAVEPOINT cash_shift_close');
+          const raced = await client.query<CashShiftRow>(
+            `SELECT * FROM cash_shift
+             WHERE tenant_id = $1 AND close_idempotency_key = $2`,
+            [principal.tenantId, cmd.closeIdempotencyKey],
+          );
+          const row = raced.rows[0];
+          if (
+            row &&
+            row.cash_shift_id === cmd.cashShiftId &&
+            row.actual_amount_minor === cmd.actualAmountMinor &&
+            row.closed_by_user_id === principal.userId
+          ) {
+            await client.query('ROLLBACK');
+            return mapRow(row);
+          }
+          throw new CashDomainError(
+            'IDEMPOTENCY_CONFLICT',
+            'closeIdempotencyKey reused with different semantics',
+          );
+        }
+        throw err;
+      }
+
+      const updated = await client.query<{ status: string }>(
+        `SELECT status FROM cash_shift WHERE cash_shift_id = $1`,
+        [cmd.cashShiftId],
+      );
+      if (updated.rows[0]?.status !== 'CLOSED') {
+        throw new CashDomainError('CASH_SHIFT_ALREADY_CLOSED', 'CashShift already closed');
+      }
+
+      await audit(client, {
+        tenantId: principal.tenantId,
+        eventType: 'CASH_SHIFT_CLOSED',
+        actorUserId: principal.userId,
+        subjectRef: cmd.cashShiftId,
+        payload: {
+          outletId: shift.outlet_id,
+          terminalId: shift.terminal_id,
+          actualAmountMinor: cmd.actualAmountMinor,
+          expectedAmountMinor: expected.expectedAmountMinor,
+          differenceMinor,
+          varianceKind,
+          closeReasonText: reasonText,
+          closeIdempotencyKey: cmd.closeIdempotencyKey,
+          expectedSourceRefs: expected.sourceRefs,
+        },
+      });
+
+      const closed = await client.query<CashShiftRow>(
+        `SELECT * FROM cash_shift WHERE cash_shift_id = $1`,
+        [cmd.cashShiftId],
+      );
+      await client.query('COMMIT');
+      return mapRow(closed.rows[0]!);
+    } catch (e) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        /* ignore */
+      }
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Fail-closed expected: opening + Σ amount_collected_minor of CASH_RECEIVE PCE
+   * bound via payment_cash_collection_evidence.cash_shift_id.
+   */
+  private async computeExpectedFromCashPce(
+    client: PoolClient,
+    shift: CashShiftRow,
+  ): Promise<{ expectedAmountMinor: string; sourceRefs: string[] }> {
+    const res = await client.query<{
+      payment_collection_event_id: string;
+      amount_collected_minor: string;
+      currency_code: string;
+      minor_unit_exponent: number;
+    }>(
+      `SELECT pce.payment_collection_event_id,
+              pce.amount_collected_minor,
+              pce.currency_code,
+              pce.minor_unit_exponent
+       FROM payment_collection_event pce
+       INNER JOIN payment_cash_collection_evidence e
+         ON e.payment_cash_collection_evidence_id = pce.payment_cash_collection_evidence_id
+       WHERE e.cash_shift_id = $1
+         AND pce.tenant_id = $2
+         AND pce.collection_evidence_kind = 'CASH_RECEIVE'
+         AND pce.instrument_family = 'CASH'
+       ORDER BY pce.collected_at ASC, pce.payment_collection_event_id ASC`,
+      [shift.cash_shift_id, shift.tenant_id],
+    );
+
+    let sum = BigInt(shift.opening_amount_minor);
+    const sourceRefs: string[] = [];
+    for (const row of res.rows) {
+      if (!/^[0-9]+$/.test(row.amount_collected_minor)) {
+        throw new CashDomainError(
+          'EXPECTED_BASE_INCOMPLETE',
+          'PaymentCollectionEvent amount_collected_minor is not a non-negative digit string',
+        );
+      }
+      if (
+        row.currency_code !== shift.currency_code ||
+        row.minor_unit_exponent !== shift.minor_unit_exponent
+      ) {
+        throw new CashDomainError(
+          'CURRENCY_MISMATCH',
+          'Cash PCE currency/exponent incompatible with OPEN CashShift',
+        );
+      }
+      sum += BigInt(row.amount_collected_minor);
+      sourceRefs.push(row.payment_collection_event_id);
+    }
+
+    return { expectedAmountMinor: sum.toString(), sourceRefs };
   }
 
   private async consumeLoginChallenge(

@@ -42,7 +42,9 @@
 - Production CashierShell without DEV context controls
 - Tax / Fiscal / no-tender blocked states remain fail-closed (no fake success)
 
-**Explicitly out:** DeviceIdentity; Quick Lock; CashShift Close; FE Tax math; fiscal success fabrication; CASH tender; Favorites / Stop/Go-list; production send policy; Floor/Table.
+**Explicitly out:** DeviceIdentity; Quick Lock; FE Tax math; fiscal success fabrication; Favorites / Stop/Go-list; production send policy; Floor/Table.
+
+**CASH1.2 CloseCashShift:** ADR-0046 Accepted; runtime `OPEN→CLOSED` with server expected (opening + Σ CASH PCE `amount_collected_minor`); shortage grant `cash_shift.close.shortage`. Refunds / cash-in-out / RECONCILED still out.
 
 ## Fiscal track
 
@@ -65,13 +67,13 @@
 
 1. Independent review + PO final review of FISC1.1 Core Runtime PR — **STOP BEFORE MERGE** until authorized
 2. Close remaining ADR-0038 A4 Level C OPEN items for finished C0 polish
-3. Do **not** select Vietnam production provider / grant G2 / start DeviceIdentity / Quick Lock / CashShift Close / R1.1 / multi-tender fiscalization
+3. Do **not** select Vietnam production provider / grant G2 / start DeviceIdentity / Quick Lock / R1.1 / multi-tender fiscalization / cash refunds
 
 Preserve:
 
 - no DeviceIdentity
 - no Quick Lock
-- no CashShift Close
+- no cash refunds / mid-shift cash-in-out without separate ADR
 - no FE Tax math
 - no fiscal success fabrication
 - no LEGAL GATE G2 claim

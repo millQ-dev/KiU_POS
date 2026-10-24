@@ -5,4 +5,8 @@ export {
   fingerprintsMatch,
   fingerprintDigest,
 } from './open-fingerprint.js';
-export { CashShiftService, type CashShiftProjection } from './cash-shift-service.js';
+export {
+  CashShiftService,
+  type CashShiftProjection,
+  type CashShiftVarianceKind,
+} from './cash-shift-service.js';
