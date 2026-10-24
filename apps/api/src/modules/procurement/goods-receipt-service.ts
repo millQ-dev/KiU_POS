@@ -11,7 +11,30 @@ import {
   semanticFingerprint as factSemanticFingerprint,
 } from '@millq/contracts';
 import { rebuildInventoryBalance, lockValuationStream } from '../inventory/rebuild-balance.js';
-import { DomainValidationError, IdempotencyConflictError, NotFoundError, PostedImmutableError } from './errors.js';
+import {
+  DomainValidationError,
+  IdempotencyConflictError,
+  NotFoundError,
+  PostedImmutableError,
+  ReverseConflictError,
+} from './errors.js';
+
+const UQ_GOODS_RECEIPT_REVERSES_ORIGINAL = 'uq_goods_receipt_reverses_original';
+const UQ_GOODS_RECEIPT_POST_IDEMPOTENCY = 'goods_receipt_legal_entity_id_post_idempotency_key_key';
+
+function pgErrorMeta(err: unknown): { code: string; constraint: string } {
+  const e = err as { code?: unknown; constraint?: unknown };
+  return {
+    code: e.code != null ? String(e.code) : '',
+    constraint: e.constraint != null ? String(e.constraint) : '',
+  };
+}
+
+function isPostIdempotencyConstraint(constraint: string): boolean {
+  return (
+    constraint === UQ_GOODS_RECEIPT_POST_IDEMPOTENCY || constraint.includes('post_idempotency')
+  );
+}
 import { fingerprintFromDraft } from './fingerprint.js';
 import {
   assertLineAcquisitionMatches,
@@ -402,123 +425,174 @@ export class GoodsReceiptService {
         return { status: 'duplicate' as const, receipt: existing };
       }
 
-      const upd = await client.query(
-        `UPDATE goods_receipt SET status = 'REVERSED', reversed_at = NOW(), recorded_at = NOW()
-         WHERE goods_receipt_id = $1 AND status = 'POSTED'`,
-        [id],
-      );
-      if (!upd.rowCount) {
-        // Lost race after lock release edge / status change — do not create a second economic reverse.
-        throw new DomainValidationError('INVALID_STATUS', 'Only POSTED receipts can be reversed');
-      }
-
-      await client.query(
-        `INSERT INTO goods_receipt (
-          goods_receipt_id, tenant_id, legal_entity_id, warehouse_id, supplier_id,
-          supplier_document_number, currency_code, minor_unit_exponent,
-          business_date, business_time, business_order, status, actor_id,
-          post_idempotency_key, post_semantic_fingerprint, reverses_goods_receipt_id, posted_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'POSTED',$12,$13,$14,$15,NOW())`,
-        [
-          reverseId,
-          existing.tenantId,
-          existing.legalEntityId,
-          existing.warehouseId,
-          existing.supplierId,
-          `REV-${existing.supplierDocumentNumber}`,
-          existing.currencyCode,
-          existing.minorUnitExponent,
-          existing.businessDate,
-          existing.businessTime,
-          existing.businessOrder,
-          input.actorId ?? null,
-          reverseKey,
-          `reverse-of:${id}`,
-          id,
-        ],
-      );
-
-      for (const line of existing.lines) {
-        const lineId = randomUUID();
-        await client.query(
-          `INSERT INTO goods_receipt_line (
-            goods_receipt_line_id, goods_receipt_id, line_number, catalog_item_id, supplier_item_id,
-            input_kind, package_count, accepted_base_quantity, base_unit, dimension,
-            unit_price_minor, line_acquisition_cost_minor
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-          [
-            lineId,
-            reverseId,
-            line.lineNumber,
-            line.catalogItemId,
-            line.supplierItemId,
-            line.inputKind,
-            line.packageCount,
-            line.acceptedBaseQuantity,
-            line.baseUnit,
-            line.dimension,
-            line.unitPriceMinor,
-            line.lineAcquisitionCostMinor,
-          ],
+      await client.query('SAVEPOINT reverse_write');
+      try {
+        const upd = await client.query(
+          `UPDATE goods_receipt SET status = 'REVERSED', reversed_at = NOW(), recorded_at = NOW()
+           WHERE goods_receipt_id = $1 AND status = 'POSTED'`,
+          [id],
         );
+        if (!upd.rowCount) {
+          throw new DomainValidationError('INVALID_STATUS', 'Only POSTED receipts can be reversed');
+        }
+
         await client.query(
-          `INSERT INTO inventory_movement (
-            movement_id, tenant_id, legal_entity_id, warehouse_id, catalog_item_id,
-            direction, quantity, base_unit, dimension, acquisition_cost_minor,
-            currency_code, minor_unit_exponent, business_date, business_time, business_order,
-            source_document_type, source_document_id, source_document_line_id, actor_id,
-            cost_certainty, cost_basis
-          ) VALUES ($1,$2,$3,$4,$5,'OUT',$6,$7,$8,$9,$10,$11,$12,$13,$14,'GoodsReceiptReversal',$15,$16,$17,'FINAL','SUPPLIER_PRICE')`,
+          `INSERT INTO goods_receipt (
+            goods_receipt_id, tenant_id, legal_entity_id, warehouse_id, supplier_id,
+            supplier_document_number, currency_code, minor_unit_exponent,
+            business_date, business_time, business_order, status, actor_id,
+            post_idempotency_key, post_semantic_fingerprint, reverses_goods_receipt_id, posted_at
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'POSTED',$12,$13,$14,$15,NOW())`,
           [
-            randomUUID(),
+            reverseId,
             existing.tenantId,
             existing.legalEntityId,
             existing.warehouseId,
-            line.catalogItemId,
-            line.acceptedBaseQuantity,
-            line.baseUnit,
-            line.dimension,
-            line.lineAcquisitionCostMinor,
+            existing.supplierId,
+            `REV-${existing.supplierDocumentNumber}`,
             existing.currencyCode,
             existing.minorUnitExponent,
             existing.businessDate,
             existing.businessTime,
             existing.businessOrder,
-            reverseId,
-            lineId,
             input.actorId ?? null,
+            reverseKey,
+            `reverse-of:${id}`,
+            id,
           ],
         );
+
+        for (const line of existing.lines) {
+          const lineId = randomUUID();
+          await client.query(
+            `INSERT INTO goods_receipt_line (
+              goods_receipt_line_id, goods_receipt_id, line_number, catalog_item_id, supplier_item_id,
+              input_kind, package_count, accepted_base_quantity, base_unit, dimension,
+              unit_price_minor, line_acquisition_cost_minor
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+            [
+              lineId,
+              reverseId,
+              line.lineNumber,
+              line.catalogItemId,
+              line.supplierItemId,
+              line.inputKind,
+              line.packageCount,
+              line.acceptedBaseQuantity,
+              line.baseUnit,
+              line.dimension,
+              line.unitPriceMinor,
+              line.lineAcquisitionCostMinor,
+            ],
+          );
+          await client.query(
+            `INSERT INTO inventory_movement (
+              movement_id, tenant_id, legal_entity_id, warehouse_id, catalog_item_id,
+              direction, quantity, base_unit, dimension, acquisition_cost_minor,
+              currency_code, minor_unit_exponent, business_date, business_time, business_order,
+              source_document_type, source_document_id, source_document_line_id, actor_id,
+              cost_certainty, cost_basis
+            ) VALUES ($1,$2,$3,$4,$5,'OUT',$6,$7,$8,$9,$10,$11,$12,$13,$14,'GoodsReceiptReversal',$15,$16,$17,'FINAL','SUPPLIER_PRICE')`,
+            [
+              randomUUID(),
+              existing.tenantId,
+              existing.legalEntityId,
+              existing.warehouseId,
+              line.catalogItemId,
+              line.acceptedBaseQuantity,
+              line.baseUnit,
+              line.dimension,
+              line.lineAcquisitionCostMinor,
+              existing.currencyCode,
+              existing.minorUnitExponent,
+              existing.businessDate,
+              existing.businessTime,
+              existing.businessOrder,
+              reverseId,
+              lineId,
+              input.actorId ?? null,
+            ],
+          );
+        }
+
+        const itemIds = [...new Set(existing.lines.map((l) => l.catalogItemId))].sort();
+        for (const catalogItemId of itemIds) {
+          await lockValuationStream(
+            client,
+            existing.legalEntityId,
+            existing.warehouseId,
+            catalogItemId,
+            existing.currencyCode,
+            existing.minorUnitExponent,
+          );
+          await this.rebuildBalance(
+            client,
+            existing.legalEntityId,
+            existing.warehouseId,
+            catalogItemId,
+            existing.currencyCode,
+            existing.minorUnitExponent,
+          );
+        }
+
+        await this.writeAudit(client, {
+          tenantId: existing.tenantId,
+          ...(input.actorId ? { actorId: input.actorId } : {}),
+          aggregateId: id,
+          action: 'GOODS_RECEIPT_REVERSED',
+          ...(input.reason ? { reason: input.reason } : {}),
+          after: { status: 'REVERSED', reverseDocumentId: reverseId },
+        });
+      } catch (writeErr) {
+        const { code, constraint } = pgErrorMeta(writeErr);
+        if (code !== '23505') throw writeErr;
+
+        await client.query('ROLLBACK TO SAVEPOINT reverse_write');
+
+        if (constraint === UQ_GOODS_RECEIPT_REVERSES_ORIGINAL) {
+          const authoritative = await this.loadReverseAuthoritativeState(client, id);
+          if (authoritative.ok) {
+            await client.query('COMMIT');
+            return { status: 'duplicate' as const, receipt: authoritative.receipt };
+          }
+          throw new ReverseConflictError(
+            'Goods receipt reverse unique conflict without a consistent completed reverse',
+          );
+        }
+
+        if (isPostIdempotencyConstraint(constraint)) {
+          const byKey = await client.query<{
+            goods_receipt_id: string;
+            reverses_goods_receipt_id: string | null;
+            status: string;
+          }>(
+            `SELECT goods_receipt_id, reverses_goods_receipt_id, status FROM goods_receipt
+             WHERE legal_entity_id = $1 AND post_idempotency_key = $2`,
+            [existing.legalEntityId, reverseKey],
+          );
+          const row = byKey.rows[0];
+          if (
+            row &&
+            row.reverses_goods_receipt_id === id &&
+            row.status === 'POSTED'
+          ) {
+            const orig = await this.get(id);
+            if (orig?.status === 'REVERSED') {
+              await client.query('COMMIT');
+              return { status: 'duplicate' as const, receipt: orig };
+            }
+          }
+          throw new IdempotencyConflictError(
+            reverseKey,
+            'Reverse idempotency key reused with incompatible semantics',
+          );
+        }
+
+        throw new ReverseConflictError(
+          `Unexpected unique violation during goods receipt reverse (${constraint || 'unknown'})`,
+        );
       }
 
-      const itemIds = [...new Set(existing.lines.map((l) => l.catalogItemId))].sort();
-      for (const catalogItemId of itemIds) {
-        await lockValuationStream(
-          client,
-          existing.legalEntityId,
-          existing.warehouseId,
-          catalogItemId,
-          existing.currencyCode,
-          existing.minorUnitExponent,
-        );
-        await this.rebuildBalance(
-          client,
-          existing.legalEntityId,
-          existing.warehouseId,
-          catalogItemId,
-          existing.currencyCode,
-          existing.minorUnitExponent,
-        );
-      }
-
-      await this.writeAudit(client, {
-        tenantId: existing.tenantId,
-        ...(input.actorId ? { actorId: input.actorId } : {}),
-        aggregateId: id,
-        action: 'GOODS_RECEIPT_REVERSED',
-        ...(input.reason ? { reason: input.reason } : {}),
-        after: { status: 'REVERSED', reverseDocumentId: reverseId },
-      });
       await client.query('COMMIT');
     } catch (e) {
       await client.query('ROLLBACK');
@@ -527,6 +601,32 @@ export class GoodsReceiptService {
       client.release();
     }
     return { status: 'created' as const, receipt: await this.get(id), reverseDocumentId: reverseId };
+  }
+
+  private async loadReverseAuthoritativeState(
+    client: Client,
+    originalId: string,
+  ): Promise<{ ok: true; receipt: NonNullable<Awaited<ReturnType<GoodsReceiptService['get']>>> } | { ok: false }> {
+    const headerRes = await client.query(`SELECT * FROM goods_receipt WHERE goods_receipt_id = $1`, [
+      originalId,
+    ]);
+    const header = (headerRes.rows[0] as Record<string, unknown> | undefined) ?? null;
+    if (!header) return { ok: false };
+    const linesRes = await client.query(
+      `SELECT * FROM goods_receipt_line WHERE goods_receipt_id = $1 ORDER BY line_number`,
+      [originalId],
+    );
+    const receipt = this.mapDoc(header, linesRes.rows);
+    if (receipt.status !== 'REVERSED') return { ok: false };
+    const prior = await client.query(
+      `SELECT goods_receipt_id FROM goods_receipt
+       WHERE reverses_goods_receipt_id = $1 AND status = 'POSTED'
+       ORDER BY posted_at ASC NULLS LAST
+       LIMIT 1`,
+      [originalId],
+    );
+    if (!prior.rowCount) return { ok: false };
+    return { ok: true, receipt };
   }
 
   /**
