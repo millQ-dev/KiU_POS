@@ -41,7 +41,7 @@ Examples:
 
 Pipeline:
 
-`Implementation Agent → Origin PR + merge-when-ready → Independent Review Agent → CI/ruleset → automatic merge`
+`Implementation Agent → Origin PR + merge-when-ready → Independent Review Agent → CI/ruleset → automatic merge → Origin→GitHub backup`
 
 ### Level B — Guarded Autonomous
 
@@ -62,7 +62,21 @@ Examples:
 
 Pipeline:
 
-`Implementation Agent → Origin PR + merge-when-ready → Specialist Review Agent → CI/ruleset → automatic merge`
+`Implementation Agent → Origin PR + merge-when-ready → Specialist Review Agent → CI/ruleset → automatic merge → Origin→GitHub backup`
+
+### Continuous Level A/B delivery (PO 2026-10-24)
+
+For Level **A** and **B**, when the change stays inside approved scope, Accepted ADRs, and current Notion PO decisions, the Implementation Agent runs the **full** cycle without stopping after each intermediate gate:
+
+`Origin branch → implementation → tests → Origin PR → independent reviews → fixes → mandatory Depot CI → merge-when-ready → GitHub backup`
+
+Do **not** pause for owner GO after PR open, after green CI alone, or after content APPROVE, unless a gate fails or the work escalates.
+
+Allowed: small accompanying fixes required to finish the same task (tests, CI mirrors, docs drift, review threads) **without** expanding business functionality.
+
+**STOP** and escalate when: architecture conflict; Level **C** product/ADR/governance question; new material risk; required CI fail; unresolved blocking review; Bugbot blocking finding; need for ruleset bypass / force-push / self-approval.
+
+Still forbidden on every level: production deploy; migrations on persistent / shared DBs unless a separate explicit owner GO names those environments.
 
 ### Level C — Owner decision required
 
