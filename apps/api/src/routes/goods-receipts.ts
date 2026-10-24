@@ -6,6 +6,7 @@ import {
   IdempotencyConflictError,
   NotFoundError,
   PostedImmutableError,
+  ReverseConflictError,
 } from '../modules/procurement/errors.js';
 import {
   IdentityDomainError,
@@ -40,6 +41,9 @@ function mapError(err: unknown): { status: number; body: Record<string, unknown>
     return { status: 409, body: { error: err.code, message: err.message } };
   }
   if (err instanceof IdempotencyConflictError) {
+    return { status: 409, body: { error: err.code, message: err.message } };
+  }
+  if (err instanceof ReverseConflictError) {
     return { status: 409, body: { error: err.code, message: err.message } };
   }
   if (err instanceof NotFoundError) {

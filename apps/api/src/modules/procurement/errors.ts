@@ -33,3 +33,12 @@ export class NotFoundError extends Error {
     this.name = 'NotFoundError';
   }
 }
+
+/** Controlled conflict for reverse races / inconsistent reverse state (HTTP 409). */
+export class ReverseConflictError extends Error {
+  readonly code = 'REVERSE_CONFLICT' as const;
+  constructor(message: string) {
+    super(message);
+    this.name = 'ReverseConflictError';
+  }
+}

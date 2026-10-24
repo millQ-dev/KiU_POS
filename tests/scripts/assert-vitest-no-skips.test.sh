@@ -55,6 +55,7 @@ expect_fail "missing-file" node "$ASSERT" "$TMP/missing.json" --min-passed=7 --l
 
 expect_ok "url-migrate" node "$URL_ASSERT" "postgresql://millq_ci:x@127.0.0.1:5432/millq_migrate_runner_123"
 expect_ok "url-pos" node "$URL_ASSERT" "postgresql://millq_ci:x@127.0.0.1:5432/millq_ci_pos_123"
+expect_ok "url-gr" node "$URL_ASSERT" "postgresql://millq_ci:x@127.0.0.1:5432/millq_ci_gr_123"
 expect_fail "url-millq-dev" node "$URL_ASSERT" "postgresql://millq:millq@127.0.0.1:5432/millq_dev"
 expect_fail "url-empty" node "$URL_ASSERT" ""
 expect_fail "url-shared" node "$URL_ASSERT" "postgresql://millq:millq@127.0.0.1:5432/millq_sec0_test"

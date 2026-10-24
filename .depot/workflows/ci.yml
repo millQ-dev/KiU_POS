@@ -190,16 +190,22 @@ jobs:
           RUN_SUFFIX="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
           MIGRATE_DB="millq_migrate_runner_${RUN_SUFFIX}"
           POS_DB="millq_ci_pos_${RUN_SUFFIX}"
+          GR_DB="millq_ci_gr_${RUN_SUFFIX}"
           psql_ci -c "CREATE DATABASE \"${MIGRATE_DB}\" OWNER millq_ci;"
           psql_ci -c "CREATE DATABASE \"${POS_DB}\" OWNER millq_ci;"
+          psql_ci -c "CREATE DATABASE \"${GR_DB}\" OWNER millq_ci;"
           MIGRATE_URL="postgresql://millq_ci:millq_ci_local_only@127.0.0.1:5432/${MIGRATE_DB}"
           POS_URL="postgresql://millq_ci:millq_ci_local_only@127.0.0.1:5432/${POS_DB}"
+          GR_URL="postgresql://millq_ci:millq_ci_local_only@127.0.0.1:5432/${GR_DB}"
           echo "migrate_db=${MIGRATE_DB}" >> "$GITHUB_OUTPUT"
           echo "pos_db=${POS_DB}" >> "$GITHUB_OUTPUT"
+          echo "gr_db=${GR_DB}" >> "$GITHUB_OUTPUT"
           echo "migrate_url=${MIGRATE_URL}" >> "$GITHUB_OUTPUT"
           echo "pos_url=${POS_URL}" >> "$GITHUB_OUTPUT"
+          echo "gr_url=${GR_URL}" >> "$GITHUB_OUTPUT"
           node scripts/ci/assert-disposable-database-url.mjs "$MIGRATE_URL"
           node scripts/ci/assert-disposable-database-url.mjs "$POS_URL"
+          node scripts/ci/assert-disposable-database-url.mjs "$GR_URL"
       - name: Migrate POS disposable database
         run: |
           set -euo pipefail
@@ -256,6 +262,37 @@ jobs:
             exit "$VITEST_EC"
           fi
           node scripts/ci/assert-vitest-no-skips.mjs "$REPORT" --min-passed=10 --label=migrate-runner
+      - name: Migrate GoodsReceipt disposable database
+        run: |
+          set -euo pipefail
+          GR_DB="${{ steps.dbs.outputs.gr_db }}"
+          export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${GR_DB}"
+          node scripts/ci/assert-disposable-database-url.mjs "$DATABASE_URL"
+          node -e 'const u=process.env.DATABASE_URL||""; const n=u.split("/").pop()?.split("?")[0]||""; if(!n.startsWith("millq_ci_gr_")) process.exit(1); console.log("gr_db_name="+n);'
+          pnpm --filter @millq/api run migrate
+      - name: GoodsReceipt reverse UNIQUE + P0 concurrency (fail-closed)
+        run: |
+          set -euo pipefail
+          GR_DB="${{ steps.dbs.outputs.gr_db }}"
+          export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${GR_DB}"
+          node scripts/ci/assert-disposable-database-url.mjs "$DATABASE_URL"
+          node -e 'const u=process.env.DATABASE_URL||""; const n=u.split("/").pop()?.split("?")[0]||""; if(!n.startsWith("millq_ci_gr_")) process.exit(1); console.log("gr_db_name="+n);'
+          REPORT=/tmp/vitest-gr-unique.json
+          set +e
+          pnpm --filter @millq/api exec vitest run \
+            src/modules/procurement/goods-receipt-p0.concurrency.acceptance.test.ts \
+            src/modules/procurement/goods-receipt-reverse-unique.acceptance.test.ts \
+            --reporter=verbose \
+            --reporter=json \
+            --outputFile="$REPORT"
+          VITEST_EC=$?
+          set -e
+          node scripts/ci/print-vitest-summary.mjs "$REPORT" || true
+          if [[ "$VITEST_EC" -ne 0 ]]; then
+            echo "vitest exited with code ${VITEST_EC}" >&2
+            exit "$VITEST_EC"
+          fi
+          node scripts/ci/assert-vitest-no-skips.mjs "$REPORT" --min-passed=13 --label=goods-receipt-unique
       - name: Drop per-run databases
         if: always()
         run: |
@@ -270,9 +307,13 @@ jobs:
           }
           MIGRATE_DB="${{ steps.dbs.outputs.migrate_db }}"
           POS_DB="${{ steps.dbs.outputs.pos_db }}"
+          GR_DB="${{ steps.dbs.outputs.gr_db }}"
           if [[ -n "${MIGRATE_DB}" ]]; then
             psql_ci -c "DROP DATABASE IF EXISTS \"${MIGRATE_DB}\" WITH (FORCE);" || true
           fi
           if [[ -n "${POS_DB}" ]]; then
             psql_ci -c "DROP DATABASE IF EXISTS \"${POS_DB}\" WITH (FORCE);" || true
+          fi
+          if [[ -n "${GR_DB}" ]]; then
+            psql_ci -c "DROP DATABASE IF EXISTS \"${GR_DB}\" WITH (FORCE);" || true
           fi

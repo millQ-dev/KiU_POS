@@ -5,7 +5,7 @@
  *
  * Usage: node scripts/ci/assert-disposable-database-url.mjs "$DATABASE_URL"
  */
-const DISPOSABLE_RE = /\/millq_(?:migrate_runner|ci_pos)(?:_[A-Za-z0-9]+)+(\?|$)/;
+const DISPOSABLE_RE = /\/millq_(?:migrate_runner|ci_pos|ci_gr)(?:_[A-Za-z0-9]+)+(\?|$)/;
 
 export function assertDisposableDatabaseUrl(url) {
   if (!url || typeof url !== 'string') {
@@ -16,7 +16,7 @@ export function assertDisposableDatabaseUrl(url) {
   }
   if (!DISPOSABLE_RE.test(url)) {
     throw new Error(
-      'DATABASE_URL must match /millq_migrate_runner(_…)? or /millq_ci_pos(_…)? disposable allowlist',
+      'DATABASE_URL must match /millq_migrate_runner(_…)? or /millq_ci_pos(_…)? or /millq_ci_gr(_…)? disposable allowlist',
     );
   }
   return true;

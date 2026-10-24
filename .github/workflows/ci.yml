@@ -1,14 +1,18 @@
-name: CI
+# Depot CI Migration
+# Source: .github/workflows/ci.yml
+#
+# Changes made:
+# - Changed GitHub runs-on labels to their Depot equivalents
 
+name: CI
 on:
   pull_request:
   push:
     branches: [main, 'feature/**', 'fix/**', 'chore/**']
-
 jobs:
   foundation:
     name: Typecheck, test, build
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest # was: ubuntu-latest. Mapped standard GitHub runner to Depot equivalent.
     services:
       postgres:
         image: postgres:16-alpine
@@ -19,10 +23,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U millq -d millq_dev"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+          --health-cmd "pg_isready -U millq -d millq_dev" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       DATABASE_URL: postgresql://millq:millq@localhost:5432/millq_dev
       NODE_ENV: test
@@ -47,28 +48,74 @@ jobs:
         run: bash tests/scripts/assert-vitest-no-skips.test.sh
       - name: Build
         run: pnpm build
+      - name: Wait for PostgreSQL
+        run: |
+          set -euo pipefail
+          echo "Waiting for PostgreSQL at 127.0.0.1:5432..."
+          probe() {
+            if command -v pg_isready >/dev/null 2>&1; then
+              pg_isready -h 127.0.0.1 -p 5432 -U millq -d millq_dev
+            else
+              docker run --rm --network host postgres:16-alpine \
+                pg_isready -h 127.0.0.1 -p 5432 -U millq -d millq_dev
+            fi
+          }
+          for i in $(seq 1 60); do
+            if probe; then
+              echo "PostgreSQL is ready"
+              exit 0
+            fi
+            echo "PostgreSQL not ready yet (attempt ${i}/60)"
+            sleep 1
+          done
+          echo "PostgreSQL did not become ready within 60s" >&2
+          exit 1
       - name: Migrate (idempotent smoke)
         run: |
           pnpm --filter @millq/api run migrate
           pnpm --filter @millq/api run migrate
       - name: API health with live PostgreSQL
         run: |
-          set -o pipefail
-          pnpm --filter @millq/api run start &
+          set -euo pipefail
+          API_LOG=/tmp/millq-api.log
+          HEALTH_JSON=/tmp/health.json
+          rm -f "$HEALTH_JSON"
+          {
+            echo "Starting @millq/api (node dist/index.js) on 127.0.0.1:3000"
+            echo "NODE_ENV=${NODE_ENV-}"
+            echo "PORT=${PORT-}"
+          } > "$API_LOG"
+          pnpm --filter @millq/api run start >> "$API_LOG" 2>&1 &
           API_PID=$!
-          HEALTH_OK=0
+          dump_api_log() {
+            echo "----- millq-api log -----" >&2
+            cat "$API_LOG" >&2 || true
+            echo "----- end millq-api log -----" >&2
+          }
+          reachable=0
           for i in $(seq 1 30); do
-            if curl -sf http://127.0.0.1:3000/health -o /tmp/health.json; then
-              HEALTH_OK=1
+            if ! kill -0 "$API_PID" 2>/dev/null; then
+              echo "API process exited before /health became reachable" >&2
+              wait "$API_PID" || true
+              dump_api_log
+              exit 1
+            fi
+            if curl -sf http://127.0.0.1:3000/health -o "$HEALTH_JSON"; then
+              reachable=1
               break
             fi
+            echo "health not reachable yet (attempt ${i}/30)"
             sleep 1
           done
-          kill $API_PID || true
-          if [ "$HEALTH_OK" -ne 1 ]; then
-            echo "API health check failed after 30 attempts"
+          if [ "$reachable" -ne 1 ]; then
+            echo "curl http://127.0.0.1:3000/health did not succeed within 30s" >&2
+            dump_api_log
+            kill "$API_PID" || true
+            wait "$API_PID" || true
             exit 1
           fi
+          kill "$API_PID" || true
+          wait "$API_PID" || true
           python3 - <<'PY'
           import json, sys
           data = json.load(open('/tmp/health.json'))
@@ -76,9 +123,10 @@ jobs:
           assert data.get('checks', {}).get('database') == 'up', data
           print('health ok')
           PY
+
   disposable-pg-acceptance:
     name: Disposable PostgreSQL P0 + migrator
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     services:
       postgres:
         # Isolated service for this job only — not millq_dev / staging / production.
@@ -142,16 +190,22 @@ jobs:
           RUN_SUFFIX="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
           MIGRATE_DB="millq_migrate_runner_${RUN_SUFFIX}"
           POS_DB="millq_ci_pos_${RUN_SUFFIX}"
+          GR_DB="millq_ci_gr_${RUN_SUFFIX}"
           psql_ci -c "CREATE DATABASE \"${MIGRATE_DB}\" OWNER millq_ci;"
           psql_ci -c "CREATE DATABASE \"${POS_DB}\" OWNER millq_ci;"
+          psql_ci -c "CREATE DATABASE \"${GR_DB}\" OWNER millq_ci;"
           MIGRATE_URL="postgresql://millq_ci:millq_ci_local_only@127.0.0.1:5432/${MIGRATE_DB}"
           POS_URL="postgresql://millq_ci:millq_ci_local_only@127.0.0.1:5432/${POS_DB}"
+          GR_URL="postgresql://millq_ci:millq_ci_local_only@127.0.0.1:5432/${GR_DB}"
           echo "migrate_db=${MIGRATE_DB}" >> "$GITHUB_OUTPUT"
           echo "pos_db=${POS_DB}" >> "$GITHUB_OUTPUT"
+          echo "gr_db=${GR_DB}" >> "$GITHUB_OUTPUT"
           echo "migrate_url=${MIGRATE_URL}" >> "$GITHUB_OUTPUT"
           echo "pos_url=${POS_URL}" >> "$GITHUB_OUTPUT"
+          echo "gr_url=${GR_URL}" >> "$GITHUB_OUTPUT"
           node scripts/ci/assert-disposable-database-url.mjs "$MIGRATE_URL"
           node scripts/ci/assert-disposable-database-url.mjs "$POS_URL"
+          node scripts/ci/assert-disposable-database-url.mjs "$GR_URL"
       - name: Migrate POS disposable database
         run: |
           set -euo pipefail
@@ -208,6 +262,37 @@ jobs:
             exit "$VITEST_EC"
           fi
           node scripts/ci/assert-vitest-no-skips.mjs "$REPORT" --min-passed=10 --label=migrate-runner
+      - name: Migrate GoodsReceipt disposable database
+        run: |
+          set -euo pipefail
+          GR_DB="${{ steps.dbs.outputs.gr_db }}"
+          export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${GR_DB}"
+          node scripts/ci/assert-disposable-database-url.mjs "$DATABASE_URL"
+          node -e 'const u=process.env.DATABASE_URL||""; const n=u.split("/").pop()?.split("?")[0]||""; if(!n.startsWith("millq_ci_gr_")) process.exit(1); console.log("gr_db_name="+n);'
+          pnpm --filter @millq/api run migrate
+      - name: GoodsReceipt reverse UNIQUE + P0 concurrency (fail-closed)
+        run: |
+          set -euo pipefail
+          GR_DB="${{ steps.dbs.outputs.gr_db }}"
+          export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${GR_DB}"
+          node scripts/ci/assert-disposable-database-url.mjs "$DATABASE_URL"
+          node -e 'const u=process.env.DATABASE_URL||""; const n=u.split("/").pop()?.split("?")[0]||""; if(!n.startsWith("millq_ci_gr_")) process.exit(1); console.log("gr_db_name="+n);'
+          REPORT=/tmp/vitest-gr-unique.json
+          set +e
+          pnpm --filter @millq/api exec vitest run \
+            src/modules/procurement/goods-receipt-p0.concurrency.acceptance.test.ts \
+            src/modules/procurement/goods-receipt-reverse-unique.acceptance.test.ts \
+            --reporter=verbose \
+            --reporter=json \
+            --outputFile="$REPORT"
+          VITEST_EC=$?
+          set -e
+          node scripts/ci/print-vitest-summary.mjs "$REPORT" || true
+          if [[ "$VITEST_EC" -ne 0 ]]; then
+            echo "vitest exited with code ${VITEST_EC}" >&2
+            exit "$VITEST_EC"
+          fi
+          node scripts/ci/assert-vitest-no-skips.mjs "$REPORT" --min-passed=13 --label=goods-receipt-unique
       - name: Drop per-run databases
         if: always()
         run: |
@@ -222,9 +307,13 @@ jobs:
           }
           MIGRATE_DB="${{ steps.dbs.outputs.migrate_db }}"
           POS_DB="${{ steps.dbs.outputs.pos_db }}"
+          GR_DB="${{ steps.dbs.outputs.gr_db }}"
           if [[ -n "${MIGRATE_DB}" ]]; then
             psql_ci -c "DROP DATABASE IF EXISTS \"${MIGRATE_DB}\" WITH (FORCE);" || true
           fi
           if [[ -n "${POS_DB}" ]]; then
             psql_ci -c "DROP DATABASE IF EXISTS \"${POS_DB}\" WITH (FORCE);" || true
+          fi
+          if [[ -n "${GR_DB}" ]]; then
+            psql_ci -c "DROP DATABASE IF EXISTS \"${GR_DB}\" WITH (FORCE);" || true
           fi

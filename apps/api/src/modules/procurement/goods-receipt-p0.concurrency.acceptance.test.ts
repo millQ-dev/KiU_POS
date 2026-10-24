@@ -1,6 +1,6 @@
 /**
  * P0 GoodsReceipt integrity: concurrent post/edit/reverse + HTTP actor attribution.
- * Uses local test DB (migrate + TRUNCATE). Not production/staging.
+ * Destructive TRUNCATE — millq_ci_gr_* disposable DB only (never millq_dev).
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
@@ -9,6 +9,10 @@ import cookie from '@fastify/cookie';
 import pg from 'pg';
 import { runMigrations } from '../../db/migrate.js';
 import { seedBlockCFixture, type BlockCFixture } from '../../test/seed.js';
+import {
+  assertGoodsReceiptDisposableDatabaseUrl,
+  isGoodsReceiptDisposableDatabaseUrl,
+} from '../../test/disposable-database-url.js';
 import { GoodsReceiptService } from './goods-receipt-service.js';
 import { PostedImmutableError } from './errors.js';
 import {
@@ -25,8 +29,10 @@ import {
 import { registerCompanyIdentityRoutes, registerIdentityRoutes } from '../../routes/identity.js';
 import { registerGoodsReceiptRoutes } from '../../routes/goods-receipts.js';
 
-const DATABASE_URL =
-  process.env.DATABASE_URL ?? 'postgresql://millq:millq@localhost:5432/millq_dev';
+const DATABASE_URL = process.env.DATABASE_URL ?? '';
+const RUN_DISPOSABLE = isGoodsReceiptDisposableDatabaseUrl(DATABASE_URL);
+const describeP0 = RUN_DISPOSABLE ? describe : describe.skip;
+
 const PEPPER = resolvePinPepper({
   NODE_ENV: 'test',
   PORT: 3000,
@@ -43,6 +49,7 @@ let companyCode: string;
 let authenticatedUserId: string;
 
 async function truncateBusiness() {
+  assertGoodsReceiptDisposableDatabaseUrl(DATABASE_URL);
   await pool.query(`
     TRUNCATE
       cash_shift,
@@ -128,8 +135,9 @@ async function loginWithPin(app: Awaited<ReturnType<typeof buildApp>>) {
   return match[1];
 }
 
-describe('GoodsReceipt P0 integrity (PostgreSQL)', () => {
+describeP0('GoodsReceipt P0 integrity (PostgreSQL)', () => {
   beforeAll(async () => {
+    assertGoodsReceiptDisposableDatabaseUrl(DATABASE_URL);
     await runMigrations(DATABASE_URL);
     pool = new pg.Pool({ connectionString: DATABASE_URL });
     service = new GoodsReceiptService(pool);
@@ -169,7 +177,6 @@ describe('GoodsReceipt P0 integrity (PostgreSQL)', () => {
       headers: authInjectHeaders(token),
       payload: {
         ...draftBase({ actorId: spoof, supplierDocumentNumber: 'HTTP-ACTOR' }),
-        // tenantId may be omitted; route sets from principal
         tenantId: fx.tenantId,
       },
     });
@@ -253,7 +260,6 @@ describe('GoodsReceipt P0 integrity (PostgreSQL)', () => {
     );
     const id = draft!.goodsReceiptId;
 
-    // Barrier: start post and edit nearly together.
     const edit = service.updateDraft(id, {
       lines: [milkLine({ packageCount: 2 })],
       actorId: fx.actorId,
@@ -263,7 +269,6 @@ describe('GoodsReceipt P0 integrity (PostgreSQL)', () => {
     const settled = await Promise.allSettled([edit, post]);
     const postResult = settled[1];
 
-    // One of: post wins then edit fails; or edit wins then post uses qty=2.
     if (postResult.status === 'rejected') {
       expect(postResult.reason).toBeInstanceOf(PostedImmutableError);
       const stillDraft = await service.get(id);
