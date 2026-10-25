@@ -23,7 +23,10 @@ import {
   PosSurfaceResolver,
   PublishedImmutableError,
 } from '../modules/pos/index.js';
-import { FiscalService } from '../modules/fiscalization/index.js';
+import {
+  FiscalService,
+  resolveFiscalProviderAdapter,
+} from '../modules/fiscalization/index.js';
 import { ReceiveCashService } from '../modules/payments/receive-cash-service.js';
 import { SettlementService } from '../modules/settlement/settlement-service.js';
 import {
@@ -36,6 +39,8 @@ export type PosRouteOptions = {
   pepper: string;
   allowedOrigins: string[];
   isProduction: boolean;
+  /** Optional override for tests — defaults to process.env.DATABASE_URL. */
+  databaseUrl?: string;
 };
 
 function mapError(err: unknown): { status: number; body: Record<string, unknown> } {
@@ -527,8 +532,13 @@ export async function registerPosRoutes(
   );
 
   // --- S1.1 Settlement + PAY1.1 Payments + FISC1.1 FiscalCheckoutGate ---
-  // Production adapter is unavailable until a provider is configured (fail closed; no fake SATISFIED).
-  const fiscal = new FiscalService(pool);
+  // Production always unavailable. Test-satisfying adapter only on disposable POS DB + explicit env
+  // (C0-FISC1 allowed test contour). Never a Vietnam production provider / G2 claim.
+  const fiscalResolved = resolveFiscalProviderAdapter({
+    isProduction: routeOpts.isProduction,
+    databaseUrl: routeOpts.databaseUrl ?? process.env.DATABASE_URL ?? null,
+  });
+  const fiscal = new FiscalService(pool, { adapter: fiscalResolved.adapter });
   const { payments, settlements } = createWiredPaymentsAndSettlement(
     pool,
     (paymentsSvc) => {
@@ -589,6 +599,25 @@ export async function registerPosRoutes(
           actorId: principal.userId,
           deviceId: body.deviceId ?? null,
         });
+      } catch (err) {
+        const mapped = mapError(err);
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    },
+  );
+
+  /** Read-only FiscalCheckoutGate observation (ADR-0014) — never caller-settable SATISFIED. */
+  app.get<{ Params: { settlementGroupId: string } }>(
+    '/api/v1/settlements/:settlementGroupId/fiscal-gate',
+    async (req, reply) => {
+      try {
+        await requireSettlementPrincipal(req, finAuth, pool, req.params.settlementGroupId);
+        const gate = await settlements.observeFiscalGate(req.params.settlementGroupId);
+        return {
+          settlementGroupId: req.params.settlementGroupId,
+          fiscalAdapterMode: fiscalResolved.mode,
+          gate,
+        };
       } catch (err) {
         const mapped = mapError(err);
         return reply.code(mapped.status).send(mapped.body);

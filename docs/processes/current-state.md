@@ -1,10 +1,10 @@
 # MillQ Current State
 
-**Checkpoint:** CASHIER-1 Production Front Door **MERGED / CANONICAL CLOSED** (pending Origin→GitHub backup verification in merge report)  
+**Checkpoint:** C0-PAY1 ReceiveCash UI **MERGED** Origin #110 (`802b70d`) — GitHub backup restore pending (see `origin-github-backup-runbook.md`)  
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)  
 **GitHub backup (sole):** `https://github.com/millQ-dev/KiU_POS.git`  
   (`millQ-dev/MillQ` = legacy rename redirect to the same repository ID)  
-**Updated:** 2026-10-11
+**Updated:** 2026-10-25
 
 ## Runtime / CI / backup
 
@@ -14,7 +14,9 @@
 | TAX1.1 Tax runtime | **MERGED** Origin PR#74 — canonical closed |
 | ADR-0033 / ADR-0034 / ADR-0037 | **ACCEPTED** |
 | CASHIER-1 Production Front Door | **MERGED** Origin PR#76 |
-| Fiscalization (FISC1.1) | **IN PR** — Core Runtime (PCE, ReceiveCash, FiscalPolicy/Document/Submission, gate); production adapter default **unavailable** (fail-closed); no G2 |
+| Fiscalization (FISC1.1) | **MERGED** Core Runtime; production adapter default **unavailable**; C0-FISC1 test-satisfying adapter only with `MILLQ_ALLOW_FISCAL_TEST_ADAPTER=1` + disposable `millq_ci_pos_*` (no real provider / no G2) |
+| C0-PAY1 ReceiveCash UI | **MERGED** Origin #110 |
+| Independent Origin APPROVE | Distinct Origin principal required — see `origin-independent-review.md` |
 | ADR-0014 Fiscalization delta | **ACCEPTED** 2026-10-10 |
 | ADR-0014 / ADR-0013 Chronology Delta | **ACCEPTED** 2026-10-11 |
 | ADR-0038 C0 CASH+CARD PCE | **ACCEPTED** 2026-10-11 |
@@ -52,7 +54,7 @@
 | --- | --- |
 | ADR-0014 delta | **ACCEPTED** 2026-10-10 |
 | Payment collection chronology | **ACCEPTED** — CARD `provider_occurred_at` + `COLLECTION_OR_CAPTURE`; CASH `ReceiveCash` server clock; no `received_at` / `satisfied_at` fallback |
-| FISC1.1 Core Runtime | **IN PR** (Level B) — migration 032; CASH+CARD PCE; Fiscal Core; gate wired; A4 OPEN → `docs/processes/review-packets/fisc11-level-c-open-items.md` |
+| FISC1.1 Core Runtime | **MERGED** — migration 032; CASH+CARD PCE; Fiscal Core; gate wired; A4 OPEN polish → `docs/processes/review-packets/fisc11-level-c-open-items.md` |
 | Production FiscalCheckoutGate | Authoritative; default **unavailable adapter** ⇒ not SATISFIED without verified evidence |
 | LEGAL GATE G2 | **REQUIRED** for Vietnam fiscal production go-live (not granted by FISC1.1 Core) |
 

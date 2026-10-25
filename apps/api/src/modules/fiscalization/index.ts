@@ -12,6 +12,10 @@ export {
   type FiscalEvidenceClass,
 } from './fiscal-provider-adapter.js';
 export {
+  resolveFiscalProviderAdapter,
+  type ResolveFiscalAdapterInput,
+} from './resolve-fiscal-adapter.js';
+export {
   defaultC0SatisfactionProfile,
   evidenceSatisfiesProfile,
   parseSatisfactionEvidenceProfile,
