@@ -7,7 +7,8 @@
 - **Related:** ADR-0002; ADR-0013; ADR-0014 (fiscal correction chains — separate); ADR-0028 (refund ≠ rewrite Order commercial); ADR-0032 (abort ≠ refund); ADR-0036; ADR-0038 (refunds RELEASE-BLOCKING OPEN); ADR-0046; Proposed ADR-0047 (CashDrawerMovement)
 - **Autonomy:** Level **C** docs only until Accept
 - **Origin main at proposal:** `6b97f3dcb650882135d5e29450cdf14c622ab547`
-- **Companion packet:** `docs/processes/review-packets/2026-10-25-cash13-refund-level-c-decision-packet.md`
+- **Companion packets:** `docs/processes/review-packets/2026-10-25-cash13-refund-level-c-decision-packet.md`; **F4Б reconciliation** `docs/processes/review-packets/2026-10-25-cash13-refund-po-f4b-reconciliation.md`
+- **Revised (PROPOSED delta):** 2026-10-25 — reconcile R1/R3/R4/R6/R7 with PO-20261025-C0-F4 / F4Б (partial refund mandatory for pilot)
 
 ---
 
@@ -15,10 +16,10 @@
 
 | Class | Content |
 | --- | --- |
-| **EXISTING Accepted ADR** | 0013 non-custody + PCE ownership; 0038 cash refunds out of FISC1.1 / compensating ReceiveCash forbidden as refund; 0046 expected reserves `− Σ refunds` but implements none; 0028 refund alone must not rewrite Order commercial; 0032 abort ≠ void/refund |
-| **PO ACCEPTED (product)** | Manager: cancellations/returns/discounts within grant/limit, above → Owner approval; close discrepancy immutable. POS-REFUND UI-161 Spec Accepted / Figma Partial — **API not Origin-verified** |
-| **PROPOSED (this document)** | Payments-owned refund evidence linked to original Payment; CASH drawer effect once via `cash_shift_id`; no historical Payment/PCE/Fiscal/Revenue mutation |
-| **OPEN / BLOCKED** | R1–R9; CARD/VietQR provider refund; fiscal correction TX coupling; voids; Accounting |
+| **EXISTING Accepted ADR** | 0013 non-custody + PCE ownership; 0014 fiscal + LEGAL GATE G2; 0038 cash refunds out of FISC1.1 / compensating ReceiveCash forbidden as refund; 0046 expected reserves `− Σ refunds` but implements none; 0028 refund alone must not rewrite Order commercial; 0032 abort ≠ void/refund |
+| **PO ACCEPTED (product)** | Manager: cancellations/returns/discounts within grant/limit, above → Owner approval; close discrepancy immutable. POS-REFUND UI-161 Spec Accepted / Figma Partial — **API not Origin-verified**. **PO-20261025-C0-F4 / F4Б:** partial monetary refund after paid **COMPLETED** Order is **mandatory** for first pilot ([Notion](https://app.notion.com/p/40430d51715181d1b2adf41282cc41db)) |
+| **PROPOSED (this document)** | Payments-owned refund evidence linked to original Payment; CASH drawer effect once via **current OPEN** `cash_shift_id`; no historical Payment/PCE/Fiscal/Revenue mutation; R3 option D; soft Order/line refs |
+| **OPEN / BLOCKED** | Remaining owner choices (R3 Accept D, R5, R8, …); VietQR refund capability gate; LEGAL GATE G2 + fiscal correction execution policy; Accounting |
 
 **STOP:** PROPOSED merge ≠ Accept. No refund runtime/migrations until Accepted revision + PO GO.
 
@@ -74,11 +75,21 @@ RecordCashRefund {
 − Σ amount_refunded_minor of SUCCEEDED CASH refunds where cash_shift_id = this shift
 ```
 
-Exactly once. Exact minor units (ADR-0002).
+Exactly once. Exact minor units (ADR-0002).  
+`cash_shift_id` is always the **current OPEN** shift that pays out cash (see R3-D) — never a rewrite of a CLOSED shift’s frozen expected.
+
+### D4b. Remaining refundable (after Accept; F4Б)
+
+```text
+remaining = original_payment_qualifying_amount
+          − Σ SUCCEEDED refunds on that payment
+```
+
+Partial refund amounts must be `> 0` and `≤ remaining`. Fail closed otherwise.
 
 ### D5. Concurrency
 
-Single transaction: lock original Payment `FOR UPDATE` → lock OPEN `cash_shift` `FOR UPDATE` → insert refund evidence → commit. Compatible with ReceiveCash `FOR SHARE` (waits) and Close `FOR UPDATE` (serialize). Idempotent key unique per LegalEntity.
+Single transaction: lock original Payment `FOR UPDATE` → lock **current OPEN** `cash_shift` `FOR UPDATE` → insert refund evidence → commit. Compatible with ReceiveCash `FOR SHARE` (waits) and Close `FOR UPDATE` (serialize). Idempotent key unique per LegalEntity. Do **not** lock or mutate CLOSED shift rows for expected rewrite.
 
 ### D6. Proposed permission
 
@@ -93,44 +104,45 @@ Single transaction: lock original Payment `FOR UPDATE` → lock OPEN `cash_shift
 | | |
 | --- | --- |
 | **Options** | (a) Full original amount only; (b) Partial ≤ remaining refundable; (c) Partial only with Manager grant |
-| **Recommendation** | **(b)** with remaining tracked on refund ledger sum; pilot may start **(a)** to shrink surface |
-| **Risks** | Partial without remaining invariant → over-refund; commercial line return deferred (ADR-0028 §13) |
-| **Pilot** | Prefer **(a)** same-day full CASH refund of one Payment |
-| **Impact** | Payments; Cash expected; Settlement coverage semantics TBD; Fiscal if R6 |
-| **Requires PO?** | **Yes** |
+| **Authority** | **PO ACCEPTED (F4Б)** supersedes prior pilot-(a) shrink |
+| **Recommendation** | **(b)** mandatory for first pilot — remaining = original qualifying − Σ SUCCEEDED refunds; optional Manager grant composition is R8, not a substitute for partial |
+| **Risks** | Partial without remaining invariant → over-refund; do not invent line commercial return here (R7) |
+| **Pilot** | Partial monetary refund on paid COMPLETED Order path (F4Б) |
+| **Impact** | Payments; Cash expected on **current** OPEN shift; Fiscal if R6 |
+| **Requires PO?** | **No further** for “partial vs full-only” — F4Б closed that ask. Thresholds → R8 |
 
-### R2 — Open-shift only for CASH
-
-| | |
-| --- | --- |
-| **Options** | (a) Current OPEN CashShift required; (b) Allow targeting prior OPEN/CLOSED with correction; (c) Allow closed-shift refund into next OPEN |
-| **Recommendation** | **(a)** — matches ADR-0046 CLOSED immutable |
-| **Risks** | (b)/(c) rewrite closed expected / forensic hole |
-| **Pilot** | Same-shift refund only |
-| **Impact** | Payments + Cash; not Fiscal by itself |
-| **Requires PO?** | **Yes** if any exception to (a) |
-
-### R3 — Cross-shift cash refund
+### R2 — Drawer payout shift (OPEN required)
 
 | | |
 | --- | --- |
-| **Options** | (a) Forbidden in C0; (b) Manager exception with new correction aggregate; (c) Force reopen CLOSED (forbidden under 0046) |
-| **Recommendation** | **(a)** |
-| **Risks** | (c) breaks close immutability; (b) new Level C |
-| **Pilot** | Next-day cash return = out of scope / manual out-of-system until later ADR |
-| **Impact** | Cash Close invariants |
-| **Requires PO?** | **Yes** only to override (a) |
+| **Options** | (a) Cash leaves **current OPEN** CashShift only; (b) Rewrite prior CLOSED expected; (c) Pay into next OPEN without binding current |
+| **Recommendation** | **(a)** — required for R3-D; matches ADR-0046 CLOSED immutable |
+| **Risks** | (b) forensic hole; (c) unbound drawer |
+| **Pilot** | Always bind refund.cash_shift_id to current OPEN |
+| **Impact** | Payments + Cash |
+| **Requires PO?** | Only if rejecting (a) |
+
+### R3 — Historical original Payment / cross-shift
+
+| | |
+| --- | --- |
+| **Options** | (a) Forbidden if Payment’s collection shift ≠ current OPEN; (b) Manager correction aggregate; (c) Force reopen CLOSED (**forbidden** under 0046); **(d)** Historical original Payment **allowed**; CASH paid from **current OPEN**; original CLOSED shift **immutable** |
+| **Recommendation** | **(d)** — enables post-close customer return without rewriting closed expected; pairs with F4Б |
+| **Risks** | Operator confusion (which drawer lost cash); must not double-count or touch CLOSED evidence |
+| **Pilot** | Allow refund of yesterday’s Payment from today’s OPEN drawer |
+| **Impact** | Cash Close immutability preserved; Payments links historical Payment |
+| **Requires PO?** | **Yes** — confirm **(d)** vs keep **(a)** |
 
 ### R4 — CARD / VietQR refund
 
 | | |
 | --- | --- |
 | **Options** | (a) Same ADR with provider async; (b) Separate ADR after CASH path; (c) Out of C0 entirely |
-| **Recommendation** | **(b)** — CASH drawer path first; electronic refund ≠ drawer expected |
-| **Risks** | Mixing provider async with cash TX locks; claiming parity without provider GO |
-| **Pilot** | CASH only |
-| **Impact** | Payments + Integrations; Cash expected unchanged for CARD |
-| **Requires PO?** | **Yes** for sequencing |
+| **Recommendation** | **(b)** for CARD **runtime**; **pilot-complete gate:** verified VietQR refund **capability/method** documented fail-closed (external provider) before declaring first pilot complete — even if implementation is a later ADR |
+| **Risks** | Claiming pilot complete with unverified VietQR refund; mixing provider async into cash TX |
+| **Pilot** | CASH path implements; VietQR capability **verified** as checklist item |
+| **Impact** | Payments + Integrations; Cash expected unchanged for electronic |
+| **Requires PO?** | Sequencing + pilot-complete definition **Yes** |
 
 ### R5 — Voids vs refunds
 
@@ -139,7 +151,7 @@ Single transaction: lock original Payment `FOR UPDATE` → lock OPEN `cash_shift
 | **Options** | (a) Distinct commands (void pre-SUCCESS vs refund post-SUCCESS); (b) One “reverse payment” umbrella; (c) Defer voids |
 | **Recommendation** | **(a)** + **(c)** for first pilot (refund SUCCESS only; void stays lifecycle reject) |
 | **Risks** | Umbrella blurs Settlement abort (0032) and fiscal |
-| **Pilot** | Refund SUCCEEDED CASH Payment only |
+| **Pilot** | Refund SUCCEEDED Payment only (partial per R1) |
 | **Impact** | Payments lifecycle; Settlement abort unchanged |
 | **Requires PO?** | **Yes** if voids in same package |
 
@@ -147,23 +159,23 @@ Single transaction: lock original Payment `FOR UPDATE` → lock OPEN `cash_shift
 
 | | |
 | --- | --- |
-| **Options** | (a) Same TX as refund; (b) Async fiscal correction required before refund SUCCEEDED; (c) Out of PAY-REFUND — separate FISC Level C; (d) Vietnam NOT_REQUIRED cafe path may omit until G2 |
-| **Recommendation** | **(c)** for architecture purity; product may require **(b)** before claiming fiscal-safe refund UX |
-| **Risks** | Shipping refund without fiscal plan → illegal e-invoice state; inventing FiscalDocument in Payments |
-| **Pilot** | Explicit “fiscal follow-up OPEN” label; no fake fiscal success |
-| **Impact** | Fiscalization ADR-0014; Payments must not own FiscalDocument |
-| **Requires PO?** | **Yes** — blocking for finished C0 refund claim |
+| **Options** | (a) Same TX as refund; (b) Async fiscal correction required before refund SUCCEEDED; (c) Out of PAY-REFUND — separate FISC Level C; (d) Omit until G2 |
+| **Recommendation** | **Ownership (c):** Fiscalization owns FiscalDocument / correction chains (ADR-0014). **Execution policy OPEN:** name Vietnam **LEGAL GATE G2** + correction workflow before claiming fiscal-safe refund UX. Money/drawer refund MUST NOT invent fiscal SATISFIED |
+| **Risks** | Illegal e-invoice state; Payments writing Fiscal tables; fake success UX |
+| **Pilot** | Explicit fiscal-follow-up OPEN; no fabricated fiscal success |
+| **Impact** | Fiscalization; Legal G2; Payments non-owner |
+| **Requires PO?** | **Yes** for execution timing; **G2** is external legal gate |
 
-### R7 — Order / commercial rewrite
+### R7 — Order / commercial / inventory
 
 | | |
 | --- | --- |
-| **Options** | (a) Payment+drawer only (no Order mutation) — ADR-0028; (b) Line return + commercial correction same package; (c) Soft link OrderId without rewrite |
-| **Recommendation** | **(a)** or **(c)**; **(b)** separate Level C |
-| **Risks** | Silent Order rewrite breaks audit |
-| **Pilot** | (a) |
-| **Impact** | Orders out; Payments + Cash in |
-| **Requires PO?** | **Yes** if merchandise return in-scope |
+| **Options** | (a) Payment+drawer only (no Order fields); (b) Line return + commercial/inventory correction same package; (c) Soft OrderId / line refs **without** rewriting historical commercial or inventory |
+| **Recommendation** | **(c)** — supports F4Б COMPLETED Order context without ADR-0028 / GoodsIssue mutation |
+| **Risks** | (b) silent rewrite; (a) weaker audit trail for “which order” |
+| **Pilot** | Store optional `order_id` / line refs on refund evidence; no CompleteOrder reverse; no stock reverse in this package |
+| **Impact** | Payments refs; Orders/Inventory **read-only** |
+| **Requires PO?** | **Yes** only if merchandise/inventory return in same package |
 
 ### R8 — Permission + over-limit
 
@@ -200,8 +212,9 @@ Single transaction: lock original Payment `FOR UPDATE` → lock OPEN `cash_shift
 ### Negative / follow-ups
 
 - Fiscal/CARD/partial commercial still Level C
-- Cross-shift cash returns unsupported under R2/R3 recommendation
+- CLOSED CashShift expected rewrite remains unsupported; historical Payment via **R3-D** (pay from current OPEN) is PROPOSED pending PO confirm — not a reopen of CLOSED
 - UI POS-REFUND still needs API contract after Accept
+- VietQR refund capability + LEGAL GATE G2 / fiscal correction policy remain external pilot-complete gates
 
 ### Explicitly out
 
