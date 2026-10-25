@@ -173,11 +173,19 @@ describe('production CashierShell cleanup', () => {
   });
 
   it('hides DEV context and Change context in production mode', async () => {
-    render(<CashierShell mode="production" context={ctx} onSignOut={vi.fn()} />);
+    render(
+      <CashierShell
+        mode="production"
+        context={ctx}
+        onSignOut={vi.fn()}
+        onCloseCashShift={vi.fn()}
+      />,
+    );
     await waitFor(() => expect(mockedApi.resolveSurface).toHaveBeenCalled());
     expect(screen.queryByText('DEV context')).toBeNull();
     expect(screen.queryByText('Change context')).toBeNull();
     expect(screen.getByText('Sign out')).toBeTruthy();
+    expect(screen.getByTestId('open-close-cash-shift')).toBeTruthy();
   });
 
   it('keeps DEV controls in dev mode', async () => {
