@@ -235,7 +235,7 @@ Full matrices (options / recommendation / risks / pilot / module impact / requir
 | C4 | SAFE_DROP vs Close | Record-only in pilot; confirm optional later |
 | C5 | Terminal scope | Movement only on CashShift Terminal |
 | C6 | Who CASH_IN | Cashier with `cash_drawer.in` (≠ Open float) |
-| R1 | Partial refund | Pilot **full-only**; target remaining-aware partial later |
+| R1 | Partial refund | **PO ACCEPTED F4Б:** partial ≤ remaining (see F4Б reconciliation packet) |
 | R2 | Open-shift only | Current OPEN required |
 | R3 | Cross-shift | Forbidden in C0 |
 | R4 | CARD/VietQR | Separate ADR after CASH |
@@ -256,9 +256,12 @@ Full matrices (options / recommendation / risks / pilot / module impact / requir
 
 ### Recommended minimal pilot (after future Accept — not this docs PR)
 
-1. **CASH1.3 slice:** CASH_IN + CASH_OUT (expense) + SAFE_DROP **record**; Terminal-scoped; no Close gate on unconfirmed drop; no bank.
-2. **Refund slice:** Full-amount same-OPEN-shift CASH refund only; no Order rewrite; no FiscalDocument invent; no CashDrawerMovement twin; no CARD.
-3. Extend Close expected only after both Accepted + tests for double-count.
+Superseded in detail by `2026-10-25-cash13-refund-po-f4b-reconciliation.md` after **F4Б**:
+
+1. **CASH1.3 slice:** CASH_IN + CASH_OUT (expense) + SAFE_DROP **record**; Terminal-scoped; no bank.
+2. **Refund slice:** **Partial** CASH ≤ remaining on paid COMPLETED Order (F4Б); soft Order/line refs; payout from **current OPEN** (R3-D if PO confirms); no commercial/inventory rewrite; no CashDrawerMovement twin; no fake fiscal success.
+3. **Pilot-complete gates:** VietQR refund capability verified; fiscal correction policy vs LEGAL GATE G2 named — not invented.
+4. Extend Close expected only after both ADRs Accepted + double-count tests.
 
 ---
 
