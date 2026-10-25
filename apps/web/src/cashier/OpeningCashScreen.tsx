@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getCurrentCashShift,
   listCashTerminals,
@@ -48,10 +48,12 @@ export function OpeningCashScreen({
     [terminals, terminalId],
   );
 
-  const idempotencyKey = useMemo(() => {
-    const seed = `${user.userId}:${terminalId}:${amountMinor}:${DEFAULT_CURRENCY}:${DEFAULT_EXPONENT}`;
-    return `cash-open-${seed}`.slice(0, 128);
-  }, [user.userId, terminalId, amountMinor]);
+  /**
+   * Fresh open attempts must not reuse a prior openIdempotencyKey (ADR-0036):
+   * server replays the prior row — after CLOSED that fails cashier entry.
+   * Approval retry reuses the pending key for the same attempt.
+   */
+  const pendingOpenKeyRef = useRef<string | null>(null);
 
   const tryResumeOpen = useCallback(
     async (terminal: TerminalTopology): Promise<boolean> => {
@@ -113,12 +115,17 @@ export function OpeningCashScreen({
     setBusy(true);
     setError(null);
     try {
+      if (!approvalRequestId || !pendingOpenKeyRef.current) {
+        pendingOpenKeyRef.current =
+          `cash-open-${user.userId}-${selected.terminalId}-${crypto.randomUUID()}`.slice(0, 128);
+      }
+      const openIdempotencyKey = pendingOpenKeyRef.current;
       const res = await sessionFetch('/api/v1/cash/shifts/open', {
         method: 'POST',
         body: JSON.stringify({
           outletId: selected.outletId,
           terminalId: selected.terminalId,
-          openIdempotencyKey: idempotencyKey,
+          openIdempotencyKey,
           openingCash: {
             amountMinor,
             currencyCode: DEFAULT_CURRENCY,
@@ -129,6 +136,7 @@ export function OpeningCashScreen({
       });
       const body = (await res.json()) as OpenCashShift & { error?: string; message?: string };
       if (res.status === 201) {
+        pendingOpenKeyRef.current = null;
         onOpened(body, selected);
         return;
       }
@@ -204,7 +212,7 @@ export function OpeningCashScreen({
   }
 
   return (
-    <main className="opening-cash-screen">
+    <main className="opening-cash-screen" data-testid="opening-cash-screen">
       <h1>Opening cash</h1>
       <p>
         {user.displayName} · {realm.displayName}
@@ -212,6 +220,7 @@ export function OpeningCashScreen({
       <label>
         Terminal
         <select
+          data-testid="opening-terminal-select"
           value={terminalId}
           onChange={(ev) => void onTerminalSelected(ev.target.value)}
           disabled={busy || terminals.length === 0}
@@ -230,6 +239,7 @@ export function OpeningCashScreen({
           name="openingCash"
           inputMode="numeric"
           autoComplete="off"
+          data-testid="opening-amount-input"
           value={amountMinor}
           onChange={(ev) => setAmountMinor(ev.target.value.replace(/\D/g, '').slice(0, 18) || '0')}
           disabled={busy || !selected}
@@ -238,6 +248,7 @@ export function OpeningCashScreen({
       {error ? <p role="alert">{error}</p> : null}
       <button
         type="button"
+        data-testid="opening-submit"
         disabled={busy || !selected || !/^[0-9]+$/.test(amountMinor)}
         onClick={() => void tryOpen()}
       >

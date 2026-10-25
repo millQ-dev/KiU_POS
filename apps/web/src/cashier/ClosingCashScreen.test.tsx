@@ -96,10 +96,21 @@ function renderScreen(props: Partial<ComponentProps<typeof ClosingCashScreen>> =
   );
 }
 
+function enterCounted(value: string) {
+  fireEvent.change(screen.getByTestId('close-actual-input'), { target: { value } });
+}
+
 describe('ClosingCashScreen', () => {
   beforeEach(() => {
     sessionStorage.clear();
     vi.restoreAllMocks();
+  });
+
+  it('does not pre-fill counted cash from opening float', () => {
+    renderScreen();
+    expect((screen.getByTestId('close-actual-input') as HTMLInputElement).value).toBe('');
+    expect((screen.getByTestId('close-submit') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('close-opening-hint').textContent).toMatch(/informational only/i);
   });
 
   it('balanced close shows server expected/actual/difference and Done leaves', async () => {
@@ -109,7 +120,7 @@ describe('ClosingCashScreen', () => {
     ]) as unknown as typeof fetch;
 
     renderScreen({ onClosed });
-
+    enterCounted('100000');
     fireEvent.click(screen.getByTestId('close-submit'));
     await waitFor(() => expect(screen.getByTestId('closing-cash-success')).toBeTruthy());
     expect(screen.getByTestId('close-variance').textContent).toBe('BALANCED');
@@ -147,7 +158,7 @@ describe('ClosingCashScreen', () => {
 
     renderScreen();
 
-    fireEvent.change(screen.getByTestId('close-actual-input'), { target: { value: '110000' } });
+    enterCounted('110000');
     fireEvent.click(screen.getByTestId('close-submit'));
     await waitFor(() => expect(screen.getByTestId('close-error')).toBeTruthy());
     fireEvent.change(screen.getByTestId('close-reason-input'), {
@@ -175,7 +186,7 @@ describe('ClosingCashScreen', () => {
 
     renderScreen({ onSignOutForManager: onSignOut });
 
-    fireEvent.change(screen.getByTestId('close-actual-input'), { target: { value: '90000' } });
+    enterCounted('90000');
     fireEvent.click(screen.getByTestId('close-submit'));
     await waitFor(() => expect(screen.getByTestId('close-reason-input')).toBeTruthy());
     fireEvent.change(screen.getByTestId('close-reason-input'), {
@@ -205,7 +216,7 @@ describe('ClosingCashScreen', () => {
 
     renderScreen({ user: { ...user, displayName: 'Manager' } });
 
-    fireEvent.change(screen.getByTestId('close-actual-input'), { target: { value: '90000' } });
+    enterCounted('90000');
     fireEvent.change(screen.getByTestId('close-reason-input'), {
       target: { value: 'Manager counted' },
     });
@@ -237,6 +248,7 @@ describe('ClosingCashScreen', () => {
     }) as unknown as typeof fetch;
 
     renderScreen();
+    enterCounted('100000');
 
     fireEvent.click(screen.getByTestId('close-submit'));
     fireEvent.click(screen.getByTestId('close-submit')); // while busy — no second request
@@ -248,6 +260,24 @@ describe('ClosingCashScreen', () => {
     expect(keys.length).toBe(2);
   });
 
+  it('IDEMPOTENCY_CONFLICT does not recommend changing count or reason', async () => {
+    global.fetch = mockFetchSequence([
+      {
+        status: 409,
+        body: { error: 'IDEMPOTENCY_CONFLICT', message: 'conflict' },
+      },
+    ]) as unknown as typeof fetch;
+
+    renderScreen();
+    enterCounted('100000');
+    fireEvent.click(screen.getByTestId('close-submit'));
+    await waitFor(() => expect(screen.getByTestId('close-error')).toBeTruthy());
+    const msg = screen.getByTestId('close-error').textContent ?? '';
+    expect(msg).toMatch(/idempotency conflict/i);
+    expect(msg).toMatch(/Do not change the amount or reason/i);
+    expect(msg).not.toMatch(/change the count\/reason/i);
+  });
+
   it('already closed surfaces error without SUCCESS', async () => {
     global.fetch = mockFetchSequence([
       {
@@ -257,6 +287,7 @@ describe('ClosingCashScreen', () => {
     ]) as unknown as typeof fetch;
 
     renderScreen();
+    enterCounted('100000');
 
     fireEvent.click(screen.getByTestId('close-submit'));
     await waitFor(() =>
@@ -277,6 +308,7 @@ describe('ClosingCashScreen', () => {
     }) as unknown as typeof fetch;
 
     renderScreen();
+    enterCounted('100000');
     fireEvent.click(screen.getByTestId('close-submit'));
     await waitFor(() => expect(screen.getByTestId('closing-cash-success')).toBeTruthy());
     expect(body.expectedAmountMinor).toBeUndefined();

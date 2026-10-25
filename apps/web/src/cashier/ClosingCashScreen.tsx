@@ -65,7 +65,8 @@ export function ClosingCashScreen({
   onCancel,
   onSignOutForManager,
 }: Props) {
-  const [actualMinor, setActualMinor] = useState(shift.openingAmountMinor);
+  /** Empty until the operator consciously enters a count — never pre-fill opening float. */
+  const [actualMinor, setActualMinor] = useState('');
   const [reasonText, setReasonText] = useState('');
   const [needReason, setNeedReason] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +81,10 @@ export function ClosingCashScreen({
     [shift.cashShiftId],
   );
 
+  const countReady = /^[0-9]+$/.test(actualMinor);
+
   async function submitClose() {
+    if (busy || !countReady) return;
     setBusy(true);
     setError(null);
     setErrorCode(null);
@@ -138,7 +142,9 @@ export function ClosingCashScreen({
         return;
       }
       if (code === 'IDEMPOTENCY_CONFLICT') {
-        setError('Close retry conflict — change the count/reason or contact support.');
+        setError(
+          'Close idempotency conflict: this key was already used with a different count or reason. Do not change the amount or reason while retrying the same key — retry the identical request, or contact support if the prior outcome is unknown.',
+        );
         setPhase('count');
         return;
       }
@@ -151,7 +157,7 @@ export function ClosingCashScreen({
       setPhase('count');
     } catch {
       setPhase('unknown');
-      setUnknownHint('Network or timeout — do not assume success. Retry uses the same idempotency key.');
+      setUnknownHint('Network or timeout — do not assume success. Retry uses the same idempotency key and the same count/reason.');
     } finally {
       setBusy(false);
     }
@@ -186,7 +192,7 @@ export function ClosingCashScreen({
           <dt>Closed at</dt>
           <dd>{closed.closedAt ?? '—'}</dd>
         </dl>
-        <button type="button" onClick={() => onClosed(closed)}>
+        <button type="button" data-testid="close-done" onClick={() => onClosed(closed)}>
           Done
         </button>
       </main>
@@ -203,9 +209,10 @@ export function ClosingCashScreen({
         Terminal {terminal.outletName} / {terminal.terminalCode} · Shift{' '}
         <code>{shift.cashShiftId.slice(0, 8)}…</code>
       </p>
-      <p className="closing-cash-screen__hint">
-        Opening float (informational): {shift.openingAmountMinor} {shift.currencyCode}. Server
-        computes expected at close — not shown as authoritative until confirmed.
+      <p className="closing-cash-screen__hint" data-testid="close-opening-hint">
+        Opening float (informational only — not a suggested count): {shift.openingAmountMinor}{' '}
+        {shift.currencyCode}. Server computes expected at close — enter the cash you physically
+        counted.
       </p>
       <label>
         Counted cash ({shift.currencyCode})
@@ -214,8 +221,9 @@ export function ClosingCashScreen({
           inputMode="numeric"
           autoComplete="off"
           data-testid="close-actual-input"
+          placeholder="Enter counted amount"
           value={actualMinor}
-          onChange={(ev) => setActualMinor(ev.target.value.replace(/\D/g, '').slice(0, 18) || '0')}
+          onChange={(ev) => setActualMinor(ev.target.value.replace(/\D/g, '').slice(0, 18))}
           disabled={busy}
         />
       </label>
@@ -238,7 +246,7 @@ export function ClosingCashScreen({
       ) : null}
       {phase === 'unknown' ? (
         <p role="status" data-testid="close-unknown">
-          UNKNOWN — {unknownHint}. Safe to retry (same idempotency key).
+          UNKNOWN — {unknownHint}. Safe to retry (same idempotency key and same count/reason).
         </p>
       ) : null}
       {errorCode === 'FORBIDDEN' ? (
@@ -249,7 +257,7 @@ export function ClosingCashScreen({
       <button
         type="button"
         data-testid="close-submit"
-        disabled={busy || !/^[0-9]+$/.test(actualMinor)}
+        disabled={busy || !countReady}
         onClick={() => void submitClose()}
       >
         {busy ? 'Closing…' : phase === 'unknown' ? 'Retry close' : 'Confirm close'}
