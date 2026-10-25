@@ -212,8 +212,9 @@ Single transaction: lock original Payment `FOR UPDATE` → lock **current OPEN**
 ### Negative / follow-ups
 
 - Fiscal/CARD/partial commercial still Level C
-- Cross-shift cash returns unsupported under R2/R3 recommendation
+- CLOSED CashShift expected rewrite remains unsupported; historical Payment via **R3-D** (pay from current OPEN) is PROPOSED pending PO confirm — not a reopen of CLOSED
 - UI POS-REFUND still needs API contract after Accept
+- VietQR refund capability + LEGAL GATE G2 / fiscal correction policy remain external pilot-complete gates
 
 ### Explicitly out
 

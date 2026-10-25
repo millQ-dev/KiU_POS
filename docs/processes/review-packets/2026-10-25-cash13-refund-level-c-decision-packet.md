@@ -235,15 +235,17 @@ Full matrices (options / recommendation / risks / pilot / module impact / requir
 | C4 | SAFE_DROP vs Close | Record-only in pilot; confirm optional later |
 | C5 | Terminal scope | Movement only on CashShift Terminal |
 | C6 | Who CASH_IN | Cashier with `cash_drawer.in` (≠ Open float) |
-| R1 | Partial refund | **PO ACCEPTED F4Б:** partial ≤ remaining (see F4Б reconciliation packet) |
-| R2 | Open-shift only | Current OPEN required |
-| R3 | Cross-shift | Forbidden in C0 |
-| R4 | CARD/VietQR | Separate ADR after CASH |
+| R1 | Partial refund | **PO ACCEPTED F4Б:** partial ≤ remaining |
+| R2 | Drawer payout | Cash leaves **current OPEN** only |
+| R3 | Historical Payment | **PROPOSED R3-D:** historical Payment OK; pay current OPEN; CLOSED immutable (confirm) |
+| R4 | CARD/VietQR | CARD deferred; **VietQR refund capability verified** before pilot complete |
 | R5 | Voids | Distinct; defer voids |
-| R6 | Fiscal correction | Out of PAY-REFUND package (separate FISC Level C) |
-| R7 | Order commercial | Payment+drawer only (ADR-0028) |
+| R6 | Fiscal | Fiscal owns corrections; **LEGAL GATE G2** + execution policy OPEN; no fake success |
+| R7 | Order refs | Soft Order/line refs; **no** commercial/inventory rewrite |
 | R8 | Refund grants | `payments.refund_cash` + approve/limit |
 | R9 | vs Settlement abort | Strictly separate; no silent abort→refund |
+
+> **Supersession:** For F4Б-era questions, the authoritative 15-row review-candidate matrix is `2026-10-25-cash13-refund-po-f4b-reconciliation.md` §3 — not older full-only / forbid-cross-shift wording.
 
 ### Explicitly deferred (do not invent)
 
