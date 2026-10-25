@@ -237,13 +237,13 @@ export function App() {
       <CashierShell
         mode="production"
         context={cashierContext}
-        onCloseCashShift={
-          activeShift && activeTerminal
-            ? () => {
+        {...(activeShift && activeTerminal
+          ? {
+              onCloseCashShift: () => {
                 setClosingCash(true);
-              }
-            : undefined
-        }
+              },
+            }
+          : {})}
         onSignOut={() => {
           void handleLogout();
         }}
