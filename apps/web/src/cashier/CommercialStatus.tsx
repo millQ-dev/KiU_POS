@@ -75,6 +75,7 @@ export function CommercialStatusPanel({
         <button
           type="button"
           className="pos-commercial__accept"
+          data-testid="accept-commercial"
           disabled={!editable || refreshing || accepting}
           onClick={onAcceptCurrentPrices}
         >

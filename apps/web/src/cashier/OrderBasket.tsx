@@ -22,6 +22,9 @@ type Props = {
   acceptingCommercial: boolean;
   settlement: SettlementProjection | null;
   settlementBusy: boolean;
+  terminalId?: string | null;
+  legalEntityId?: string | null;
+  outletId?: string | null;
   onSelectLine: (lineId: string | null) => void;
   onUpdateQuantity: (line: OrderLine, quantity: string) => void;
   onRemoveLine: (line: OrderLine) => void;
@@ -29,6 +32,7 @@ type Props = {
   onAcceptCurrentPrices: () => void;
   onOpenCheckout: () => void;
   onAbortCheckout: () => void;
+  onSettlementRefresh: () => Promise<void>;
   onCancelOrder: () => void;
   onNewOrder: () => void;
 };
@@ -49,6 +53,9 @@ export function OrderBasketPanel({
   acceptingCommercial,
   settlement,
   settlementBusy,
+  terminalId,
+  legalEntityId,
+  outletId,
   onSelectLine,
   onUpdateQuantity,
   onRemoveLine,
@@ -56,6 +63,7 @@ export function OrderBasketPanel({
   onAcceptCurrentPrices,
   onOpenCheckout,
   onAbortCheckout,
+  onSettlementRefresh,
   onCancelOrder,
   onNewOrder,
 }: Props) {
@@ -147,8 +155,12 @@ export function OrderBasketPanel({
         commercialAccepted={!!commercialAccepted}
         editableOrder={editable && !!order}
         busy={mutationBusy || settlementBusy || loading}
+        terminalId={terminalId ?? null}
+        legalEntityId={legalEntityId ?? order?.legalEntityId ?? null}
+        outletId={outletId ?? order?.outletId ?? null}
         onOpenCheckout={onOpenCheckout}
         onAbortCheckout={onAbortCheckout}
+        onSettlementRefresh={onSettlementRefresh}
       />
 
       <footer className="pos-basket__footer">
@@ -164,7 +176,7 @@ export function OrderBasketPanel({
         )}
         <p className="pos-basket__note">
           Authoritative merchandise gross and Customer Payable come from backend. No frontend Money
-          arithmetic. No Cash/Card/QR in this shell.
+          arithmetic. Cash via authenticated ReceiveCash only.
         </p>
       </footer>
     </aside>

@@ -249,6 +249,58 @@ export class PaymentsService {
     return res.rows[0] ? mapTender(res.rows[0]) : null;
   }
 
+  /**
+   * Server-authoritative tender catalog for a LegalEntity (read-only).
+   * Optional instrumentFamily filter (e.g. CASH for ReceiveCash UX).
+   * When outletId is provided, verifies Outlet belongs to the same LegalEntity (no new money rules).
+   */
+  async listEnabledTenders(input: {
+    tenantId: string;
+    legalEntityId: string;
+    outletId?: string | null;
+    instrumentFamily?: string | null;
+  }): Promise<TenderDefinitionRow[]> {
+    const le = await this.pool.query<{ tenant_id: string }>(
+      `SELECT tenant_id FROM legal_entity WHERE legal_entity_id = $1`,
+      [input.legalEntityId],
+    );
+    if (!le.rows[0] || le.rows[0].tenant_id !== input.tenantId) {
+      throw new DomainValidationError('VALIDATION', 'legalEntityId does not belong to tenantId');
+    }
+    if (input.outletId) {
+      const outlet = await this.pool.query<{ legal_entity_id: string; tenant_id: string }>(
+        `SELECT legal_entity_id, tenant_id FROM outlet WHERE outlet_id = $1`,
+        [input.outletId],
+      );
+      if (
+        !outlet.rows[0] ||
+        outlet.rows[0].tenant_id !== input.tenantId ||
+        outlet.rows[0].legal_entity_id !== input.legalEntityId
+      ) {
+        throw new DomainValidationError(
+          'VALIDATION',
+          'outletId does not belong to tenantId/legalEntityId',
+        );
+      }
+    }
+    const family = input.instrumentFamily?.trim().toUpperCase() || null;
+    const res = family
+      ? await this.pool.query<TenderDb>(
+          `SELECT * FROM tender_definition
+           WHERE tenant_id = $1 AND legal_entity_id = $2 AND enabled = TRUE
+             AND UPPER(COALESCE(instrument_family, '')) = $3
+           ORDER BY code ASC`,
+          [input.tenantId, input.legalEntityId, family],
+        )
+      : await this.pool.query<TenderDb>(
+          `SELECT * FROM tender_definition
+           WHERE tenant_id = $1 AND legal_entity_id = $2 AND enabled = TRUE
+           ORDER BY code ASC`,
+          [input.tenantId, input.legalEntityId],
+        );
+    return res.rows.map(mapTender);
+  }
+
   /** Tenant + optional outlet for a SettlementCheck (via SettlementGroup → Order). */
   async resolveOutletForSettlementCheck(
     settlementCheckId: string,
