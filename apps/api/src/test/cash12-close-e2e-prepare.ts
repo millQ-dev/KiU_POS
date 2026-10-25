@@ -28,6 +28,7 @@ const FIXTURE_PATH = process.env.E2E_FIXTURE_PATH;
 if (!FIXTURE_PATH) {
   throw new Error('E2E_FIXTURE_PATH is required');
 }
+const fixtureOutPath: string = FIXTURE_PATH;
 
 /** Same pepper resolution as the running API (honours IDENTITY_PIN_PEPPER). */
 const PEPPER = resolvePinPepper(loadEnv());
@@ -141,8 +142,8 @@ async function main() {
       pceAmountMinor: '25000',
       expectedWithPceMinor: '125000',
     };
-    writeFileSync(FIXTURE_PATH, JSON.stringify(fixture, null, 2));
-    console.log(`e2e fixture written: ${FIXTURE_PATH}`);
+    writeFileSync(fixtureOutPath, JSON.stringify(fixture, null, 2));
+    console.log(`e2e fixture written: ${fixtureOutPath}`);
   } finally {
     await pool.end();
   }
