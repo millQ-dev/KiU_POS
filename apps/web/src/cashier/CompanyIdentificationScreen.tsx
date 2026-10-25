@@ -70,7 +70,7 @@ export function CompanyIdentificationScreen({ onResolved }: Props) {
   }
 
   return (
-    <main className="company-id-screen">
+    <main className="company-id-screen" data-testid="company-id-screen">
       <h1>MillQ</h1>
       <p>Enter Company ID to continue</p>
       <form onSubmit={submit}>
@@ -78,6 +78,7 @@ export function CompanyIdentificationScreen({ onResolved }: Props) {
           Company ID
           <input
             name="companyCode"
+            data-testid="company-code-input"
             autoComplete="organization"
             value={companyCode}
             onChange={(ev) => setCompanyCode(ev.target.value)}
@@ -85,7 +86,7 @@ export function CompanyIdentificationScreen({ onResolved }: Props) {
           />
         </label>
         {error ? <p role="alert">{error}</p> : null}
-        <button type="submit" disabled={busy || companyCode.trim().length < 3}>
+        <button type="submit" data-testid="company-continue" disabled={busy || companyCode.trim().length < 3}>
           Continue
         </button>
       </form>

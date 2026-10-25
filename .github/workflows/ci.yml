@@ -238,6 +238,16 @@ jobs:
             exit "$VITEST_EC"
           fi
           node scripts/ci/assert-vitest-no-skips.mjs "$REPORT" --min-passed=8 --label=cash12-close
+      - name: CASH1.2 CloseCashShift browser E2E (fail-closed)
+        env:
+          DATABASE_URL: ${{ steps.dbs.outputs.pos_url }}
+        run: |
+          set -euo pipefail
+          POS_DB="${{ steps.dbs.outputs.pos_db }}"
+          export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${POS_DB}"
+          node scripts/ci/assert-disposable-database-url.mjs "$DATABASE_URL"
+          pnpm --filter @millq/e2e-cash12-close exec playwright install --with-deps chromium
+          pnpm --filter @millq/e2e-cash12-close run test
       - name: Migrate runner acceptance (fail-closed)
         env:
           DATABASE_URL: ${{ steps.dbs.outputs.migrate_url }}

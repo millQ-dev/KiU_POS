@@ -64,7 +64,7 @@ export function PinAuthScreen({ realm, onAuthenticated, onChangeCompany }: Props
   }
 
   return (
-    <main className="pin-auth-screen">
+    <main className="pin-auth-screen" data-testid="pin-auth-screen">
       <h1>{realm.displayName}</h1>
       <p>Company ID: {realm.companyCode}</p>
       <form onSubmit={submit}>
@@ -75,13 +75,14 @@ export function PinAuthScreen({ realm, onAuthenticated, onChangeCompany }: Props
             type="password"
             inputMode="numeric"
             autoComplete="current-password"
+            data-testid="pin-input"
             value={pin}
             onChange={(ev) => setPin(ev.target.value.replace(/\D/g, '').slice(0, 12))}
             disabled={busy}
           />
         </label>
         {error ? <p role="alert">{error}</p> : null}
-        <button type="submit" disabled={busy || pin.length < 4}>
+        <button type="submit" data-testid="pin-submit" disabled={busy || pin.length < 4}>
           Sign in
         </button>
       </form>
