@@ -33,8 +33,10 @@ function mapError(err: unknown): { status: number; body: Record<string, unknown>
   if (err instanceof CashDomainError) {
     const conflict = new Set([
       'CASH_SHIFT_ALREADY_OPEN',
+      'CASH_SHIFT_ALREADY_CLOSED',
       'IDEMPOTENCY_CONFLICT',
       'APPROVAL_REQUIRED',
+      'EXPECTED_MISMATCH',
     ]);
     const status =
       err.code === 'NOT_FOUND'
@@ -135,6 +137,42 @@ export async function registerCashRoutes(
       }
       const shift = await cash.openShift(principal, req.body);
       return reply.code(201).send(shift);
+    } catch (err) {
+      const mapped = mapError(err);
+      return reply.code(mapped.status).send(mapped.body);
+    }
+  });
+
+  app.post('/api/v1/cash/shifts/close', async (req, reply) => {
+    try {
+      const body = (req.body ?? {}) as {
+        cashShiftId?: string;
+        tenantId?: string;
+        status?: unknown;
+        closedByUserId?: unknown;
+        closedAt?: unknown;
+        differenceMinor?: unknown;
+        varianceKind?: unknown;
+        actorUserId?: unknown;
+      };
+      // Session + CSRF only — grant matrix (balanced/surplus vs shortage) is server-side in Cash.
+      const principal = await requireFinancialSession(req, finAuth);
+      rejectTenantAuthorityInjection(principal, body.tenantId);
+      if (
+        body.status !== undefined ||
+        body.closedByUserId !== undefined ||
+        body.closedAt !== undefined ||
+        body.differenceMinor !== undefined ||
+        body.varianceKind !== undefined ||
+        body.actorUserId !== undefined
+      ) {
+        return reply.code(400).send({
+          error: 'VALIDATION',
+          message: 'Authoritative fields are not caller-settable',
+        });
+      }
+      const shift = await cash.closeShift(principal, req.body);
+      return reply.code(200).send(shift);
     } catch (err) {
       const mapped = mapError(err);
       return reply.code(mapped.status).send(mapped.body);
