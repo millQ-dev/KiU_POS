@@ -19,6 +19,20 @@ export type OpenCashShift = {
   openedAt: string;
 };
 
+/** Server close evidence (ADR-0046) — never client-authored. */
+export type ClosedCashShift = OpenCashShift & {
+  status: 'CLOSED' | string;
+  closedAt: string | null;
+  closedByUserId: string | null;
+  actualAmountMinor: string | null;
+  expectedAmountMinor: string | null;
+  differenceMinor: string | null;
+  varianceKind: 'BALANCED' | 'SURPLUS' | 'SHORTAGE' | string | null;
+  closeReasonText: string | null;
+  closeIdempotencyKey: string | null;
+  expectedSourceRefs: string[] | null;
+};
+
 /** Cookie-authenticated fetch — browser Origin/Referer for CSRF on mutations. */
 export function sessionFetch(path: string, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);

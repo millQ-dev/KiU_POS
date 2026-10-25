@@ -45,6 +45,8 @@ type Props = {
   mode?: 'dev' | 'production';
   onChangeContext?: () => void;
   onSignOut?: () => void;
+  /** Production CASH1.2 — open CloseCashShift UI (POS-SHIFT surface). */
+  onCloseCashShift?: () => void;
 };
 
 function feedbackForApiError(err: ApiError): string {
@@ -75,6 +77,7 @@ export function CashierShell({
   mode = 'dev',
   onChangeContext,
   onSignOut,
+  onCloseCashShift,
 }: Props) {
   const production = mode === 'production';
   const [surface, setSurface] = useState<ResolvedPosSurface | null>(null);
@@ -467,6 +470,16 @@ export function CashierShell({
           {!production && onChangeContext ? (
             <button type="button" className="pos-shell__btn" onClick={onChangeContext}>
               Change context
+            </button>
+          ) : null}
+          {production && onCloseCashShift ? (
+            <button
+              type="button"
+              className="pos-shell__btn"
+              data-testid="open-close-cash-shift"
+              onClick={onCloseCashShift}
+            >
+              Close cash shift
             </button>
           ) : null}
           {production && onSignOut ? (

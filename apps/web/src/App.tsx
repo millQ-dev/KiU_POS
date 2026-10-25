@@ -22,6 +22,7 @@ import {
   DEV_CASHIER_STORAGE_KEY,
   isDevCashierPathEnabled,
 } from './cashier/devCashierGate.js';
+import { ClosingCashScreen } from './cashier/ClosingCashScreen.js';
 import { OpeningCashScreen } from './cashier/OpeningCashScreen.js';
 import { PinAuthScreen } from './cashier/PinAuthScreen.js';
 import { GuestMenuPage } from './guest/GuestMenuPage.js';
@@ -61,6 +62,9 @@ export function App() {
   const [authUser, setAuthUser] = useState<SessionUser | null>(null);
   const [sessionPhase, setSessionPhase] = useState<SessionPhase>('idle');
   const [cashierContext, setCashierContext] = useState<CashierContext | null>(null);
+  const [activeShift, setActiveShift] = useState<OpenCashShift | null>(null);
+  const [activeTerminal, setActiveTerminal] = useState<TerminalTopology | null>(null);
+  const [closingCash, setClosingCash] = useState(false);
   const [contextError, setContextError] = useState<string | null>(null);
   /** Bumps to cancel in-flight session resume and force a fresh resolve when needed. */
   const [sessionEpoch, setSessionEpoch] = useState(0);
@@ -70,6 +74,9 @@ export function App() {
     bootstrapGen.current += 1;
     setAuthUser(null);
     setCashierContext(null);
+    setActiveShift(null);
+    setActiveTerminal(null);
+    setClosingCash(false);
     setContextError(null);
   }, []);
 
@@ -98,14 +105,29 @@ export function App() {
           terminal,
         });
         setContextError(null);
+        setActiveShift(shift);
+        setActiveTerminal(terminal);
+        setClosingCash(false);
         setCashierContext(ctx);
       } catch {
         setCashierContext(null);
+        setActiveShift(null);
+        setActiveTerminal(null);
+        setClosingCash(false);
         setContextError('Cash shift / terminal topology mismatch — cannot enter cashier');
       }
     },
     [],
   );
+
+  const leaveCashierAfterClose = useCallback(() => {
+    // Session preserved; OPEN CashShift cleared — back to OpeningCashScreen.
+    setCashierContext(null);
+    setActiveShift(null);
+    setActiveTerminal(null);
+    setClosingCash(false);
+    setContextError(null);
+  }, []);
 
   async function handleLogout() {
     await logoutSession();
@@ -182,10 +204,29 @@ export function App() {
         onAuthenticated={(u) => {
           setAuthUser(u);
           setCashierContext(null);
+          setActiveShift(null);
+          setActiveTerminal(null);
+          setClosingCash(false);
           setContextError(null);
         }}
         onChangeCompany={() => {
           void handleChangeCompany();
+        }}
+      />
+    );
+  }
+
+  if (cashierContext && closingCash && activeShift && activeTerminal && authUser && realm) {
+    return (
+      <ClosingCashScreen
+        user={authUser}
+        realm={realm}
+        shift={activeShift}
+        terminal={activeTerminal}
+        onClosed={() => leaveCashierAfterClose()}
+        onCancel={() => setClosingCash(false)}
+        onSignOutForManager={() => {
+          void handleLogout();
         }}
       />
     );
@@ -196,6 +237,13 @@ export function App() {
       <CashierShell
         mode="production"
         context={cashierContext}
+        {...(activeShift && activeTerminal
+          ? {
+              onCloseCashShift: () => {
+                setClosingCash(true);
+              },
+            }
+          : {})}
         onSignOut={() => {
           void handleLogout();
         }}
