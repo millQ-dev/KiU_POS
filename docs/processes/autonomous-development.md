@@ -68,7 +68,7 @@ Pipeline:
 
 For Level **A** and **B**, when the change stays inside approved scope, Accepted ADRs, and current Notion PO decisions, the Implementation Agent runs the **full** cycle without stopping after each intermediate gate:
 
-`Origin branch → implementation → tests → Origin PR → independent reviews → fixes → mandatory Depot CI → merge-when-ready → GitHub backup`
+`Origin branch → implementation → tests → Origin PR → independent reviews (distinct Origin principal) → fixes → mandatory Depot CI → merge-when-ready → GitHub backup (MillQ Origin Backup App; see origin-github-backup-runbook.md)`
 
 Do **not** pause for owner GO after PR open, after green CI alone, or after content APPROVE, unless a gate fails or the work escalates.
 
@@ -143,7 +143,7 @@ Check:
 
 Result: `APPROVE` or `REQUEST CHANGES`. The Review Agent does **not** arm merge-when-ready. That is the Implementation Agent’s job.
 
-Self-approval is invalid even if the same person launches both agents. The **contexts** must be independent.
+Self-approval is invalid even if the same person launches both agents. The **contexts** must be independent **and** the Origin principal (`user_*`) must differ from the PR author. Same-account `--approve` is rejected by Origin and is not a substitute. See [`origin-independent-review.md`](origin-independent-review.md).
 
 ### Fix Agent (implementation continuation)
 

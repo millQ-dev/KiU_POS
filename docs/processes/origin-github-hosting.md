@@ -99,7 +99,7 @@ Repo-level rulesets on `millQ-dev/KiU_POS` were empty when last checked from thi
 
 A local `git remote set-url --push github no_push` on developer clones is an extra guard. It does not replace the GitHub rulesets.
 
-Job body: [`scripts/backup-origin-to-github.sh`](../../scripts/backup-origin-to-github.sh). Fast-forward only; no force-push of GitHub `main`. Pushes Origin `main` and Origin tags only. GitHub App installation token required; anonymous push is refused.
+Job body: [`scripts/backup-origin-to-github.sh`](../../scripts/backup-origin-to-github.sh). Fast-forward only; no force-push of GitHub `main`. Pushes Origin `main` and Origin tags only. GitHub App installation token required; anonymous push is refused. Operational restore / drift repair: [`origin-github-backup-runbook.md`](origin-github-backup-runbook.md).
 
 How to trigger it is an owner/platform choice once Origin is detached, for example:
 
