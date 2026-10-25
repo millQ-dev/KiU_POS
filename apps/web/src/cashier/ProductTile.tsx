@@ -36,6 +36,7 @@ export function ProductTile({ slot, busy, onSelect }: Props) {
   return (
     <button
       type="button"
+      data-testid={`pos-slot-${slot.catalogItemId}`}
       className={[
         'pos-tile',
         `pos-tile--${slot.state.toLowerCase()}`,

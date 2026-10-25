@@ -47,6 +47,8 @@ type Props = {
   onSignOut?: () => void;
   /** Production CASH1.2 — open CloseCashShift UI (POS-SHIFT surface). */
   onCloseCashShift?: () => void;
+  /** OPEN CashShift terminal — required for ADR-0038 ReceiveCash. */
+  terminalId?: string | null;
 };
 
 function feedbackForApiError(err: ApiError): string {
@@ -78,6 +80,7 @@ export function CashierShell({
   onChangeContext,
   onSignOut,
   onCloseCashShift,
+  terminalId = null,
 }: Props) {
   const production = mode === 'production';
   const [surface, setSurface] = useState<ResolvedPosSurface | null>(null);
@@ -443,6 +446,19 @@ export function CashierShell({
     });
   };
 
+  const onSettlementRefresh = async () => {
+    if (!order) return;
+    try {
+      const res = await posApi.getLiveSettlement(order.orderId);
+      setSettlement(res.settlement);
+      if (res.settlement?.state === 'SATISFIED') {
+        setFeedback('Settlement SATISFIED — cash collection recorded (fiscal CompleteOrder still blocked)');
+      }
+    } catch (err) {
+      await handleMutationError(err, order.orderId);
+    }
+  };
+
   return (
     <div className="pos-shell">
       <header className="pos-shell__header">
@@ -551,6 +567,9 @@ export function CashierShell({
             acceptingCommercial={acceptingCommercial}
             settlement={liveSettlement}
             settlementBusy={settlementBusy}
+            terminalId={terminalId}
+            legalEntityId={context.legalEntityId}
+            outletId={context.outletId}
             onSelectLine={setSelectedLineId}
             onUpdateQuantity={onUpdateQuantity}
             onRemoveLine={onRemoveLine}
@@ -558,6 +577,7 @@ export function CashierShell({
             onAcceptCurrentPrices={onAcceptCurrentPrices}
             onOpenCheckout={onOpenCheckout}
             onAbortCheckout={onAbortCheckout}
+            onSettlementRefresh={onSettlementRefresh}
             onCancelOrder={onCancelOrder}
             onNewOrder={() => {
               setOrder(null);

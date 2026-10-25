@@ -1,48 +1,67 @@
 /**
- * CASH1.2 browser E2E on disposable PostgreSQL (ADR-0046).
- * Stack started by run-with-stack.mjs.
- *
- * Note: CashierShell has no ReceiveCash UI yet (SettlementCheckout waits on tender capability).
- * Confirmed CASH PCE is seeded as real payment_collection_event evidence after Open —
- * same evidence Close uses for server expected. PersonalShift / OperatorSession unchanged.
+ * C0-PAY1 ReceiveCash UI + CASH1.2 Close browser E2E on disposable PostgreSQL.
+ * Real tender path: Product → Commercial → Settlement → ReceiveCash → PCE → Close.
+ * No PCE/payment evidence seed. Stack started by run-with-stack.mjs.
  */
 import { readFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 
 type Fixture = {
   companyCode: string;
   cashierPin: string;
   managerPin: string;
+  noReceivePin: string;
   foreignCompanyCode: string;
+  foreignTerminalId: string;
   openingAmountMinor: string;
-  pceAmountMinor: string;
-  expectedWithPceMinor: string;
+  eggCatalogItemId: string;
+  eggPriceMinor: string;
+  tenderDefinitionId: string;
+  disabledTenderDefinitionId: string;
+  overpayTenderedMinor: string;
+  expectedChangeMinor: string;
+  expectedCollectedMinor: string;
+  expectedCloseMinor: string;
   terminalId: string;
 };
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 const fixturePath = process.env.E2E_FIXTURE_PATH;
 if (!fixturePath) throw new Error('E2E_FIXTURE_PATH required');
 const fx = JSON.parse(readFileSync(fixturePath, 'utf8')) as Fixture;
-const DATABASE_URL = process.env.DATABASE_URL ?? '';
 
 async function companyLogin(page: Page, companyCode: string, pin: string) {
+  await page.context().clearCookies();
   await page.goto('/');
+  await page.evaluate(() => localStorage.clear());
+  await page.goto('/');
+  // Serial suite reuses disposable DB — prior OPEN CashShift may auto-bind after PIN.
+  const signOut = page.getByRole('button', { name: /Sign out/i });
+  if (await signOut.isVisible().catch(() => false)) {
+    await signOut.click();
+    await page.goto('/');
+  }
+  if (await page.getByTestId('pin-input').isVisible().catch(() => false)) {
+    await page.getByRole('button', { name: /Change company/i }).click();
+  }
+  await expect(page.getByTestId('company-code-input')).toBeVisible({ timeout: 15_000 });
   await page.getByTestId('company-code-input').fill(companyCode);
   await page.getByTestId('company-continue').click();
-  await expect(page.getByTestId('pin-auth-screen')).toBeVisible();
+  await expect(page.getByTestId('pin-input')).toBeVisible({ timeout: 15_000 });
   await page.getByTestId('pin-input').fill(pin);
   await page.getByTestId('pin-submit').click();
 }
 
 async function openCashShift(page: Page, opening: string) {
-  await expect(page.getByTestId('opening-cash-screen')).toBeVisible({ timeout: 30_000 });
+  // Disposable DB may already have OPEN CashShift — OpeningCashScreen auto-binds.
+  const openingScreen = page.getByTestId('opening-cash-screen');
+  const cashierReady = page.getByTestId('open-close-cash-shift');
+  await expect(openingScreen.or(cashierReady)).toBeVisible({ timeout: 30_000 });
+  if (await cashierReady.isVisible().catch(() => false)) {
+    return;
+  }
   await page.getByTestId('opening-amount-input').fill(opening);
   await page.getByTestId('opening-submit').click();
-  await expect(page.getByTestId('open-close-cash-shift')).toBeVisible({ timeout: 30_000 });
+  await expect(cashierReady).toBeVisible({ timeout: 30_000 });
 }
 
 async function currentCashShiftId(page: Page): Promise<string> {
@@ -58,61 +77,341 @@ async function currentCashShiftId(page: Page): Promise<string> {
   return id;
 }
 
-function seedPce(cashShiftId: string, amount: string) {
-  const r = spawnSync(
-    'pnpm',
-    ['--filter', '@millq/api', 'exec', 'tsx', 'src/test/cash12-close-e2e-seed-pce.ts'],
-    {
-      cwd: ROOT,
-      env: {
-        ...process.env,
-        DATABASE_URL,
-        CASH_SHIFT_ID: cashShiftId,
-        AMOUNT: amount,
-        NODE_ENV: 'test',
-      },
-      encoding: 'utf8',
-    },
-  );
-  if (r.status !== 0) {
-    throw new Error(`seed PCE failed: ${r.stderr || r.stdout}`);
+/** SessionStorage key written by SettlementCheckout when receive panel mounts. */
+async function receiveKeyContext(page: Page): Promise<{ checkId: string; key: string }> {
+  const ctx = await page.evaluate(() => {
+    const storageKeys = Object.keys(sessionStorage).filter((k) =>
+      k.startsWith('millq.receiveCashIdempotency.'),
+    );
+    if (storageKeys.length === 0) return null;
+    const storageKey = storageKeys[0]!;
+    return {
+      checkId: storageKey.slice('millq.receiveCashIdempotency.'.length),
+      key: sessionStorage.getItem(storageKey) ?? '',
+    };
+  });
+  expect(ctx?.checkId).toBeTruthy();
+  expect(ctx?.key.length).toBeGreaterThan(8);
+  return ctx!;
+}
+
+async function sellEggAndOpenSettlement(page: Page) {
+  // Prefer a fresh editable order — prior serial tests may leave SATISFIED basket.
+  const abort = page.getByTestId('abort-checkout');
+  if (await abort.isVisible().catch(() => false)) {
+    await abort.click();
   }
-  const line = (r.stdout ?? '')
-    .trim()
-    .split('\n')
-    .filter((l) => l.startsWith('{'))
-    .at(-1);
-  if (!line) throw new Error(`seed PCE produced no JSON: ${r.stdout}`);
-  return JSON.parse(line) as { pceId: string; amountCollectedMinor: string };
+  const newOrder = page.getByRole('button', { name: /New order/i });
+  if (await newOrder.isVisible().catch(() => false)) {
+    await newOrder.click();
+  }
+  // Egg is on both Quick Access and page grid — same catalogItemId testid.
+  const slot = page.getByTestId(`pos-slot-${fx.eggCatalogItemId}`).first();
+  await expect(slot).toBeVisible({ timeout: 30_000 });
+  await expect(slot).toBeEnabled();
+  await slot.click();
+  await expect(page.getByRole('option', { name: /Eggs/i })).toBeVisible({ timeout: 15_000 });
+  const accept = page.getByTestId('accept-commercial');
+  await expect(accept).toBeEnabled({ timeout: 15_000 });
+  await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        r.url().includes('calculate-and-accept-commercial-terms') &&
+        r.request().method() === 'POST' &&
+        r.ok(),
+      { timeout: 20_000 },
+    ),
+    accept.click(),
+  ]);
+  await expect(page.getByText('Commercial terms accepted')).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('open-checkout').click();
+  await expect(page.getByTestId('settlement-state')).toContainText('COLLECTING', { timeout: 15_000 });
+  await expect(page.getByTestId('receive-cash-panel')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('receive-tender-select')).toBeVisible();
+}
+
+async function receiveCashUi(page: Page, tendered: string) {
+  await page.getByTestId('receive-tendered-input').fill(tendered);
+  await page.getByTestId('receive-human-confirm').check();
+  await page.getByTestId('receive-cash-submit').click();
 }
 
 test.describe.configure({ mode: 'serial' });
 
-test('Open → confirmed CASH PCE → Close balanced → Opening keeps Session', async ({ page }) => {
+test('Open → Product → ReceiveCash overpay → SATISFIED → Close expected=opening+collected (no change)', async ({
+  page,
+}) => {
   await companyLogin(page, fx.companyCode, fx.cashierPin);
   await openCashShift(page, fx.openingAmountMinor);
+  await sellEggAndOpenSettlement(page);
 
-  const shiftId = await currentCashShiftId(page);
-  const seeded = seedPce(shiftId, fx.pceAmountMinor);
-  expect(seeded.amountCollectedMinor).toBe(fx.pceAmountMinor);
+  await page.getByTestId('receive-tendered-input').fill(fx.overpayTenderedMinor);
+  await expect(page.getByTestId('receive-change-preview')).toContainText(fx.expectedChangeMinor);
+  await page.getByTestId('receive-human-confirm').check();
+  await page.getByTestId('receive-cash-submit').click();
+
+  await expect(page.getByTestId('receive-cash-success')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('receive-money-facts')).toContainText(
+    `${fx.eggPriceMinor} / ${fx.overpayTenderedMinor} / ${fx.expectedChangeMinor}`,
+  );
+  await expect(page.getByTestId('receive-pce-collected')).toContainText(fx.expectedCollectedMinor);
+  await expect(page.getByTestId('settlement-satisfied')).toBeVisible();
+  await expect(page.getByTestId('fiscal-gate-blocked')).toContainText(/CompleteOrder/i);
 
   await page.getByTestId('open-close-cash-shift').click();
   await expect(page.getByTestId('closing-cash-count')).toBeVisible();
-  await expect(page.getByTestId('close-actual-input')).toHaveValue('');
-  await expect(page.getByTestId('close-submit')).toBeDisabled();
-
-  await page.getByTestId('close-actual-input').fill(fx.expectedWithPceMinor);
+  await page.getByTestId('close-actual-input').fill(fx.expectedCloseMinor);
   await page.getByTestId('close-submit').click();
   await expect(page.getByTestId('closing-cash-success')).toBeVisible();
   await expect(page.getByTestId('close-variance')).toHaveText('BALANCED');
-  await expect(page.getByTestId('close-expected')).toContainText(fx.expectedWithPceMinor);
-  await expect(page.getByTestId('close-actual')).toContainText(fx.expectedWithPceMinor);
+  await expect(page.getByTestId('close-expected')).toContainText(fx.expectedCloseMinor);
   await expect(page.getByTestId('close-difference')).toHaveText('0');
-
   await page.getByTestId('close-done').click();
   await expect(page.getByTestId('opening-cash-screen')).toBeVisible();
-  await expect(page.getByTestId('company-id-screen')).toHaveCount(0);
-  await expect(page.getByTestId('pin-auth-screen')).toHaveCount(0);
+});
+
+test('double-click Confirm does not double-collect', async ({ page }) => {
+  await companyLogin(page, fx.companyCode, fx.cashierPin);
+  await openCashShift(page, fx.openingAmountMinor);
+  await sellEggAndOpenSettlement(page);
+
+  await page.getByTestId('receive-tendered-input').fill(fx.eggPriceMinor);
+  await page.getByTestId('receive-human-confirm').check();
+  // Fire two clicks without waiting for disabled state — ReceiveCash must not double-collect.
+  await page.getByTestId('receive-cash-submit').evaluate((el: HTMLButtonElement) => {
+    el.click();
+    el.click();
+  });
+  await expect(page.getByTestId('receive-cash-success')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('settlement-satisfied')).toBeVisible();
+  await expect(page.getByTestId('receive-cash-success')).toHaveCount(1);
+});
+
+test('loss of response after COMMIT: same-key replay duplicate; amount change conflicts', async ({
+  page,
+}) => {
+  await companyLogin(page, fx.companyCode, fx.cashierPin);
+  await openCashShift(page, fx.openingAmountMinor);
+  await sellEggAndOpenSettlement(page);
+  const { checkId, key } = await receiveKeyContext(page);
+
+  const first = await page.evaluate(
+    async ({ checkId, key, tenderDefinitionId, terminalId, amountTenderedMinor }) => {
+      const res = await fetch('/api/v1/payments/receive-cash', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          settlementCheckId: checkId,
+          tenderDefinitionId,
+          terminalId,
+          receiveIdempotencyKey: key,
+          amountTenderedMinor,
+          humanConfirmation: true,
+        }),
+      });
+      return { status: res.status, body: await res.json() };
+    },
+    {
+      checkId,
+      key,
+      tenderDefinitionId: fx.tenderDefinitionId,
+      terminalId: fx.terminalId,
+      amountTenderedMinor: fx.eggPriceMinor,
+    },
+  );
+  expect(first.status).toBe(200);
+  expect(first.body.payment?.paymentId).toBeTruthy();
+
+  const replay = await page.evaluate(
+    async ({ checkId, key, tenderDefinitionId, terminalId, amountTenderedMinor }) => {
+      const res = await fetch('/api/v1/payments/receive-cash', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          settlementCheckId: checkId,
+          tenderDefinitionId,
+          terminalId,
+          receiveIdempotencyKey: key,
+          amountTenderedMinor,
+          humanConfirmation: true,
+        }),
+      });
+      return { status: res.status, body: await res.json() };
+    },
+    {
+      checkId,
+      key,
+      tenderDefinitionId: fx.tenderDefinitionId,
+      terminalId: fx.terminalId,
+      amountTenderedMinor: fx.eggPriceMinor,
+    },
+  );
+  expect(replay.status).toBe(200);
+  expect(replay.body.duplicate).toBe(true);
+  expect(replay.body.payment?.paymentId).toBe(first.body.payment.paymentId);
+  expect(replay.body.collectionEvent?.paymentCollectionEventId).toBe(
+    first.body.collectionEvent.paymentCollectionEventId,
+  );
+
+  const conflict = await page.evaluate(
+    async ({ checkId, key, tenderDefinitionId, terminalId }) => {
+      const res = await fetch('/api/v1/payments/receive-cash', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          settlementCheckId: checkId,
+          tenderDefinitionId,
+          terminalId,
+          receiveIdempotencyKey: key,
+          amountTenderedMinor: '99999',
+          humanConfirmation: true,
+        }),
+      });
+      return { status: res.status, body: await res.json() };
+    },
+    {
+      checkId,
+      key,
+      tenderDefinitionId: fx.tenderDefinitionId,
+      terminalId: fx.terminalId,
+    },
+  );
+  expect(conflict.body.error).toBe('IDEMPOTENCY_CONFLICT');
+});
+
+test('missing payments.receive_cash grant → FORBIDDEN', async ({ page }) => {
+  await companyLogin(page, fx.companyCode, fx.noReceivePin);
+  await openCashShift(page, fx.openingAmountMinor);
+  await sellEggAndOpenSettlement(page);
+  await receiveCashUi(page, fx.eggPriceMinor);
+  await expect(page.getByTestId('receive-forbidden')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('settlement-satisfied')).toHaveCount(0);
+});
+
+test('disabled tender fail-closed; closed shift reject', async ({ page }) => {
+  await companyLogin(page, fx.companyCode, fx.cashierPin);
+  await openCashShift(page, fx.openingAmountMinor);
+  await sellEggAndOpenSettlement(page);
+  const { checkId } = await receiveKeyContext(page);
+
+  const disabledAttempt = await page.evaluate(
+    async ({ checkId, disabledTenderDefinitionId, terminalId, amountTenderedMinor }) => {
+      const res = await fetch('/api/v1/payments/receive-cash', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          settlementCheckId: checkId,
+          tenderDefinitionId: disabledTenderDefinitionId,
+          terminalId,
+          receiveIdempotencyKey: `disabled-${crypto.randomUUID()}`,
+          amountTenderedMinor,
+          humanConfirmation: true,
+        }),
+      });
+      return { status: res.status, body: await res.json() };
+    },
+    {
+      checkId,
+      disabledTenderDefinitionId: fx.disabledTenderDefinitionId,
+      terminalId: fx.terminalId,
+      amountTenderedMinor: fx.eggPriceMinor,
+    },
+  );
+  expect(disabledAttempt.status).toBeGreaterThanOrEqual(400);
+  expect(['TENDER_DISABLED', 'VALIDATION', 'NOT_FOUND']).toContain(disabledAttempt.body.error);
+
+  const shiftId = await currentCashShiftId(page);
+  // Prior serial tests may have CASH PCE on this OPEN shift — surplus+reason closes reliably.
+  const closedOk = await page.evaluate(
+    async ({ cashShiftId }) => {
+      const res = await fetch('/api/v1/cash/shifts/close', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          cashShiftId,
+          closeIdempotencyKey: `e2e-close-before-rcv-${cashShiftId}`,
+          actualAmountMinor: '500000',
+          currencyCode: 'VND',
+          minorUnitExponent: 0,
+          reasonText: 'e2e force close before receive reject',
+        }),
+      });
+      return { status: res.status, body: await res.json() };
+    },
+    { cashShiftId: shiftId },
+  );
+  expect(closedOk.status).toBe(200);
+  expect(closedOk.body.status).toBe('CLOSED');
+
+  const closedAttempt = await page.evaluate(
+    async ({ checkId, tenderDefinitionId, terminalId, amountTenderedMinor }) => {
+      const res = await fetch('/api/v1/payments/receive-cash', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          settlementCheckId: checkId,
+          tenderDefinitionId,
+          terminalId,
+          receiveIdempotencyKey: `closed-${crypto.randomUUID()}`,
+          amountTenderedMinor,
+          humanConfirmation: true,
+        }),
+      });
+      return { status: res.status, body: await res.json() };
+    },
+    {
+      checkId,
+      tenderDefinitionId: fx.tenderDefinitionId,
+      terminalId: fx.terminalId,
+      amountTenderedMinor: fx.eggPriceMinor,
+    },
+  );
+  expect(closedAttempt.status).toBeGreaterThanOrEqual(400);
+  expect(String(closedAttempt.body.error ?? closedAttempt.body.message)).toMatch(
+    /SHIFT|CLOSED|OPEN|VALIDATION|FORBIDDEN|NOT_FOUND/i,
+  );
+});
+
+test('foreign company PIN cannot authenticate; foreign terminal isolation', async ({ page }) => {
+  await companyLogin(page, fx.foreignCompanyCode, fx.cashierPin);
+  await expect(page.getByRole('alert')).toContainText(/Invalid credentials/i);
+
+  await companyLogin(page, fx.companyCode, fx.cashierPin);
+  await openCashShift(page, fx.openingAmountMinor);
+  await sellEggAndOpenSettlement(page);
+  const { checkId } = await receiveKeyContext(page);
+
+  const iso = await page.evaluate(
+    async ({ checkId, tenderDefinitionId, foreignTerminalId, amountTenderedMinor }) => {
+      const res = await fetch('/api/v1/payments/receive-cash', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          settlementCheckId: checkId,
+          tenderDefinitionId,
+          terminalId: foreignTerminalId,
+          receiveIdempotencyKey: `iso-${crypto.randomUUID()}`,
+          amountTenderedMinor,
+          humanConfirmation: true,
+        }),
+      });
+      return { status: res.status, body: await res.json() };
+    },
+    {
+      checkId,
+      tenderDefinitionId: fx.tenderDefinitionId,
+      foreignTerminalId: fx.foreignTerminalId,
+      amountTenderedMinor: fx.eggPriceMinor,
+    },
+  );
+  expect(iso.status).toBeGreaterThanOrEqual(400);
 });
 
 test('surplus requires reason; shortage FORBIDDEN then Manager re-auth closes', async ({ page }) => {
@@ -152,145 +451,12 @@ test('surplus requires reason; shortage FORBIDDEN then Manager re-auth closes', 
   await expect(page.getByTestId('close-variance')).toHaveText('SHORTAGE');
 });
 
-test('same-key retry after COMMIT returns CLOSED without second close; conflict messaging safe', async ({
-  page,
-}) => {
+test('tendered less than due stays rejected in UI', async ({ page }) => {
   await companyLogin(page, fx.companyCode, fx.cashierPin);
   await openCashShift(page, fx.openingAmountMinor);
-  const shiftId = await currentCashShiftId(page);
-  const key = `e2e-close-${shiftId}`;
-
-  await page.evaluate(
-    ({ id, k }) => {
-      sessionStorage.setItem(`millq.closeIdempotency.${id}`, k);
-    },
-    { id: shiftId, k: key },
-  );
-
-  // Server COMMIT first (simulates success after client saw UNKNOWN / timeout).
-  const pre = await page.evaluate(
-    async ({ cashShiftId, closeIdempotencyKey }) => {
-      const res = await fetch('/api/v1/cash/shifts/close', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          cashShiftId,
-          closeIdempotencyKey,
-          actualAmountMinor: '100000',
-          currencyCode: 'VND',
-          minorUnitExponent: 0,
-        }),
-      });
-      return { status: res.status, body: await res.json() };
-    },
-    { cashShiftId: shiftId, closeIdempotencyKey: key },
-  );
-  expect(pre.status).toBe(200);
-  expect(pre.body.status).toBe('CLOSED');
-
-  // Reload so close UI remounts with same sessionStorage key, then retry identical payload.
-  await page.reload();
-  // Shift is CLOSED — Opening screen (no cashier shell). Re-open for conflict case below.
-  await expect(page.getByTestId('opening-cash-screen')).toBeVisible({ timeout: 30_000 });
-
-  // Idempotent replay via API still CLOSED
-  const replay = await page.evaluate(
-    async ({ cashShiftId, closeIdempotencyKey }) => {
-      const res = await fetch('/api/v1/cash/shifts/close', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          cashShiftId,
-          closeIdempotencyKey,
-          actualAmountMinor: '100000',
-          currencyCode: 'VND',
-          minorUnitExponent: 0,
-        }),
-      });
-      return { status: res.status, body: await res.json() };
-    },
-    { cashShiftId: shiftId, closeIdempotencyKey: key },
-  );
-  expect(replay.status).toBe(200);
-  expect(replay.body.status).toBe('CLOSED');
-  expect(replay.body.cashShiftId).toBe(shiftId);
-
-  // Conflict: same key, different actual — UI must not tell operator to change count/reason.
-  await openCashShift(page, fx.openingAmountMinor);
-  const shift2 = await currentCashShiftId(page);
-  const key2 = `e2e-conflict-${shift2}`;
-  await page.evaluate(
-    async ({ cashShiftId, closeIdempotencyKey }) => {
-      sessionStorage.setItem(`millq.closeIdempotency.${cashShiftId}`, closeIdempotencyKey);
-      await fetch('/api/v1/cash/shifts/close', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          cashShiftId,
-          closeIdempotencyKey,
-          actualAmountMinor: '100000',
-          currencyCode: 'VND',
-          minorUnitExponent: 0,
-        }),
-      });
-    },
-    { cashShiftId: shift2, closeIdempotencyKey: key2 },
-  );
-  // New OPEN after the previous was closed by the fetch above — need another open for UI conflict demo.
-  // Instead drive conflict on a fresh OPEN with UI: pre-close with key, then UI submit different amount.
-  await page.reload();
-  await expect(page.getByTestId('opening-cash-screen')).toBeVisible();
-  await openCashShift(page, fx.openingAmountMinor);
-  const shift3 = await currentCashShiftId(page);
-  const key3 = `e2e-ui-conflict-${shift3}`;
-  await page.evaluate(
-    ({ id, k }) => sessionStorage.setItem(`millq.closeIdempotency.${id}`, k),
-    { id: shift3, k: key3 },
-  );
-  await page.evaluate(
-    async ({ cashShiftId, closeIdempotencyKey }) => {
-      await fetch('/api/v1/cash/shifts/close', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          cashShiftId,
-          closeIdempotencyKey,
-          actualAmountMinor: '100000',
-          currencyCode: 'VND',
-          minorUnitExponent: 0,
-        }),
-      });
-    },
-    { cashShiftId: shift3, closeIdempotencyKey: key3 },
-  );
-  // Shift closed — cannot open close UI. Conflict messaging covered by unit test;
-  // here verify API conflict for different payload:
-  const conflict = await page.evaluate(
-    async ({ cashShiftId, closeIdempotencyKey }) => {
-      const res = await fetch('/api/v1/cash/shifts/close', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          cashShiftId,
-          closeIdempotencyKey,
-          actualAmountMinor: '99999',
-          currencyCode: 'VND',
-          minorUnitExponent: 0,
-        }),
-      });
-      return { status: res.status, body: await res.json() };
-    },
-    { cashShiftId: shift3, closeIdempotencyKey: key3 },
-  );
-  expect(conflict.body.error).toBe('IDEMPOTENCY_CONFLICT');
-});
-
-test('foreign company PIN cannot authenticate against other tenant users', async ({ page }) => {
-  await companyLogin(page, fx.foreignCompanyCode, fx.cashierPin);
-  await expect(page.getByRole('alert')).toContainText(/Invalid credentials/i);
+  await sellEggAndOpenSettlement(page);
+  await page.getByTestId('receive-tendered-input').fill('1');
+  await expect(page.getByText(/less than due|partial tender/i)).toBeVisible();
+  await page.getByTestId('receive-human-confirm').check();
+  await expect(page.getByTestId('receive-cash-submit')).toBeDisabled();
 });

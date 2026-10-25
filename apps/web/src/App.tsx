@@ -237,6 +237,7 @@ export function App() {
       <CashierShell
         mode="production"
         context={cashierContext}
+        terminalId={activeTerminal?.terminalId ?? null}
         {...(activeShift && activeTerminal
           ? {
               onCloseCashShift: () => {

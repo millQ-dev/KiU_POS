@@ -51,3 +51,46 @@
   cursor: not-allowed;
   opacity: 0.6;
 }
+
+.pos-settlement__receive,
+.pos-settlement__success {
+  margin: 0.75rem 0;
+  padding: 0.65rem 0;
+  border-top: 1px dashed var(--color-border, #ccc);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.pos-settlement__receive-title {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.pos-settlement__receive label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.pos-settlement__confirm {
+  flex-direction: row !important;
+  align-items: flex-start;
+  gap: 0.5rem !important;
+}
+
+.pos-settlement__receive input[type='text'],
+.pos-settlement__receive input:not([type]),
+.pos-settlement__receive input[inputmode='numeric'],
+.pos-settlement__receive select,
+.pos-settlement__receive textarea {
+  padding: 0.4rem 0.5rem;
+  font: inherit;
+}
+
+.pos-settlement__fiscal {
+  margin: 0.5rem 0;
+  font-size: 0.8rem;
+  color: var(--color-muted, #666);
+}

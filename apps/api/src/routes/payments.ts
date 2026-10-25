@@ -92,6 +92,39 @@ export async function registerPaymentRoutes(
     permissionKey: PERMISSION_PAYMENTS_RECEIVE_CASH,
   };
 
+  /**
+   * Read enabled TenderDefinitions for the Session tenant + LegalEntity (ADR-0038 config).
+   * outletId is required so outlet-scoped pos.operate grants authorize (SEC-0 assertPermission).
+   */
+  app.get('/api/v1/payments/tenders', async (req, reply) => {
+    try {
+      const q = (req.query ?? {}) as {
+        legalEntityId?: string;
+        outletId?: string;
+        instrumentFamily?: string;
+        tenantId?: string;
+      };
+      if (!q.legalEntityId || !q.outletId) {
+        return reply.code(400).send({
+          error: 'VALIDATION',
+          message: 'legalEntityId and outletId query required',
+        });
+      }
+      const principal = await requireFinancialPrincipal(req, opts, { outletId: q.outletId });
+      rejectTenantAuthorityInjection(principal, q.tenantId);
+      const tenders = await payments.listEnabledTenders({
+        tenantId: principal.tenantId,
+        legalEntityId: q.legalEntityId,
+        outletId: q.outletId,
+        instrumentFamily: q.instrumentFamily ?? null,
+      });
+      return { tenders };
+    } catch (err) {
+      const mapped = mapPaymentError(err);
+      return reply.code(mapped.status).send(mapped.body);
+    }
+  });
+
   app.post('/api/v1/payments/tenders', async (req, reply) => {
     try {
       const principal = await requireFinancialPrincipal(req, opts);

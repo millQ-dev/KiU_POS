@@ -179,6 +179,7 @@ const basketProps = {
   onAcceptCurrentPrices: vi.fn(),
   onOpenCheckout: vi.fn(),
   onAbortCheckout: vi.fn(),
+  onSettlementRefresh: vi.fn(async () => undefined),
   onCancelOrder: vi.fn(),
   onNewOrder: vi.fn(),
 };
@@ -326,7 +327,7 @@ describe('cashier components', () => {
   it('empty basket state and no line-gross math in panel', () => {
     render(<OrderBasketPanel order={null} {...basketProps} />);
     expect(screen.getByText(/Empty/i)).toBeTruthy();
-    expect(screen.getByText(/No Cash\/Card\/QR/i)).toBeTruthy();
+    expect(screen.getByText(/Cash via authenticated ReceiveCash only/i)).toBeTruthy();
   });
 
   it('selects basket line and shows selected visual + editor', () => {
