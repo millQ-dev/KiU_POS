@@ -414,8 +414,24 @@ export function CashierShell({
     void withMutationGuard(async () => {
       setSettlementBusy(true);
       try {
+        // ADR-0037: attempt Tax snapshot before OpenSettlement. When tax_required=FALSE and
+        // no TaxPolicy exists, accept may fail — OpenSettlement remains the fail-closed gate.
+        const commercialKey =
+          commercial?.merchandiseGrossMinor ??
+          commercial?.acceptedGrossMerchandiseMinor ??
+          'na';
+        try {
+          await posApi.acceptTaxSnapshot(order.orderId, {
+            idempotencyKey: `accept-tax:${order.orderId}:${commercialKey}`,
+            businessDateTime: salesPayload(context).salesContext.businessDateTime,
+          });
+        } catch (taxErr) {
+          if (!(taxErr instanceof ApiError) || !String(taxErr.code).startsWith('TAX')) {
+            throw taxErr;
+          }
+        }
         const next = await posApi.openSettlement(order.orderId, {
-          idempotencyKey: `open-settlement:${order.orderId}:${Date.now()}`,
+          idempotencyKey: `open-settlement:${order.orderId}:${commercialKey}`,
         });
         setSettlement(next);
         setFeedback('Checkout opened — Customer Payable frozen');
@@ -452,11 +468,34 @@ export function CashierShell({
       const res = await posApi.getLiveSettlement(order.orderId);
       setSettlement(res.settlement);
       if (res.settlement?.state === 'SATISFIED') {
-        setFeedback('Settlement SATISFIED — cash collection recorded (fiscal CompleteOrder still blocked)');
+        setFeedback(
+          'Settlement SATISFIED — cash collection recorded. Issue fiscal evidence before CompleteOrder.',
+        );
       }
     } catch (err) {
       await handleMutationError(err, order.orderId);
     }
+  };
+
+  const onOrderCompleted = (result: {
+    orderId: string;
+    status: string;
+    businessDate: string;
+    businessOrder: number;
+    goodsIssueId?: string | null;
+  }) => {
+    // Keep completion result mounted until cashier starts a new order (immutable COMPLETED).
+    setFeedback(
+      `Order ${result.status} · chronology ${result.businessDate}#${result.businessOrder}${
+        result.goodsIssueId ? ` · GI ${result.goodsIssueId.slice(0, 8)}` : ''
+      } — start a new order`,
+    );
+    setSelectedLineId(null);
+    setOrder((prev) =>
+      prev && prev.orderId === result.orderId
+        ? { ...prev, status: result.status as typeof prev.status }
+        : prev,
+    );
   };
 
   return (
@@ -570,6 +609,7 @@ export function CashierShell({
             terminalId={terminalId}
             legalEntityId={context.legalEntityId}
             outletId={context.outletId}
+            outletTimeZone="Asia/Ho_Chi_Minh"
             onSelectLine={setSelectedLineId}
             onUpdateQuantity={onUpdateQuantity}
             onRemoveLine={onRemoveLine}
@@ -578,10 +618,12 @@ export function CashierShell({
             onOpenCheckout={onOpenCheckout}
             onAbortCheckout={onAbortCheckout}
             onSettlementRefresh={onSettlementRefresh}
+            onOrderCompleted={onOrderCompleted}
             onCancelOrder={onCancelOrder}
             onNewOrder={() => {
               setOrder(null);
               setSettlement(null);
+              setCommercial(null);
             }}
           />
         </div>

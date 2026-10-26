@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { sessionFetch } from '../api/sessionClient.js';
 import type { SettlementProjection } from '../api/types.js';
+import { allocateTerminalBusinessChronology } from './terminalBusinessChronology.js';
 import './SettlementCheckout.css';
 
 export type CashTenderOption = {
@@ -35,6 +36,28 @@ export type ReceiveCashSuccess = {
   duplicate: boolean;
 };
 
+type FiscalGateView = {
+  status: string;
+  detail?: string | undefined;
+  fiscalAdapterMode?: string | undefined;
+};
+
+type FiscalDocView = {
+  fiscalDocumentId: string;
+  status: string;
+  paymentId: string;
+  paymentCollectionEventId: string;
+  taxOrderSnapshotId: string;
+};
+
+type CompleteResultView = {
+  orderId: string;
+  status: string;
+  businessDate: string;
+  businessOrder: number;
+  goodsIssueId: string | null;
+};
+
 type Props = {
   settlement: SettlementProjection | null;
   commercialAccepted: boolean;
@@ -45,13 +68,19 @@ type Props = {
   legalEntityId?: string | null | undefined;
   /** Outlet scope for tender catalog (outlet-scoped pos.operate). */
   outletId?: string | null | undefined;
+  /** IANA timezone for terminal businessDate (ADR-0003 device chronology). */
+  outletTimeZone?: string | null | undefined;
   onOpenCheckout: () => void;
   onAbortCheckout: () => void;
   /** Reload Settlement from server after ReceiveCash SUCCESS. */
   onSettlementRefresh: () => Promise<void>;
+  /** After CompleteOrder SUCCESS — parent starts a new editable basket. */
+  onOrderCompleted?: ((result: CompleteResultView) => void) | undefined;
 };
 
 const IDEMPOTENCY_PREFIX = 'millq.receiveCashIdempotency.';
+const ISSUE_KEY_PREFIX = 'millq.fiscalIssueIdempotency.';
+const COMPLETE_KEY_PREFIX = 'millq.completeOrderIdempotency.';
 
 function loadOrCreateReceiveKey(checkId: string): string {
   const storageKey = `${IDEMPOTENCY_PREFIX}${checkId}`;
@@ -78,6 +107,31 @@ function clearReceiveKey(checkId: string): void {
   }
 }
 
+function loadOrCreateKeyed(prefix: string, id: string): string {
+  const storageKey = `${prefix}${id}`;
+  try {
+    const existing = sessionStorage.getItem(storageKey);
+    if (existing && existing.length >= 8) return existing;
+  } catch {
+    /* ignore */
+  }
+  const next = `${prefix.slice(6, 10)}-${id}-${crypto.randomUUID()}`.slice(0, 128);
+  try {
+    sessionStorage.setItem(storageKey, next);
+  } catch {
+    /* ignore */
+  }
+  return next;
+}
+
+function clearKeyed(prefix: string, id: string): void {
+  try {
+    sessionStorage.removeItem(`${prefix}${id}`);
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Settlement checkout + C0 ReceiveCash (ADR-0038) on production CashierShell.
  * Client never authors actor, collectedAt, amountCollected, payment/fiscal SUCCESS.
@@ -90,9 +144,11 @@ export function SettlementCheckoutPanel({
   terminalId,
   legalEntityId,
   outletId,
+  outletTimeZone = 'Asia/Ho_Chi_Minh',
   onOpenCheckout,
   onAbortCheckout,
   onSettlementRefresh,
+  onOrderCompleted,
 }: Props) {
   const live =
     settlement && (settlement.state === 'COLLECTING' || settlement.state === 'SATISFIED')
@@ -109,6 +165,7 @@ export function SettlementCheckoutPanel({
     !!legalEntityId &&
     !!outletId &&
     !!primaryCheck;
+  const paymentSatisfied = !!live && live.state === 'SATISFIED';
 
   const [tenders, setTenders] = useState<CashTenderOption[]>([]);
   const [tendersError, setTendersError] = useState<string | null>(null);
@@ -123,10 +180,77 @@ export function SettlementCheckoutPanel({
   /** Locked payload after first submit — UNKNOWN retries must not change amount. */
   const [lockedTendered, setLockedTendered] = useState<string | null>(null);
 
+  const [fiscalGate, setFiscalGate] = useState<FiscalGateView | null>(null);
+  const [fiscalDoc, setFiscalDoc] = useState<FiscalDocView | null>(null);
+  const [fiscalBusy, setFiscalBusy] = useState(false);
+  const [fiscalError, setFiscalError] = useState<string | null>(null);
+  const [fiscalUnknown, setFiscalUnknown] = useState<string | null>(null);
+  const [completeBusy, setCompleteBusy] = useState(false);
+  const [completeError, setCompleteError] = useState<string | null>(null);
+  const [completeUnknown, setCompleteUnknown] = useState<string | null>(null);
+  const [completeResult, setCompleteResult] = useState<CompleteResultView | null>(null);
+  /** Chronology locked after first Complete attempt — UNKNOWN retry must reuse it. */
+  const [lockedChronology, setLockedChronology] = useState<{
+    businessDate: string;
+    businessOrder: number;
+  } | null>(null);
+
   const receiveKey = useMemo(
     () => (primaryCheck ? loadOrCreateReceiveKey(primaryCheck.settlementCheckId) : ''),
     [primaryCheck?.settlementCheckId],
   );
+
+  const issueKey = useMemo(
+    () => (live ? loadOrCreateKeyed(ISSUE_KEY_PREFIX, live.settlementGroupId) : ''),
+    [live?.settlementGroupId],
+  );
+
+  const completeKey = useMemo(
+    () => (live ? loadOrCreateKeyed(COMPLETE_KEY_PREFIX, live.settlementGroupId) : ''),
+    [live?.settlementGroupId],
+  );
+
+  const refreshFiscalGate = useCallback(async () => {
+    if (!live) {
+      setFiscalGate(null);
+      return;
+    }
+    try {
+      const res = await sessionFetch(
+        `/api/v1/settlements/${encodeURIComponent(live.settlementGroupId)}/fiscal-gate`,
+      );
+      const body = (await res.json()) as {
+        gate?: FiscalGateView;
+        fiscalAdapterMode?: string;
+        error?: string;
+        message?: string;
+      };
+      if (!res.ok) {
+        setFiscalGate({
+          status: 'UNAVAILABLE',
+          detail: body.message ?? body.error ?? `HTTP_${res.status}`,
+        });
+        return;
+      }
+      setFiscalGate({
+        status: body.gate?.status ?? 'UNAVAILABLE',
+        ...(body.gate?.detail != null ? { detail: body.gate.detail } : {}),
+        ...(body.fiscalAdapterMode != null
+          ? { fiscalAdapterMode: body.fiscalAdapterMode }
+          : {}),
+      });
+    } catch {
+      setFiscalGate({
+        status: 'UNAVAILABLE',
+        detail: 'Fiscal gate observation failed — do not assume SATISFIED',
+      });
+    }
+  }, [live?.settlementGroupId]);
+
+  useEffect(() => {
+    if (!paymentSatisfied || completeResult) return;
+    void refreshFiscalGate();
+  }, [paymentSatisfied, live?.settlementGroupId, live?.version, completeResult, refreshFiscalGate]);
 
   useEffect(() => {
     if (!canCollect || !legalEntityId || !outletId) {
@@ -258,6 +382,189 @@ export function SettlementCheckoutPanel({
       setReceiveBusy(false);
     }
   }
+
+  async function submitIssueFiscal() {
+    if (!live || !paymentSatisfied || fiscalBusy || completeResult) return;
+    setFiscalBusy(true);
+    setFiscalError(null);
+    setFiscalUnknown(null);
+    try {
+      const res = await sessionFetch('/api/v1/fiscal/documents/issue', {
+        method: 'POST',
+        body: JSON.stringify({
+          settlementGroupId: live.settlementGroupId,
+          issueIdempotencyKey: issueKey,
+        }),
+      });
+      let body: FiscalDocView & { error?: string; message?: string };
+      try {
+        body = (await res.json()) as FiscalDocView & { error?: string; message?: string };
+      } catch {
+        setFiscalUnknown('Issue response was not JSON — do not assume SATISFIED. Retry same key.');
+        return;
+      }
+      if (res.ok && body.fiscalDocumentId) {
+        setFiscalDoc({
+          fiscalDocumentId: body.fiscalDocumentId,
+          status: body.status,
+          paymentId: body.paymentId,
+          paymentCollectionEventId: body.paymentCollectionEventId,
+          taxOrderSnapshotId: body.taxOrderSnapshotId,
+        });
+        await refreshFiscalGate();
+        return;
+      }
+      const code = body.error ?? `HTTP_${res.status}`;
+      if (res.status >= 500 || res.status === 0) {
+        setFiscalUnknown(body.message ?? code);
+        return;
+      }
+      setFiscalError(body.message ?? code);
+    } catch {
+      setFiscalUnknown(
+        'Network or timeout on fiscal issue — do not assume SATISFIED. Retry same idempotency key.',
+      );
+    } finally {
+      setFiscalBusy(false);
+    }
+  }
+
+  async function submitReconcileFiscal() {
+    if (!fiscalDoc || fiscalBusy) return;
+    setFiscalBusy(true);
+    setFiscalError(null);
+    setFiscalUnknown(null);
+    try {
+      const res = await sessionFetch(
+        `/api/v1/fiscal/documents/${encodeURIComponent(fiscalDoc.fiscalDocumentId)}/reconcile`,
+        { method: 'POST', body: JSON.stringify({}) },
+      );
+      let body: { status?: string; error?: string; message?: string };
+      try {
+        body = (await res.json()) as { status?: string; error?: string; message?: string };
+      } catch {
+        setFiscalUnknown('Reconcile response was not JSON — retry same document.');
+        return;
+      }
+      if (res.ok && body.status) {
+        setFiscalDoc({ ...fiscalDoc, status: body.status });
+        await refreshFiscalGate();
+        return;
+      }
+      if (res.status >= 500) {
+        setFiscalUnknown(body.message ?? body.error ?? `HTTP_${res.status}`);
+        return;
+      }
+      setFiscalError(body.message ?? body.error ?? `HTTP_${res.status}`);
+    } catch {
+      setFiscalUnknown('Network on reconcile — retry; never forge SATISFIED.');
+    } finally {
+      setFiscalBusy(false);
+    }
+  }
+
+  async function submitCompleteOrder() {
+    if (!live || !terminalId || completeBusy || completeResult) return;
+    if (fiscalGate?.status !== 'SATISFIED' && fiscalGate?.status !== 'NOT_REQUIRED') {
+      setCompleteError('CompleteOrder requires server FiscalCheckoutGate SATISFIED (or NOT_REQUIRED).');
+      return;
+    }
+    setCompleteBusy(true);
+    setCompleteError(null);
+    setCompleteUnknown(null);
+    const chrono =
+      lockedChronology ??
+      allocateTerminalBusinessChronology({
+        terminalId,
+        timeZone: outletTimeZone || 'Asia/Ho_Chi_Minh',
+      });
+    setLockedChronology(chrono);
+    try {
+      const res = await sessionFetch(
+        `/api/v1/settlements/${encodeURIComponent(live.settlementGroupId)}/advance-checkout`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            completeIdempotencyKey: completeKey,
+            businessDate: chrono.businessDate,
+            businessOrder: chrono.businessOrder,
+            deviceId: terminalId,
+          }),
+        },
+      );
+      let body: {
+        completion?: {
+          orderId?: string;
+          status?: string;
+          goodsIssueId?: string;
+          order?: { orderId: string; status: string };
+        };
+        fiscal?: { status: string };
+        error?: string;
+        message?: string;
+      };
+      try {
+        body = (await res.json()) as typeof body;
+      } catch {
+        setCompleteUnknown(
+          'Complete response was not JSON — do not assume GoodsIssue. Retry same key and chronology.',
+        );
+        return;
+      }
+      const orderId = body.completion?.order?.orderId ?? body.completion?.orderId;
+      const orderStatus = body.completion?.order?.status ?? body.completion?.status;
+      if (res.ok && orderId && orderStatus) {
+        clearKeyed(ISSUE_KEY_PREFIX, live.settlementGroupId);
+        clearKeyed(COMPLETE_KEY_PREFIX, live.settlementGroupId);
+        const result: CompleteResultView = {
+          orderId,
+          status: orderStatus,
+          businessDate: chrono.businessDate,
+          businessOrder: chrono.businessOrder,
+          goodsIssueId: body.completion?.goodsIssueId ?? null,
+        };
+        setCompleteResult(result);
+        setLockedChronology(null);
+        onOrderCompleted?.(result);
+        return;
+      }
+      const code = body.error ?? `HTTP_${res.status}`;
+      if (
+        code === 'CHECKOUT_FISCAL_PREREQUISITE_PENDING' ||
+        code === 'CHECKOUT_FISCAL_PREREQUISITE_UNAVAILABLE'
+      ) {
+        setCompleteError(body.message ?? code);
+        await refreshFiscalGate();
+        return;
+      }
+      if (res.status >= 500 || res.status === 0) {
+        setCompleteUnknown(body.message ?? code);
+        return;
+      }
+      setCompleteError(body.message ?? code);
+      // Non-unknown validation failures unlock chronology for a corrected retry.
+      if (code !== 'IDEMPOTENCY_CONFLICT') {
+        setLockedChronology(null);
+      }
+    } catch {
+      setCompleteUnknown(
+        'Network or timeout on CompleteOrder — do not assume GoodsIssue. Retry same key and chronology.',
+      );
+    } finally {
+      setCompleteBusy(false);
+    }
+  }
+
+  const fiscalSatisfied =
+    fiscalGate?.status === 'SATISFIED' || fiscalGate?.status === 'NOT_REQUIRED';
+  const canComplete =
+    paymentSatisfied &&
+    fiscalSatisfied &&
+    !!terminalId &&
+    !completeBusy &&
+    !fiscalBusy &&
+    !busy &&
+    !completeResult;
 
   return (
     <section className="pos-settlement" aria-label="Checkout settlement" data-testid="settlement-checkout">
@@ -462,24 +769,190 @@ export function SettlementCheckoutPanel({
             </p>
           ) : null}
 
-          {live.state === 'COLLECTING' || live.state === 'SATISFIED' ? (
-            <p className="pos-settlement__fiscal" role="status" data-testid="fiscal-gate-blocked">
-              Fiscal blocked: FiscalCheckoutGate UNAVAILABLE — CompleteOrder remains fail-closed. No
-              fiscal success fabrication. Payment may be confirmed without unlocking CompleteOrder.
-            </p>
-          ) : null}
           {live.state === 'SATISFIED' ? (
             <p className="pos-settlement__zero" data-testid="settlement-satisfied">
-              Settlement SATISFIED — payment coverage complete. CompleteOrder still blocked until
-              fiscal evidence exists.
+              Settlement SATISFIED — payment coverage complete. Fiscal evidence required before
+              CompleteOrder.
             </p>
           ) : null}
+
+          {paymentSatisfied && !completeResult ? (
+            <div className="pos-settlement__fiscal" data-testid="fiscal-checkout-panel">
+              <h4 className="pos-settlement__receive-title">Fiscal document</h4>
+              <p className="pos-settlement__hint">
+                Payment confirmed. Fiscal SUCCESS is only authoritative when the server
+                FiscalCheckoutGate returns SATISFIED — the client never forges fiscal state.
+              </p>
+              {fiscalGate ? (
+                <p role="status" data-testid="fiscal-gate-status">
+                  Gate: {fiscalGate.status}
+                  {fiscalGate.fiscalAdapterMode
+                    ? ` · adapter ${fiscalGate.fiscalAdapterMode}`
+                    : ''}
+                  {fiscalGate.detail ? ` — ${fiscalGate.detail}` : ''}
+                </p>
+              ) : (
+                <p role="status" data-testid="fiscal-gate-loading">
+                  Observing FiscalCheckoutGate…
+                </p>
+              )}
+              {fiscalGate &&
+              (fiscalGate.status === 'UNAVAILABLE' ||
+                fiscalGate.status === 'REQUIRED_NOT_SATISFIED' ||
+                fiscalGate.status === 'PENDING') &&
+              !fiscalSatisfied ? (
+                <p
+                  className="pos-settlement__waiting"
+                  role="status"
+                  data-testid="fiscal-gate-blocked"
+                >
+                  Fiscal not SATISFIED — CompleteOrder remains fail-closed.
+                </p>
+              ) : null}
+              {fiscalDoc ? (
+                <dl className="pos-settlement__facts" data-testid="fiscal-document-facts">
+                  <div>
+                    <dt>FiscalDocument</dt>
+                    <dd data-testid="fiscal-document-id">{fiscalDoc.fiscalDocumentId}</dd>
+                  </div>
+                  <div>
+                    <dt>Doc status</dt>
+                    <dd data-testid="fiscal-document-status">{fiscalDoc.status}</dd>
+                  </div>
+                  <div>
+                    <dt>Payment / PCE</dt>
+                    <dd>
+                      {fiscalDoc.paymentId} / {fiscalDoc.paymentCollectionEventId}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Tax snapshot</dt>
+                    <dd>{fiscalDoc.taxOrderSnapshotId}</dd>
+                  </div>
+                </dl>
+              ) : null}
+              {fiscalError ? (
+                <p role="alert" data-testid="fiscal-error">
+                  {fiscalError}
+                </p>
+              ) : null}
+              {fiscalUnknown ? (
+                <p role="status" data-testid="fiscal-unknown">
+                  UNKNOWN — {fiscalUnknown}
+                </p>
+              ) : null}
+              {!fiscalSatisfied ? (
+                <button
+                  type="button"
+                  className="pos-settlement__open"
+                  data-testid="fiscal-issue-submit"
+                  disabled={fiscalBusy || busy || !!completeResult}
+                  onClick={() => void submitIssueFiscal()}
+                >
+                  {fiscalBusy
+                    ? 'Issuing…'
+                    : fiscalUnknown
+                      ? 'Retry issue fiscal'
+                      : fiscalDoc
+                        ? 'Re-issue / resume fiscal'
+                        : 'Issue fiscal document'}
+                </button>
+              ) : null}
+              {fiscalDoc &&
+              (fiscalDoc.status === 'PENDING_ISSUE' ||
+                fiscalDoc.status === 'ISSUED_PENDING_EVIDENCE' ||
+                fiscalUnknown) ? (
+                <button
+                  type="button"
+                  className="pos-settlement__abort"
+                  data-testid="fiscal-reconcile-submit"
+                  disabled={fiscalBusy || busy}
+                  onClick={() => void submitReconcileFiscal()}
+                >
+                  Reconcile fiscal evidence
+                </button>
+              ) : null}
+              {fiscalSatisfied ? (
+                <p role="status" data-testid="fiscal-gate-satisfied">
+                  FiscalCheckoutGate {fiscalGate?.status} — CompleteOrder unlocked by server.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {paymentSatisfied && fiscalSatisfied && !completeResult ? (
+            <div className="pos-settlement__complete" data-testid="complete-order-panel">
+              <h4 className="pos-settlement__receive-title">Complete order</h4>
+              <p className="pos-settlement__hint">
+                Advances via CheckoutOrchestrator after fiscal gate. Inventory GoodsIssue is
+                server-owned — double-click must not create a second issue.
+              </p>
+              {lockedChronology ? (
+                <p className="pos-settlement__hint" data-testid="complete-chronology-locked">
+                  Chronology locked for retry: {lockedChronology.businessDate} #
+                  {lockedChronology.businessOrder}
+                </p>
+              ) : null}
+              {completeError ? (
+                <p role="alert" data-testid="complete-error">
+                  {completeError}
+                </p>
+              ) : null}
+              {completeUnknown ? (
+                <p role="status" data-testid="complete-unknown">
+                  UNKNOWN — {completeUnknown}
+                </p>
+              ) : null}
+              <button
+                type="button"
+                className="pos-settlement__open"
+                data-testid="complete-order-submit"
+                disabled={!canComplete}
+                onClick={() => void submitCompleteOrder()}
+              >
+                {completeBusy
+                  ? 'Completing…'
+                  : completeUnknown
+                    ? 'Retry complete order'
+                    : 'Complete order'}
+              </button>
+            </div>
+          ) : null}
+
+          {completeResult ? (
+            <div className="pos-settlement__success" data-testid="complete-order-success">
+              <h4>Order completed (server)</h4>
+              <dl className="pos-settlement__facts">
+                <div>
+                  <dt>Order</dt>
+                  <dd data-testid="complete-order-id">{completeResult.orderId}</dd>
+                </div>
+                <div>
+                  <dt>Status</dt>
+                  <dd data-testid="complete-order-status">{completeResult.status}</dd>
+                </div>
+                <div>
+                  <dt>Business chronology</dt>
+                  <dd data-testid="complete-business-chronology">
+                    {completeResult.businessDate} #{completeResult.businessOrder}
+                  </dd>
+                </div>
+                {completeResult.goodsIssueId ? (
+                  <div>
+                    <dt>GoodsIssue</dt>
+                    <dd data-testid="complete-goods-issue-id">{completeResult.goodsIssueId}</dd>
+                  </div>
+                ) : null}
+              </dl>
+            </div>
+          ) : null}
+
           {live.state === 'COLLECTING' ? (
             <button
               type="button"
               className="pos-settlement__abort"
               data-testid="abort-checkout"
-              disabled={busy || receiveBusy}
+              disabled={busy || receiveBusy || fiscalBusy || completeBusy}
               onClick={onAbortCheckout}
             >
               Abort checkout / Back to edit

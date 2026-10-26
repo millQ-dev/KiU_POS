@@ -162,10 +162,69 @@ export const posApi = {
     return request('POST', `/api/v1/orders/${orderId}/open-settlement`, payload);
   },
 
+  acceptTaxSnapshot(
+    orderId: string,
+    payload: { idempotencyKey: string; businessDateTime?: string },
+  ): Promise<{ taxOrderSnapshotId: string }> {
+    return request('POST', `/api/v1/orders/${orderId}/accept-tax-snapshot`, payload);
+  },
+
   getLiveSettlement(
     orderId: string,
   ): Promise<{ orderId: string; settlement: import('./types.js').SettlementProjection | null }> {
     return request('GET', `/api/v1/orders/${orderId}/settlement`);
+  },
+
+  getFiscalGate(
+    settlementGroupId: string,
+  ): Promise<{
+    settlementGroupId: string;
+    fiscalAdapterMode: 'unavailable' | 'test-satisfying';
+    gate: { status: string; detail?: string };
+  }> {
+    return request('GET', `/api/v1/settlements/${settlementGroupId}/fiscal-gate`);
+  },
+
+  issueFiscalDocument(payload: {
+    settlementGroupId: string;
+    issueIdempotencyKey: string;
+  }): Promise<{
+    fiscalDocumentId: string;
+    status: string;
+    settlementGroupId: string;
+    paymentId: string;
+    paymentCollectionEventId: string;
+    taxOrderSnapshotId: string;
+  }> {
+    return request('POST', '/api/v1/fiscal/documents/issue', payload);
+  },
+
+  reconcileFiscalDocument(fiscalDocumentId: string): Promise<{
+    fiscalDocumentId: string;
+    status: string;
+  }> {
+    return request('POST', `/api/v1/fiscal/documents/${fiscalDocumentId}/reconcile`, {});
+  },
+
+  advanceCheckout(
+    settlementGroupId: string,
+    payload: {
+      completeIdempotencyKey: string;
+      businessDate: string;
+      businessOrder: number;
+      businessTime?: string | null;
+      deviceId?: string;
+    },
+  ): Promise<{
+    settlement: import('./types.js').SettlementProjection;
+    fiscal: { status: string; detail?: string };
+    completion: { orderId: string; status: string };
+  }> {
+    return request(
+      'POST',
+      `/api/v1/settlements/${settlementGroupId}/advance-checkout`,
+      payload,
+    );
   },
 
   abortSettlement(

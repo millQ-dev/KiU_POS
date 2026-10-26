@@ -1,21 +1,22 @@
 # MillQ Current State
 
-**Checkpoint:** C0-PAY1 ReceiveCash UI **MERGED** Origin #110 (`802b70d`) — GitHub backup restore pending (see `origin-github-backup-runbook.md`)  
+**Checkpoint:** C0-FISC2 Fiscal → CompleteOrder → GoodsIssue (this PR) on tip after #111 `51686f30`  
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)  
 **GitHub backup (sole):** `https://github.com/millQ-dev/KiU_POS.git`  
   (`millQ-dev/MillQ` = legacy rename redirect to the same repository ID)  
-**Updated:** 2026-10-25
+**Updated:** 2026-10-26
 
 ## Runtime / CI / backup
 
 | Item | State |
 | --- | --- |
-| Migration head | **032** `032_fisc11_payment_collection_fiscal_core.sql` (FISC1.1 PR; main was 031) |
+| Migration head | **034** `034_cash12_close_cash_shift.sql` (no new migration in C0-FISC2) |
 | TAX1.1 Tax runtime | **MERGED** Origin PR#74 — canonical closed |
 | ADR-0033 / ADR-0034 / ADR-0037 | **ACCEPTED** |
 | CASHIER-1 Production Front Door | **MERGED** Origin PR#76 |
 | Fiscalization (FISC1.1) | **MERGED** Core Runtime; production adapter default **unavailable**; C0-FISC1 test-satisfying adapter only with `MILLQ_ALLOW_FISCAL_TEST_ADAPTER=1` + disposable `millq_ci_pos_*` (no real provider / no G2) |
 | C0-PAY1 ReceiveCash UI | **MERGED** Origin #110 |
+| C0-FISC2 Fiscal → CompleteOrder | **THIS PR** — SettlementCheckout issue/reconcile + CheckoutOrchestrator advance; terminal monotonic `businessOrder` (ADR-0003 / offline-foundation); disposable browser E2E full path |
 | Independent Origin APPROVE | Distinct Origin principal required — see `origin-independent-review.md` |
 | ADR-0014 Fiscalization delta | **ACCEPTED** 2026-10-10 |
 | ADR-0014 / ADR-0013 Chronology Delta | **ACCEPTED** 2026-10-11 |
@@ -67,7 +68,7 @@
 
 ## Next
 
-1. Independent review + PO final review of FISC1.1 Core Runtime PR — **STOP BEFORE MERGE** until authorized
+1. Independent Origin APPROVE (distinct principal) for C0-FISC2 PR → merge-when-ready → backup SHA match
 2. Close remaining ADR-0038 A4 Level C OPEN items for finished C0 polish
 3. Do **not** select Vietnam production provider / grant G2 / start DeviceIdentity / Quick Lock / R1.1 / multi-tender fiscalization / cash refunds
 

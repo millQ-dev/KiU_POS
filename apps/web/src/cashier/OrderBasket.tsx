@@ -25,6 +25,7 @@ type Props = {
   terminalId?: string | null;
   legalEntityId?: string | null;
   outletId?: string | null;
+  outletTimeZone?: string | null;
   onSelectLine: (lineId: string | null) => void;
   onUpdateQuantity: (line: OrderLine, quantity: string) => void;
   onRemoveLine: (line: OrderLine) => void;
@@ -33,6 +34,15 @@ type Props = {
   onOpenCheckout: () => void;
   onAbortCheckout: () => void;
   onSettlementRefresh: () => Promise<void>;
+  onOrderCompleted?:
+    | ((result: {
+        orderId: string;
+        status: string;
+        businessDate: string;
+        businessOrder: number;
+        goodsIssueId?: string | null;
+      }) => void)
+    | undefined;
   onCancelOrder: () => void;
   onNewOrder: () => void;
 };
@@ -56,6 +66,7 @@ export function OrderBasketPanel({
   terminalId,
   legalEntityId,
   outletId,
+  outletTimeZone,
   onSelectLine,
   onUpdateQuantity,
   onRemoveLine,
@@ -64,6 +75,7 @@ export function OrderBasketPanel({
   onOpenCheckout,
   onAbortCheckout,
   onSettlementRefresh,
+  onOrderCompleted,
   onCancelOrder,
   onNewOrder,
 }: Props) {
@@ -158,9 +170,11 @@ export function OrderBasketPanel({
         terminalId={terminalId ?? null}
         legalEntityId={legalEntityId ?? order?.legalEntityId ?? null}
         outletId={outletId ?? order?.outletId ?? null}
+        outletTimeZone={outletTimeZone ?? 'Asia/Ho_Chi_Minh'}
         onOpenCheckout={onOpenCheckout}
         onAbortCheckout={onAbortCheckout}
         onSettlementRefresh={onSettlementRefresh}
+        onOrderCompleted={onOrderCompleted}
       />
 
       <footer className="pos-basket__footer">
