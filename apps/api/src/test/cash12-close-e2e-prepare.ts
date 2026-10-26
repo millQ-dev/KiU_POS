@@ -1,7 +1,7 @@
 /**
- * Prepare disposable DB + fixture JSON for C0-PAY1 / CASH1.2 browser E2E.
- * Seeds POS surface + RoundingPolicy + enabled CASH tender + receive_cash grant.
- * Destructive — millq_ci_pos_* only. Does NOT seed Payment / PCE evidence.
+ * Prepare disposable DB + fixture JSON for C0-PAY1 / CASH1.2 / C0-FISC2 browser E2E.
+ * Seeds POS surface + RoundingPolicy + CASH tender + Tax/FiscalPolicy + egg stock.
+ * Destructive — millq_ci_pos_* only. Does NOT seed Payment / PCE / FiscalDocument evidence.
  *
  * Usage:
  *   DATABASE_URL=... E2E_FIXTURE_PATH=... pnpm --filter @millq/api exec tsx src/test/cash12-close-e2e-prepare.ts
@@ -24,7 +24,10 @@ import {
 import { MenuService } from '../modules/menu/index.js';
 import { LayoutService } from '../modules/pos/index.js';
 import { CommercialRoundingPolicyService } from '../modules/commercial-rounding/rounding-policy-service.js';
+import { FiscalService } from '../modules/fiscalization/index.js';
 import { PaymentsService } from '../modules/payments/index.js';
+import { GoodsReceiptService } from '../modules/procurement/goods-receipt-service.js';
+import { TaxService } from '../modules/tax/tax-service.js';
 import { TEST_PIN } from './financial-auth-harness.js';
 
 const DATABASE_URL = process.env.DATABASE_URL ?? '';
@@ -47,6 +50,10 @@ const OPENING_MINOR = '100000';
 async function truncate(pool: pg.Pool) {
   await pool.query(`
     TRUNCATE
+      fiscal_provider_outcome_evidence, fiscal_provider_attempt, fiscal_submission,
+      fiscal_document, fiscal_policy_version, fiscal_policy,
+      tax_line_snapshot, tax_order_snapshot,
+      tax_classification_assignment, tax_policy_version, tax_policy, tax_classification,
       payment_collection_event, payment_cash_collection_evidence,
       payment_allocation, payment_provider_outcome, payment, tender_definition,
       settlement_check_line_allocation, settlement_check, settlement_group,
@@ -203,6 +210,70 @@ async function main() {
     const fx = await seedBlockCFixture(pool);
     const identity = new IdentityService(pool, PEPPER);
     const tenders = await seedPosSurface(pool, fx);
+
+    // C0-FISC2: tax + fiscal required; policies effective; stock for DIRECT_STOCK GoodsIssue.
+    await pool.query(
+      `UPDATE legal_entity SET tax_required = TRUE, fiscal_required = TRUE
+       WHERE legal_entity_id = $1`,
+      [fx.legalEntityId],
+    );
+    const tax = new TaxService(pool);
+    await tax.upsertC0TaxPolicy({
+      tenantId: fx.tenantId,
+      legalEntityId: fx.legalEntityId,
+      jurisdictionCode: 'VN',
+      policyCode: `e2e-tax-${randomUUID().slice(0, 8)}`,
+      pricingTaxMode: 'TAX_INCLUSIVE',
+      taxTreatment: 'STANDARD_RATE',
+      rateDecimal: '0.08',
+      taxableBaseRule: 'TB_CUSTOMER_PAYABLE_MERCHANDISE_SHARE',
+      catalogItemIds: [fx.eggItemId],
+      inclusiveRounding: { roundingMode: 'HALF_UP', quantumMinor: '1' },
+    });
+    const fiscal = new FiscalService(pool);
+    const pol = await fiscal.createFiscalPolicy({
+      tenantId: fx.tenantId,
+      legalEntityId: fx.legalEntityId,
+      jurisdictionCode: 'VN',
+      policyCode: `e2e-fisc-${randomUUID().slice(0, 8)}`,
+    });
+    await fiscal.addFiscalPolicyVersion({
+      fiscalPolicyId: pol.fiscalPolicyId,
+      policyVersion: 1,
+      fiscalDocumentRequired: true,
+      effectiveFrom: '2020-01-01T00:00:00.000Z',
+    });
+    const receipts = new GoodsReceiptService(pool);
+    const draft = await receipts.createDraft({
+      tenantId: fx.tenantId,
+      legalEntityId: fx.legalEntityId,
+      warehouseId: fx.warehouseId,
+      supplierId: fx.supplierId,
+      supplierDocumentNumber: `E2E-EGG-${randomUUID()}`,
+      currencyCode: 'VND',
+      minorUnitExponent: 0,
+      businessDate: '2026-01-01',
+      businessOrder: 1,
+      actorId: fx.actorId,
+      lines: [
+        {
+          lineNumber: 1,
+          catalogItemId: fx.eggItemId,
+          supplierItemId: fx.eggSupplierItemId,
+          inputKind: 'COUNT',
+          packageCount: 500,
+          acceptedBaseQuantity: '500',
+          baseUnit: 'ea',
+          dimension: 'COUNT',
+          unitPriceMinor: '2000',
+          lineAcquisitionCostMinor: '1000000',
+        },
+      ],
+    });
+    await receipts.post(draft!.goodsReceiptId, {
+      idempotencyKey: `e2e-egg-${draft!.goodsReceiptId}`,
+      actorId: fx.actorId,
+    });
 
     const terminalId = randomUUID();
     await pool.query(

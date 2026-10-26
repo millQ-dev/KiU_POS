@@ -96,6 +96,7 @@ try {
 
   console.log(`start API ${apiUrl}…`);
   // Start API via node+tsx in apps/api so PORT/DATABASE_URL are not swallowed by pnpm filter.
+  // C0-FISC2: explicit test-adapter opt-in on disposable millq_ci_pos_* only (#111).
   children.push(
     start(
       'pnpm',
@@ -107,6 +108,7 @@ try {
         CORS_ORIGINS: webUrl,
         COOKIE_SECURE: 'false',
         LOG_LEVEL: 'error',
+        MILLQ_ALLOW_FISCAL_TEST_ADAPTER: '1',
       },
       join(ROOT, 'apps/api'),
     ),

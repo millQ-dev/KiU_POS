@@ -176,7 +176,7 @@ describe('SettlementCheckoutPanel ReceiveCash', () => {
     expect((screen.getByTestId('receive-tendered-input') as HTMLInputElement).value).toBe('5000');
   });
 
-  it('shows fiscal gate blocked while COLLECTING', async () => {
+  it('does not show fiscal panel while COLLECTING (payment still open)', async () => {
     sessionFetch.mockResolvedValue(
       jsonResponse(200, {
         tenders: [
@@ -204,6 +204,8 @@ describe('SettlementCheckoutPanel ReceiveCash', () => {
         onSettlementRefresh={vi.fn(async () => undefined)}
       />,
     );
-    await waitFor(() => expect(screen.getByTestId('fiscal-gate-blocked')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('receive-cash-panel')).toBeTruthy());
+    expect(screen.queryByTestId('fiscal-checkout-panel')).toBeNull();
+    expect(screen.queryByTestId('complete-order-submit')).toBeNull();
   });
 });

@@ -29,6 +29,7 @@ import {
 } from '../modules/fiscalization/index.js';
 import { ReceiveCashService } from '../modules/payments/receive-cash-service.js';
 import { SettlementService } from '../modules/settlement/settlement-service.js';
+import { TaxService } from '../modules/tax/tax-service.js';
 import {
   createWiredPaymentsAndSettlement,
   registerDevPaymentSimulatorRoutes,
@@ -207,6 +208,7 @@ export async function registerPosRoutes(
   const selection = new PosSelectionService(pool, orders);
   const menuResolver = new MenuResolver(pool);
   const baseCommercial = new BaseCommercialAcceptanceService(pool, orders);
+  const tax = new TaxService(pool);
 
   app.post('/api/v1/pos/surface/resolve', async (req, reply) => {
     try {
@@ -531,6 +533,47 @@ export async function registerPosRoutes(
     },
   );
 
+  /**
+   * TAX1.1 accept — freezes TaxOrderSnapshot before OpenSettlement when tax_required.
+   * Client cannot set VAT amounts or fabricate tax evidence (ADR-0033 / ADR-0037).
+   */
+  app.post<{ Params: { orderId: string } }>(
+    '/api/v1/orders/:orderId/accept-tax-snapshot',
+    async (req, reply) => {
+      try {
+        await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
+        const body = (req.body ?? {}) as {
+          idempotencyKey?: string;
+          businessDateTime?: string;
+          vatTotalMinor?: unknown;
+          customerPayableMinor?: unknown;
+          taxTreatment?: unknown;
+        };
+        if (
+          body.vatTotalMinor !== undefined ||
+          body.customerPayableMinor !== undefined ||
+          body.taxTreatment !== undefined
+        ) {
+          return reply.code(400).send({
+            error: 'VALIDATION',
+            message: 'Authoritative tax fields are not caller-settable',
+          });
+        }
+        if (!body.idempotencyKey) {
+          return reply.code(400).send({ error: 'VALIDATION', message: 'idempotencyKey required' });
+        }
+        return await tax.acceptTaxSnapshot({
+          orderId: req.params.orderId,
+          idempotencyKey: body.idempotencyKey,
+          ...(body.businessDateTime ? { businessDateTime: body.businessDateTime } : {}),
+        });
+      } catch (err) {
+        const mapped = mapError(err);
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    },
+  );
+
   // --- S1.1 Settlement + PAY1.1 Payments + FISC1.1 FiscalCheckoutGate ---
   // Production always unavailable. Test-satisfying adapter only on disposable POS DB + explicit env
   // (C0-FISC1 allowed test contour). Never a Vietnam production provider / G2 claim.
@@ -657,6 +700,37 @@ export async function registerPosRoutes(
       return reply.code(mapped.status).send(mapped.body);
     }
   });
+
+  /**
+   * Reconcile pending FiscalDocument after UNKNOWN / timeout (ADR-0014).
+   * Never accepts client-forged SATISFIED — evidence comes from provider adapter only.
+   */
+  app.post<{ Params: { fiscalDocumentId: string } }>(
+    '/api/v1/fiscal/documents/:fiscalDocumentId/reconcile',
+    async (req, reply) => {
+      try {
+        const body = (req.body ?? {}) as {
+          fiscalStatus?: unknown;
+          satisfied?: unknown;
+        };
+        if (body.fiscalStatus !== undefined || body.satisfied !== undefined) {
+          return reply.code(400).send({
+            error: 'VALIDATION',
+            message: 'Client cannot set FiscalCheckoutGate / SATISFIED',
+          });
+        }
+        const existing = await fiscal.getDocument(req.params.fiscalDocumentId);
+        if (!existing) {
+          return reply.code(404).send({ error: 'NOT_FOUND', message: 'FiscalDocument not found' });
+        }
+        await requireOrderPrincipal(req, finAuth, pool, existing.orderId);
+        return await fiscal.reconcileDocument(req.params.fiscalDocumentId);
+      } catch (err) {
+        const mapped = mapError(err);
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    },
+  );
 
   app.get<{ Params: { orderId: string } }>(
     '/api/v1/orders/:orderId/settlement',

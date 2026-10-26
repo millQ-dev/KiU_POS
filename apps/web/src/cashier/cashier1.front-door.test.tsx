@@ -26,8 +26,13 @@ vi.mock('../api/client.js', () => ({
     resolveMenuPrices: vi.fn(),
     calculateAndAcceptCommercialTerms: vi.fn(),
     repriceAndAcceptCommercialTerms: vi.fn(),
+    acceptTaxSnapshot: vi.fn(),
     openSettlement: vi.fn(),
     abortSettlement: vi.fn(),
+    getFiscalGate: vi.fn(),
+    issueFiscalDocument: vi.fn(),
+    reconcileFiscalDocument: vi.fn(),
+    advanceCheckout: vi.fn(),
     listDevContexts: vi.fn(),
   },
 }));
@@ -196,6 +201,7 @@ describe('production CashierShell cleanup', () => {
   });
 
   it('surfaces tax blocked codes honestly — no success conversion', async () => {
+    mockedApi.acceptTaxSnapshot.mockResolvedValue({ taxOrderSnapshotId: 'tax-1' });
     mockedApi.openSettlement.mockRejectedValue(
       new ApiError(400, 'SETTLEMENT_TAX_SNAPSHOT_REQUIRED', 'Tax required'),
     );

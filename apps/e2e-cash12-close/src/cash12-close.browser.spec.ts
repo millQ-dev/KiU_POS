@@ -1,7 +1,8 @@
 /**
- * C0-PAY1 ReceiveCash UI + CASH1.2 Close browser E2E on disposable PostgreSQL.
- * Real tender path: Product → Commercial → Settlement → ReceiveCash → PCE → Close.
- * No PCE/payment evidence seed. Stack started by run-with-stack.mjs.
+ * C0-PAY1 / C0-FISC2 / CASH1.2 browser E2E on disposable PostgreSQL.
+ * Real tender path: Product → Tax → Settlement → ReceiveCash → Fiscal → CompleteOrder → GI → Close.
+ * No PCE/payment/fiscal evidence seed. Test adapter only via MILLQ_ALLOW_FISCAL_TEST_ADAPTER=1.
+ * Stack started by run-with-stack.mjs.
  */
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
@@ -138,7 +139,68 @@ async function receiveCashUi(page: Page, tendered: string) {
 
 test.describe.configure({ mode: 'serial' });
 
-test('Open → Product → ReceiveCash overpay → SATISFIED → Close expected=opening+collected (no change)', async ({
+test('C0-FISC2 full path: ReceiveCash → Fiscal SATISFIED → CompleteOrder → one GI → Close', async ({
+  page,
+}) => {
+  await companyLogin(page, fx.companyCode, fx.cashierPin);
+  await openCashShift(page, fx.openingAmountMinor);
+  await sellEggAndOpenSettlement(page);
+  await receiveCashUi(page, fx.eggPriceMinor);
+
+  await expect(page.getByTestId('receive-cash-success')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('settlement-satisfied')).toBeVisible();
+  await expect(page.getByTestId('fiscal-checkout-panel')).toBeVisible();
+  await expect(page.getByTestId('fiscal-gate-blocked')).toBeVisible();
+  await expect(page.getByTestId('complete-order-submit')).toHaveCount(0);
+
+  await page.getByTestId('fiscal-issue-submit').click();
+  await expect(page.getByTestId('fiscal-document-id')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('fiscal-gate-satisfied')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('complete-order-panel')).toBeVisible();
+
+  const paymentId = await page.getByTestId('receive-payment-id').innerText();
+  const pceId = await page.getByTestId('receive-pce-id').innerText();
+  const fiscalDocId = await page.getByTestId('fiscal-document-id').innerText();
+
+  await page.getByTestId('complete-order-submit').evaluate((el: HTMLButtonElement) => {
+    el.click();
+    el.click();
+  });
+  await expect(page.getByTestId('complete-order-success')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('complete-order-status')).toContainText(/COMPLETED/i);
+  const completedOrderId = await page.getByTestId('complete-order-id').innerText();
+  const goodsIssueId = await page.getByTestId('complete-goods-issue-id').innerText();
+
+  expect(paymentId.length).toBeGreaterThan(8);
+  expect(pceId.length).toBeGreaterThan(8);
+  expect(fiscalDocId.length).toBeGreaterThan(8);
+  expect(completedOrderId.length).toBeGreaterThan(8);
+  expect(goodsIssueId.length).toBeGreaterThan(8);
+  await expect(page.getByTestId('complete-goods-issue-id')).toHaveCount(1);
+
+  const orderProof = await page.evaluate(async (orderId) => {
+    const res = await fetch(`/api/v1/orders/${orderId}`, { credentials: 'include' });
+    return { status: res.status, body: await res.json() };
+  }, completedOrderId);
+  expect(orderProof.status).toBe(200);
+  expect(String(orderProof.body.status).toUpperCase()).toBe('COMPLETED');
+  expect(orderProof.body.consumptionPlanId).toBeTruthy();
+
+  // New-order transition after completion (feedback + locked basket both mention it).
+  await expect(page.getByText(/Order COMPLETED/i).first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/editing disabled/i)).toBeVisible();
+
+  await page.getByTestId('open-close-cash-shift').click();
+  await expect(page.getByTestId('closing-cash-count')).toBeVisible();
+  await page.getByTestId('close-actual-input').fill(fx.expectedCloseMinor);
+  await page.getByTestId('close-submit').click();
+  await expect(page.getByTestId('closing-cash-success')).toBeVisible();
+  await expect(page.getByTestId('close-variance')).toHaveText('BALANCED');
+  await page.getByTestId('close-done').click();
+  await expect(page.getByTestId('opening-cash-screen')).toBeVisible();
+});
+
+test('Open → Product → ReceiveCash overpay → SATISFIED (fiscal pending) → Close without CompleteOrder', async ({
   page,
 }) => {
   await companyLogin(page, fx.companyCode, fx.cashierPin);
@@ -157,6 +219,7 @@ test('Open → Product → ReceiveCash overpay → SATISFIED → Close expected=
   await expect(page.getByTestId('receive-pce-collected')).toContainText(fx.expectedCollectedMinor);
   await expect(page.getByTestId('settlement-satisfied')).toBeVisible();
   await expect(page.getByTestId('fiscal-gate-blocked')).toContainText(/CompleteOrder/i);
+  await expect(page.getByTestId('complete-order-submit')).toHaveCount(0);
 
   await page.getByTestId('open-close-cash-shift').click();
   await expect(page.getByTestId('closing-cash-count')).toBeVisible();
