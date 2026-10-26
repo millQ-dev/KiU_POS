@@ -1,6 +1,6 @@
 # MillQ Current State
 
-**Checkpoint:** C0-FISC2 Fiscal → CompleteOrder → GoodsIssue (this PR) on tip after #111 `51686f30`  
+**Checkpoint:** C0-FISC2 **MERGED** Origin #112 @ `343487819aa669798dbe1c38426d03c7f6023c2a` — GitHub backup **MATCH** (App FF 2026-10-26)  
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)  
 **GitHub backup (sole):** `https://github.com/millQ-dev/KiU_POS.git`  
   (`millQ-dev/MillQ` = legacy rename redirect to the same repository ID)  
@@ -16,8 +16,9 @@
 | CASHIER-1 Production Front Door | **MERGED** Origin PR#76 |
 | Fiscalization (FISC1.1) | **MERGED** Core Runtime; production adapter default **unavailable**; C0-FISC1 test-satisfying adapter only with `MILLQ_ALLOW_FISCAL_TEST_ADAPTER=1` + disposable `millq_ci_pos_*` (no real provider / no G2) |
 | C0-PAY1 ReceiveCash UI | **MERGED** Origin #110 |
-| C0-FISC2 Fiscal → CompleteOrder | **THIS PR** — SettlementCheckout issue/reconcile + CheckoutOrchestrator advance; terminal monotonic `businessOrder` (ADR-0003 / offline-foundation); disposable browser E2E full path |
-| Independent Origin APPROVE | Distinct Origin principal required — see `origin-independent-review.md` |
+| C0-FISC2 Fiscal → CompleteOrder | **MERGED** #112 — SettlementCheckout issue/reconcile + CheckoutOrchestrator advance; terminal monotonic `businessOrder`; disposable E2E 9/9 |
+| GitHub backup parity | **MATCH** Origin/GitHub `3434878…` via MillQ Origin Backup App (persistent Automation trigger still must keep App secrets) |
+| Independent Origin APPROVE | Ruleset **active** (`requiredApprovingReviewCount=1`); **second Write principal still missing** — see `origin-independent-review.md` |
 | ADR-0014 Fiscalization delta | **ACCEPTED** 2026-10-10 |
 | ADR-0014 / ADR-0013 Chronology Delta | **ACCEPTED** 2026-10-11 |
 | ADR-0038 C0 CASH+CARD PCE | **ACCEPTED** 2026-10-11 |
@@ -68,9 +69,9 @@
 
 ## Next
 
-1. Independent Origin APPROVE (distinct principal) for C0-FISC2 PR → merge-when-ready → backup SHA match
-2. Close remaining ADR-0038 A4 Level C OPEN items for finished C0 polish
-3. Do **not** select Vietnam production provider / grant G2 / start DeviceIdentity / Quick Lock / R1.1 / multi-tender fiscalization / cash refunds
+1. Grant a **second** Origin principal Write and prove non-author APPROVE → MWR on a Level A PR (gate active; Approver identity still missing)
+2. Verify Cursor Automation “MillQ Origin→GitHub backup” fires on the next Origin merge (App secrets in vault)
+3. Do **not** start another sensitive financial PR until the Review principal exists; no real VN provider / G2 / DeviceIdentity / R1.1 / refunds
 
 Preserve:
 
