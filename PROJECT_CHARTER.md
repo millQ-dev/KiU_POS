@@ -117,15 +117,17 @@ If classification is unclear, use the stricter level. Unclear B vs C is C: stop 
 
 ## 10. AI Agent Operating Model
 
-MillQ uses specialized AI-agent roles. A single person or tool may support multiple roles across the project, but **implementation and review for the same change must use separate contexts**. Independent review may be an authorized agent. It is not required to be a human owner on every PR.
+MillQ uses specialized AI-agent roles. A single person or tool may support multiple roles across the project. For Level **B**, **implementation and substantive AI review for the same change must use separate contexts**. Review may be an authorized agent context. It is not required to be a human owner on every PR, and it is **not** required to be a second Origin account.
+
+**PO ACCEPT 2026-10-26:** Origin does **not** require formal non-author `APPROVE`. There is no second Origin reviewer principal. Merge gates: Level **A** = mandatory Depot CI; Level **B** = Depot CI + Bugbot + substantive AI review (process); Level **C** = separate PO ACCEPT for new architectural, financial, or legal semantics before mergeable implementation. Production deploy and persistent DB migrations need a **separate** PO GO. ChatGPT advises the Product Owner strategically/technically and does **not** issue Origin `APPROVE`.
 
 Minimum delivery roles:
 
 | Role | Responsibility |
 | --- | --- |
-| Implementation Agent | Classify autonomy level, implement agreed scope on an Origin branch, test, document, open Origin PR, **arm merge-when-ready** on Level A/B (Level C only after owner decision). Must not self-approve, merge immediately, bypass Origin protections, or push to GitHub. |
-| Review Agent | Independent context. Checks correctness, scope, regressions, architecture, tests, migrations, security, money/inventory invariants, compatibility, docs, and declared level. Returns `APPROVE` or `REQUEST CHANGES`. |
-| Fix Agent | Same implementation identity after `REQUEST CHANGES`: fix threads, re-test, push, re-arm merge-when-ready. Must not self-approve or merge immediately. |
+| Implementation Agent | Classify autonomy level, implement agreed scope on an Origin branch, test, document, open Origin PR, **arm merge-when-ready** on Level A/B (Level C only after owner decision). Must not merge immediately, bypass Origin protections, remove required Depot CI, or push to GitHub. |
+| Review Agent | Separate context (process). Checks correctness, scope, regressions, architecture, tests, migrations, security, money/inventory invariants, compatibility, docs, and declared level. Returns process `APPROVE` or `REQUEST CHANGES` in PR notes — not an Origin approval-count gate. |
+| Fix Agent | Same implementation identity after `REQUEST CHANGES`: fix threads, re-test, push, re-arm merge-when-ready. Must not merge immediately. |
 
 Specialist roles (Product Analyst, System Architect, QA, Security, Documentation, and others) may act as the Review Agent when the change is Level B in their domain.
 
@@ -135,7 +137,8 @@ Operating rules:
 - Agents must **not edit unrelated files**.
 - Agents must **explain assumptions**.
 - Agents must **classify each change as Level A, B, or C** and stop on Level C until an owner decision exists.
-- **Implementation and review must be performed by separate contexts**.
+- **Level B: implementation and substantive review must use separate contexts** (not a second Origin principal requirement).
+- Agents must **not claim** a second independent Origin reviewer principal exists.
 - **Cursor** is the primary workstation for interactive development and the canonical hosting surface (Origin + Cloud Agents).
 - **Codex** is used for isolated autonomous tasks against the Origin repository, not against a separate GitHub history.
 - **GitHub** is a backup mirror of Origin. After cutover, only the backup automation identity may write to it. That identity is the sole bypass on the GitHub `main` branch ruleset (routine writes blocked) and on the GitHub tag ruleset for release/protected tags (create/update/delete restricted). No developer or implementation agent receives those bypasses.
@@ -145,12 +148,12 @@ Operating rules:
 A task is complete only when all of the following are true:
 
 - acceptance criteria are met
-- implementation has independent review (`APPROVE` from a context that did not author the change)
+- Level A: required Depot CI green; Level B: Depot CI + Bugbot + substantive AI review (process) complete with blockers cleared
 - tests pass
 - documentation is updated where relevant
 - migrations are checked when schema changes are involved
 - the Pull Request is linked to the relevant Cloud Agent run and/or tracked Origin work item and declares autonomy level A, B, or C
-- CI passes when CI exists
+- required Depot CI passes
 - Level A/B PRs have merge-when-ready armed by the Implementation Agent; Level C has a recorded owner decision before merge-when-ready
 
 ## 12. Decision-Making
@@ -160,7 +163,7 @@ A task is complete only when all of the following are true:
 - **Uncertain business logic** must be escalated rather than invented (Level C).
 - **Irreversible decisions** require explicit owner approval.
 - **Reversible decisions** should prefer speed and simplicity (Level A or B when they fit those classes).
-- After an owner accepts a Level C decision, agents implement, arm merge-when-ready, get independent review, and let the ruleset merge. The owner does not have to click merge.
+- After an owner accepts a Level C decision, agents implement, arm merge-when-ready, apply Level B review discipline where applicable, and let required CI rulesets merge. The owner does not have to click merge.
 
 ## 13. Documentation Hierarchy
 
@@ -179,4 +182,4 @@ Lower-level documents must not contradict this charter. If they conflict, the ch
 
 ## 14. Change Control
 
-Changes to this charter must be made through a dedicated Pull Request with a clear rationale. Editorial corrections may be small; changes to mission, scope, principles, workflow, autonomy levels, or decision rights are **Level C** and require an owner decision plus independent review before merge. Independent review may be an authorized agent. The author must not approve the charter change.
+Changes to this charter must be made through a dedicated Pull Request with a clear rationale. Editorial corrections may be small; changes to mission, scope, principles, workflow, autonomy levels, or decision rights are **Level C** and require an owner decision (PO ACCEPT) before mergeable implementation. After ACCEPT, required Depot CI and process review discipline apply; formal Origin non-author `APPROVE` is not a merge gate (PO ACCEPT 2026-10-26).

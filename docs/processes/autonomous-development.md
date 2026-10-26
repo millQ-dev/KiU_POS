@@ -4,20 +4,20 @@ This process implements the charter’s agent workflow after Origin cutover. It 
 
 Canonical hosting is Cursor Origin. GitHub is backup only. See [ADR-0004](../decisions/ADR-0004-origin-source-of-truth.md) and [`origin-github-hosting.md`](origin-github-hosting.md).
 
-## Independent review
+**Review policy (PO ACCEPT 2026-10-26):** there is no second Origin reviewer principal and no Origin ruleset requiring formal non-author `APPROVE`. See [`origin-independent-review.md`](origin-independent-review.md). ChatGPT advises the Product Owner; it does not issue Origin `APPROVE`.
 
-Independent review is **mandatory**. It may be performed by an **authorized independent agent**. It does not have to be a human owner.
+## Review (process, not Origin APPROVE count)
+
+Substantive review remains part of delivery quality. It may be performed by an authorized AI review **context** (separate conversation / agent run from implementation). It is **not** required to be a distinct Origin `user_*`, and it does **not** produce a formal Origin merge-gate `APPROVE`.
 
 Rules:
 
-- The author of a change must not approve that change.
-- Implementation context and review context must be independent (separate Cloud Agent run, or a distinct authorized review agent).
-- Level C requires an **owner decision** on the proposal or ADR. After that decision, implementation, review, CI, and merge proceed autonomously. Owner decision is not the same as owner merge.
-
-A reviewer returns exactly one of:
-
-- `APPROVE`
-- `REQUEST CHANGES`
+- Do not claim a second independent Origin principal exists.
+- Level **A**: Depot CI is the Origin merge gate.
+- Level **B**: Depot CI (Origin gate) **plus** Bugbot **plus** substantive AI review (process gate) before treating the change as done.
+- Level **C**: owner PO ACCEPT on the proposal/ADR before implementation proceeds to mergeable work. After ACCEPT, CI + review discipline apply; owner does not have to click merge.
+- A review context returns guidance as `APPROVE` / `REQUEST CHANGES` **in process notes** (PR comment). That is not the old Origin approval-count gate.
+- ChatGPT strategic packets support the PO; they are not Origin reviews.
 
 ## Autonomy levels
 
@@ -41,16 +41,16 @@ Examples:
 
 Pipeline:
 
-`Implementation Agent → Origin PR + merge-when-ready → Independent Review Agent → CI/ruleset → automatic merge → Origin→GitHub backup`
+`Implementation Agent → Origin PR + merge-when-ready → mandatory Depot CI → automatic merge → Origin→GitHub backup`
 
 ### Level B — Guarded Autonomous
 
-Human approval is **not** required on each PR. An independent **specialist** review is required, and that reviewer must explicitly check the relevant invariants.
+Human Origin `APPROVE` is **not** required. Bugbot and a substantive AI review (separate context) are required as process gates.
 
 Examples:
 
 - DB schema changes
-- migrations
+- migrations (runtime/schema in repo; **persistent DB apply** still needs separate PO GO)
 - API contracts
 - domain logic
 - inventory behaviour
@@ -58,23 +58,23 @@ Examples:
 - offline/sync behaviour
 - permissions/auth implementation
 - cross-module changes
-- production infrastructure
+- production infrastructure (still no prod deploy without separate GO)
 
 Pipeline:
 
-`Implementation Agent → Origin PR + merge-when-ready → Specialist Review Agent → CI/ruleset → automatic merge → Origin→GitHub backup`
+`Implementation Agent → Origin PR + merge-when-ready → Bugbot + substantive AI review → mandatory Depot CI → automatic merge → Origin→GitHub backup`
 
-### Continuous Level A/B delivery (PO 2026-10-24)
+### Continuous Level A/B delivery (PO 2026-10-24; review gate updated 2026-10-26)
 
 For Level **A** and **B**, when the change stays inside approved scope, Accepted ADRs, and current Notion PO decisions, the Implementation Agent runs the **full** cycle without stopping after each intermediate gate:
 
-`Origin branch → implementation → tests → Origin PR → independent reviews (distinct Origin principal) → fixes → mandatory Depot CI → merge-when-ready → GitHub backup (MillQ Origin Backup App; see origin-github-backup-runbook.md)`
+`Origin branch → implementation → tests → Origin PR → (Level B: Bugbot + substantive AI review) → fixes → mandatory Depot CI → merge-when-ready → GitHub backup (MillQ Origin Backup App; see origin-github-backup-runbook.md)`
 
-Do **not** pause for owner GO after PR open, after green CI alone, or after content APPROVE, unless a gate fails or the work escalates.
+Do **not** pause for owner GO after PR open or after green CI alone, unless a gate fails or the work escalates.
 
 Allowed: small accompanying fixes required to finish the same task (tests, CI mirrors, docs drift, review threads) **without** expanding business functionality.
 
-**STOP** and escalate when: architecture conflict; Level **C** product/ADR/governance question; new material risk; required CI fail; unresolved blocking review; Bugbot blocking finding; need for ruleset bypass / force-push / self-approval.
+**STOP** and escalate when: architecture conflict; Level **C** product/ADR/governance question; new material risk; required CI fail; unresolved blocking review / Bugbot finding; need for ruleset bypass / force-push.
 
 Still forbidden on every level: production deploy; migrations on persistent / shared DBs unless a separate explicit owner GO names those environments.
 
@@ -98,7 +98,7 @@ Examples:
 
 Pipeline:
 
-`Proposal / ADR → OWNER DECISION → Implementation Agent → Origin PR + merge-when-ready → Independent Review Agent → CI/ruleset → automatic merge`
+`Proposal / ADR → OWNER DECISION (PO ACCEPT) → Implementation Agent → Origin PR + merge-when-ready → Bugbot + substantive AI review as applicable → CI/ruleset → automatic merge`
 
 After the owner accepts the decision, implementation is autonomous again. The owner does not have to merge the implementation PR. Merge-when-ready may be armed only after that owner decision is recorded.
 
@@ -113,19 +113,19 @@ Changing this file, `PROJECT_CHARTER.md`, `AGENTS.md`, or ADR-0004 is Level C.
 - Implement only the agreed scope on a branch from Origin `main`.
 - Run relevant tests and update documentation.
 - Open an Origin pull request. Declare the autonomy level.
-- **Arm merge-when-ready** on that PR when allowed (`origin pr merge --auto`). This is required for unattended Level A/B delivery. It is **not** self-approval: Origin rulesets must still require an independent `APPROVE` and required CI/checks before the merge happens.
+- **Arm merge-when-ready** on that PR when allowed (`origin pr merge --auto`). This is required for unattended Level A/B delivery. Origin merges after **required Depot CI** (and other active rulesets), not after a formal non-author `APPROVE` count.
 - Level C: arm merge-when-ready only after the owner decision is recorded on the PR.
 - Must **not**:
-  - self-approve;
+  - pretend a second Origin principal approved the change;
   - perform an immediate or unconditional merge;
   - bypass Origin branch protections;
-  - remove required reviews or checks;
+  - remove required Depot CI checks;
   - force-push or direct-push Origin `main`;
   - push to GitHub.
 
-### Review Agent
+### Review Agent (process context)
 
-A separate context from the implementation run.
+A separate **context** from the implementation run (not a second Origin account requirement).
 
 Check:
 
@@ -141,47 +141,43 @@ Check:
 - documentation
 - declared autonomy level (reject under-classified PRs)
 
-Result: `APPROVE` or `REQUEST CHANGES`. The Review Agent does **not** arm merge-when-ready. That is the Implementation Agent’s job.
-
-Self-approval is invalid even if the same person launches both agents. The **contexts** must be independent **and** the Origin principal (`user_*`) must differ from the PR author. Same-account `--approve` is rejected by Origin and is not a substitute. See [`origin-independent-review.md`](origin-independent-review.md).
+Result in process notes: `APPROVE` or `REQUEST CHANGES`. The Review Agent does **not** arm merge-when-ready. That is the Implementation Agent’s job. Process `APPROVE` is **not** an Origin approval-count gate.
 
 ### Fix Agent (implementation continuation)
 
-After `REQUEST CHANGES`:
+After process `REQUEST CHANGES` or blocking Bugbot:
 
-- Address every unresolved thread.
+- Address every unresolved thread / finding.
 - Re-run tests.
 - Push to the same Origin branch.
-- Request review again. Do not approve the follow-up yourself.
+- Re-request substantive review as needed.
 - Re-arm merge-when-ready if it was disabled (`origin pr merge --auto`). Do not merge immediately.
 
 ## Auto-merge
 
-Level A and Level B pull requests **must be able to merge automatically** once all merge requirements are met. No human merge click is required. Freedom comes from automation and rulesets, not from an unprotected `main`.
+Level A and Level B pull requests **must be able to merge automatically** once Origin requirements are met (mandatory Depot CI; push protection on `main`). No human merge click is required. Freedom comes from automation and rulesets, not from an unprotected `main`.
 
 **Direct push to Origin `main` is forbidden.**
 
 ### Who arms merge-when-ready
 
-| Actor | Arms `origin pr merge --auto`? | Approves the PR? | Merges immediately? |
+| Actor | Arms `origin pr merge --auto`? | Formal Origin APPROVE? | Merges immediately? |
 | --- | --- | --- | --- |
-| Implementation Agent (and Fix Agent) | **Yes** — required on Level A/B after opening or updating the PR. Level C only after the owner decision is recorded | **No** | **No** |
-| Review Agent | No | Yes (`APPROVE` / `REQUEST CHANGES`) | No |
-| Owner | Not required for A/B | Not required for A/B. Level C: decides the proposal/ADR | Not required |
+| Implementation Agent (and Fix Agent) | **Yes** — required on Level A/B after opening or updating the PR. Level C only after the owner decision is recorded | **Not used** as merge gate (PO ACCEPT 2026-10-26) | **No** |
+| Review Agent (process context) | No | N/A — process notes only | No |
+| Owner | Not required for A/B | Not required for A/B. Level C: PO ACCEPT on proposal/ADR | Not required |
+| ChatGPT | No | Never — strategic advisor to PO only | No |
 
-Arming merge-when-ready is not self-approval. The ruleset, not the implementer, performs the merge after independent approval and required checks.
+Arming merge-when-ready is not a substitute for required CI. The ruleset, not the implementer, performs the merge after required checks.
 
 Merge actually happens only when all of the following are true:
 
-- required tests pass
-- required CI / Origin checks pass (when CI exists; until CI exists, the Review Agent must record that CI is not yet a merge gate)
-- required independent review is `APPROVE`
-- no unresolved review threads (`origin pr thread list --unresolved` is empty)
+- required Depot CI / Origin checks pass
+- no unresolved blocking review threads / Bugbot blockers for Level B (process)
 - the branch is current with `main` if the Origin ruleset requires it
 - the change is not Level C without a recorded owner decision
-- the implementation agent is not the approving reviewer
 
-Documented Origin mechanism (verified in public CLI docs, not verified against this repo’s dashboard):
+Documented Origin mechanism:
 
 ```bash
 origin pr merge --auto
@@ -189,19 +185,17 @@ origin pr merge --auto
 
 That command means: merge once Origin requirements are met, then return. It must not be used as an immediate/unconditional merge. `--disable-auto` turns it off for that PR.
 
-Until Origin Rules and Protections are configured for this repository, auto-merge is the **target** behaviour, not a verified live gate. See remaining owner actions in [`origin-github-hosting.md`](origin-github-hosting.md).
-
 ## Target Origin protections
 
-Configure on Origin **Settings → Rules and Protections** (owner/platform operation; not applied from this GitHub checkout):
+Configure on Origin **Settings → Rules and Protections** (owner/platform operation):
 
-1. Protect `main`: pull request required; no direct pushes.
-2. Require an independent approving review. The author cannot satisfy this requirement.
-3. Require CI checks once CI is attached (Depot or Buildkite on an Origin-hosted repo; they do not apply to GitHub-mirrored repos).
-4. Allow merge-when-ready / auto-merge for PRs that meet those requirements.
-5. Do not allow bypass of Origin `main` protection for implementation agents, review agents, or human developers.
+1. Protect `main`: no direct pushes / non-FF / deletion (`Protect Origin main`) — **active**.
+2. Require Depot CI checks (`MillQ Required Depot CI`) — **active**.
+3. Allow merge-when-ready / auto-merge for PRs that meet those requirements.
+4. Do **not** require formal non-author `APPROVE` unless a future owner decision reinstates it with a real second principal.
+5. Do not allow bypass of Origin `main` protection for implementation agents or human developers for routine work.
 
-The Origin CLI can **list and view** rulesets (`origin ruleset list`). Creating or editing them is a dashboard operation. This repository does not contain a fabricated ruleset file.
+The Origin CLI can list, view, create, update, and delete rulesets (`origin ruleset …`).
 
 ## GitHub
 
