@@ -40,9 +40,14 @@ vi.mock('./api/client.js', () => ({
     resolveMenuPrices: vi.fn(),
     calculateAndAcceptCommercialTerms: vi.fn(),
     repriceAndAcceptCommercialTerms: vi.fn(),
+    acceptTaxSnapshot: vi.fn().mockResolvedValue({ taxOrderSnapshotId: 'tax-mock' }),
     openSettlement: vi.fn(),
     getLiveSettlement: vi.fn(),
     abortSettlement: vi.fn(),
+    getFiscalGate: vi.fn(),
+    issueFiscalDocument: vi.fn(),
+    reconcileFiscalDocument: vi.fn(),
+    advanceCheckout: vi.fn(),
   },
 }));
 
