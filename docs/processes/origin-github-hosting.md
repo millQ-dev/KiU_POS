@@ -93,7 +93,7 @@ The same backup automation/service identity is the sole bypass actor on **both**
 
 A GitHub branch ruleset that blocks routine writes would also reject the backup job unless that backup identity is listed. The tag ruleset is the matching control so protected tags cannot be created, moved, or deleted except by the same backup path.
 
-Do **not** copy these bypasses onto Origin `main`. Origin remains PR-only with independent review and no implementer bypass.
+Do **not** copy these bypasses onto Origin `main`. Origin remains PR-only with required Depot CI, no direct push, and no implementer bypass (formal non-author APPROVE is not a merge gate — PO ACCEPT 2026-10-26; see `origin-independent-review.md`).
 
 Repo-level rulesets on `millQ-dev/KiU_POS` were empty when last checked from this environment. Creating or confirming the two rulesets above is an owner/platform operation.
 
@@ -125,9 +125,9 @@ Do not mark cutover complete until every step below has actually been done.
 6. From this point, treat Origin as the only writable host.
 7. Start a **test Cloud Agent against the Origin MillQ repo** (not GitHub).
 8. Have that agent create a test branch and an Origin pull request (Level A, trivial, disposable) and **arm merge-when-ready** (`origin pr merge --auto`).
-9. Run an **independent** Review Agent on that PR (`APPROVE` or `REQUEST CHANGES` from a separate context). The Review Agent must not be asked to merge.
-10. Confirm CI/checks behaviour: either required checks run, or record that CI is not attached yet and is therefore not a merge gate.
-11. Confirm unattended merge: after independent `APPROVE` and required checks, Origin merges without a human click. Direct push to Origin `main` must still be rejected. Immediate/unconditional merge by the Implementation Agent must still be rejected.
+9. Confirm CI/checks behaviour: required Depot checks run as the Origin merge gate (PO ACCEPT 2026-10-26: no formal non-author APPROVE count).
+10. For Level B proof PRs, confirm Bugbot + substantive AI review (separate context) as process gates.
+11. Confirm unattended merge: after required Depot CI, Origin merges without a human click. Direct push to Origin `main` must still be rejected. Immediate/unconditional merge by the Implementation Agent must still be rejected.
 12. Confirm the test change is on Origin `main`.
 13. Run backup: Origin `main` → GitHub `main` and Origin release/protected tags → GitHub via the **backup identity only**, using its bypass on **both** GitHub rulesets. Confirm a routine identity cannot push GitHub `main` and cannot create, update, or delete those tags.
 14. Confirm GitHub `main` SHA equals Origin `main` SHA.
@@ -171,12 +171,12 @@ Not performed from the GitHub-cloned Cloud Agent that authored these docs:
 1. Merge GitHub PR #13 after independent review (last GitHub-workflow governance PR).
 2. Confirm Origin namespace `{owner}` and repo URL.
 3. Equalize Origin `main` and GitHub `main` SHAs, then **Detach from GitHub**.
-4. Protect Origin `main` (PR required, no direct push, independent review required, CI required when CI exists, merge-when-ready allowed). Do **not** give implementation agents a bypass on Origin `main`.
+4. Protect Origin `main` (no direct push; Depot CI required; merge-when-ready allowed; formal non-author APPROVE not required after PO ACCEPT 2026-10-26). Do **not** give implementation agents a bypass on Origin `main`.
 5. Attach Depot or Buildkite if CI should be a merge gate.
 6. On GitHub, apply two rulesets and give **only** the backup identity bypass on each:
    - branch ruleset on `main`: routine writes blocked;
    - tag ruleset on release/protected tags: create/update/delete restricted.
    Do not give either bypass to developers or agents. Do not add an Origin `main` bypass.
 7. Wire backup on each Origin merge; test SHA match; confirm a non-backup identity cannot push GitHub `main` or mutate protected tags.
-8. Start the first Origin Cloud Agent and run the test PR: implementer arms merge-when-ready → independent review → automatic merge → backup (cutover steps 7–14).
+8. Start the first Origin Cloud Agent and run the test PR: implementer arms merge-when-ready → required Depot CI → automatic merge → backup (cutover steps 7–14).
 9. Stop launching new implementation agents against GitHub.

@@ -1,56 +1,58 @@
-# Origin independent review — distinct principal (post #110 / #112)
+# Origin review policy (PO ACCEPT 2026-10-26)
 
-**Status:** Binding process + Origin merge ruleset (Level A/B ops). Does not amend ADR-0004 / charter.  
-**Incident #110 / #112:** PRs merged while Origin reported “Gates: none required” / no required approving review. Same Origin `user_*` cannot `--approve` its own PR. A separate chat under the **same** Cursor/Origin account is **not** an independent Approver. Bugbot is **not** a substitute unless listed as a required reviewer.
+**Status:** Binding process after Product Owner ACCEPT. Supersedes the post-#110/#112 interim rule that required a second Origin `user_*` and formal non-author `APPROVE`.  
+**Does not** amend ADR-0004 hosting SoT. Charter / `AGENTS.md` / this file / `autonomous-development.md` must stay aligned.
 
-## Rule
+## Owner decision (recorded)
 
-1. **Implementation Agent** and **Review Agent** must use **different Origin principals** (`user_*` / Cursor account), not only different conversation contexts.
-2. Same-account `--approve` is **invalid** even if the review content would have APPROVEd.
-3. Posting an APPROVE-as-comment under the author account does **not** satisfy independent review.
-4. Implementation Agent must **STOP** before treating merge-when-ready as complete if `origin pr requirements` shows missing non-author APPROVE — escalate for a second principal.
+The project has **no** second independent Origin reviewer principal. Therefore:
 
-## Effective Origin rulesets (2026-10-26)
+1. The Origin ruleset **MillQ Require non-author APPROVE** (`requiredApprovingReviewCount=1`, formerly `rs_01m5vbr0twf549p91kr7ddg4xw`) is **removed** by owner decision.
+2. Agents must **not** claim that a second Origin principal exists or that ChatGPT issues a formal Origin `APPROVE`.
+3. ChatGPT remains the **strategic / technical reviewer for the Product Owner** via safe review packets. That is PO advice, not an Origin merge gate.
+4. **Protect Origin main** (no direct push) and **MillQ Required Depot CI** stay active.
+5. Production deploy and persistent DB migrations still need a **separate explicit PO GO**.
 
-| Ruleset | Kind | Evidence |
+## Merge gates by autonomy level
+
+| Level | Origin merge gate (ruleset) | Process gate (agents must satisfy before treating delivery complete) |
 | --- | --- | --- |
-| Protect Origin main | `push_branch` | block direct updates / non-FF / deletion on `~DEFAULT_BRANCH` |
-| MillQ Required Depot CI | `merge_branch` | require Depot `Typecheck, test, build` + `Disposable PostgreSQL P0 + migrator` |
-| **MillQ Require non-author APPROVE** | `merge_branch` | `pull_request.requiredApprovingReviewCount=1` on `~DEFAULT_BRANCH` (`rs_01m5vbr0twf549p91kr7ddg4xw`) |
+| **A** | Mandatory **Depot CI** green → merge-when-ready may land | Docs/tests for the change; no fabricated independence claims |
+| **B** | Mandatory **Depot CI** green → merge-when-ready may land | **Bugbot** completed on the PR head **and** a **substantive AI review** (separate review context: correctness, scope, invariants, security, level honesty). Result recorded on the PR as comment / review notes. Not a formal Origin `APPROVE` count. |
+| **C** | Same CI protection as above once implementation is allowed | **Separate PO ACCEPT** on the proposal/ADR **before** implementing mergeable work that introduces new architectural, financial, or legal semantics. After ACCEPT: implement → PR → Level B-quality review discipline where applicable → CI → MWR |
 
-Origin also rejects author self-approve at the review API. Combined with the ruleset, merge-when-ready cannot land without a non-author APPROVE **and** required CI.
+Unresolved blocking Bugbot findings or a review context that returns **REQUEST CHANGES** still stop merge-when-ready until fixed (process), even though Origin no longer counts formal approvals.
+
+## Effective Origin rulesets (2026-10-26, after PO ACCEPT)
+
+| Ruleset | Kind | Status |
+| --- | --- | --- |
+| Protect Origin main | `push_branch` | **active** — block direct updates / non-FF / deletion on `~DEFAULT_BRANCH` |
+| MillQ Required Depot CI | `merge_branch` | **active** — Depot `Typecheck, test, build` + `Disposable PostgreSQL P0 + migrator` |
+| MillQ Require non-author APPROVE | `merge_branch` | **removed** (owner decision; ID was `rs_01m5vbr0twf549p91kr7ddg4xw`) |
 
 ## Operator checklist
 
 | Step | Who |
 | --- | --- |
-| Open Origin PR + arm `origin pr merge --auto` | Implementation Agent (author account) |
-| `origin pr review N --approve` or `--request-changes` | Review Agent on a **second** Cursor/Origin identity with repo **Write** |
-| Required CI (Depot) | Automation |
-| Merge | Origin rulesets after non-author APPROVE + required checks |
+| Open Origin PR + arm `origin pr merge --auto` | Implementation Agent (Level A/B; Level C only after PO ACCEPT) |
+| Substantive AI review (Level B; recommended on material Level A) | Separate review **context** — comment/`REQUEST CHANGES` discipline; **not** a second Origin account requirement |
+| Bugbot (Level B) | Cursor Bugbot on the PR |
+| Required CI (Depot) | Automation — **merge ruleset** |
+| Merge | Origin after required checks; no formal APPROVE count |
 | Origin→GitHub backup | MillQ Origin Backup App only (`scripts/backup-origin-to-github.sh`) |
-
-## Owner / platform — remaining gap
-
-**Ruleset:** done (require ≥1 approving review).  
-**Second principal:** still open as of 2026-10-26.
-
-`origin repo access list` currently shows a **single** Admin grant (`kuzmilman@gmail.com`). Until a distinct Review Agent identity has **Write** on `millqdev/MillQ`:
-
-1. Create or invite a second Cursor/Origin account dedicated to review (or a team Write grant).
-2. `origin repo access set -R millqdev/MillQ --user <reviewer> --role Write`
-3. Launch Review Agents signed in as that principal.
-4. Prove fail-closed: author-only PR cannot merge; after non-author APPROVE + green CI, MWR can merge.
-
-Do **not** weaken rulesets, add author bypass, or treat Bugbot as the required Approver.
-
-## Retrospective note (PR #112)
-
-Merged PR #112 was **not** formally approved by a distinct Origin principal before merge. A post-merge retrospective code review may still return APPROVE/REQUEST CHANGES for product learning; that does **not** rewrite history as pre-merge formal APPROVE.
+| Strategic PO packet | Implementation Agent fills ChatGPT packet; PO uses ChatGPT as advisor |
 
 ## What agents must not do
 
-- Self-approve under the author account.
-- Bypass Origin protections or push GitHub `main`.
-- Start another sensitive financial PR while the second Review principal is missing (gate is active but no independent Approver can act).
-- Treat Bugbot “neutral” / comment-only reviews as independent APPROVE unless Origin ruleset explicitly accepts that integration as a required reviewer.
+- Invent or claim a second independent Origin reviewer principal.
+- Treat ChatGPT output as Origin `APPROVE`.
+- Re-create `requiredApprovingReviewCount` without a new owner decision.
+- Bypass Protect Origin main, remove Depot CI requirements, force-push, or push GitHub `main`.
+- Arm merge-when-ready on Level C before PO ACCEPT is recorded.
+- Deploy to production or migrate persistent DBs without a separate PO GO.
+- Open paid Automations or new accounts to fake “independent APPROVE”.
+
+## Historical note
+
+PRs #110 / #112 exposed that “Gates: none required” allowed merge without formal APPROVE. An interim ruleset required non-author APPROVE, but the namespace had only one Write/Admin principal, so the gate could not be satisfied honestly. PO ACCEPT 2026-10-26 replaces that interim with level-based CI + Bugbot + substantive AI review, without pretending a second Origin principal exists.

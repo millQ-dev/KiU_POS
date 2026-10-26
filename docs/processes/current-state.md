@@ -17,8 +17,8 @@
 | Fiscalization (FISC1.1) | **MERGED** Core Runtime; production adapter default **unavailable**; C0-FISC1 test-satisfying adapter only with `MILLQ_ALLOW_FISCAL_TEST_ADAPTER=1` + disposable `millq_ci_pos_*` (no real provider / no G2) |
 | C0-PAY1 ReceiveCash UI | **MERGED** Origin #110 |
 | C0-FISC2 Fiscal → CompleteOrder | **MERGED** #112 — SettlementCheckout issue/reconcile + CheckoutOrchestrator advance; terminal monotonic `businessOrder`; disposable E2E 9/9 |
-| GitHub backup parity | **MATCH** Origin/GitHub `3434878…` via MillQ Origin Backup App (persistent Automation trigger still must keep App secrets) |
-| Independent Origin APPROVE | Ruleset **active** (`requiredApprovingReviewCount=1`); **second Write principal still missing** — see `origin-independent-review.md` |
+| GitHub backup parity | **MATCH** Origin/GitHub `3434878…` via MillQ Origin Backup App (drift-repair / App path; no new Automations) |
+| Origin review policy | **PO ACCEPT 2026-10-26** — formal non-author APPROVE ruleset **removed**; A=CI, B=CI+Bugbot+AI review, C=PO ACCEPT; see `origin-independent-review.md` |
 | ADR-0014 Fiscalization delta | **ACCEPTED** 2026-10-10 |
 | ADR-0014 / ADR-0013 Chronology Delta | **ACCEPTED** 2026-10-11 |
 | ADR-0038 C0 CASH+CARD PCE | **ACCEPTED** 2026-10-11 |
@@ -69,9 +69,9 @@
 
 ## Next
 
-1. Grant a **second** Origin principal Write and prove non-author APPROVE → MWR on a Level A PR (gate active; Approver identity still missing)
-2. Verify Cursor Automation “MillQ Origin→GitHub backup” fires on the next Origin merge (App secrets in vault)
-3. Do **not** start another sensitive financial PR until the Review principal exists; no real VN provider / G2 / DeviceIdentity / R1.1 / refunds
+1. Land governance docs for PO ACCEPT 2026-10-26 review policy (this PR) → CI → MWR → Origin→GitHub backup
+2. Continue C0 cafe operability inside Accepted ADRs; Level C only with separate PO ACCEPT
+3. No real VN provider / G2 / DeviceIdentity / R1.1 / refunds without separate decisions; no prod deploy / persistent migrate without separate PO GO
 
 Preserve:
 
