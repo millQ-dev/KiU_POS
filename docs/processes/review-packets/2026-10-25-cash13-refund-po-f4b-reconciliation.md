@@ -1,11 +1,10 @@
 # Level C reconciliation — ADR-0047/0048 vs PO-20261025-C0-F4 / F4Б
 
-- **Status:** **PROPOSED** reconciliation (docs only; ADRs remain **PROPOSED**, not Accepted)
-- **Date:** 2026-10-25
-- **Baseline Origin main:** `fcf7632d3638c8b74f342ec689e07c4a459d1659` (PR #106 docs)
-- **PO product source:** [PO-20261025-C0-F4 / F4Б](https://app.notion.com/p/40430d51715181d1b2adf41282cc41db) — **PO ACCEPTED:** partial monetary refund after paid **COMPLETED** Order is **mandatory** for first pilot  
-  *(Notion MCP fetch returned 404 for this integration — content taken from PO direction in this task; re-verify access before Accept.)*
-- **STOP:** Do **not** mark ADR-0047/0048 Accepted. No runtime / persistent migrate / deploy.
+- **Status:** **SUPERSEDED for ADR-0048** — historical F4Б reconciliation packet. **ADR-0048 Accepted WITH DELTAS 2026-10-27** (see `docs/decisions/ADR-0048-payments-refund-c0.md` and `docs/processes/review-packets/2026-10-27-adr-0048-po-accept-with-deltas.md`). **ADR-0047 remains PROPOSED.**
+- **Date:** 2026-10-25 (original); superseded note 2026-10-27
+- **Baseline Origin main (original):** `fcf7632d3638c8b74f342ec689e07c4a459d1659` (PR #106 docs)
+- **PO product source:** [PO-20261025-C0-F4 / F4Б](https://app.notion.com/p/40430d51715181d1b2adf41282cc41db) — **PO ACCEPTED:** partial monetary refund after paid **COMPLETED** Order is **mandatory** for first pilot
+- **STOP:** Do **not** treat this historical packet as the live ADR-0048 text. No runtime / persistent migrate / deploy from docs alone.
 
 ---
 
