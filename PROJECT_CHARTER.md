@@ -93,19 +93,20 @@ This charter does not select frameworks, programming languages, cloud vendors, o
 - Changes land through **Pull Requests on Origin**. Direct push to `main` is forbidden.
 - The **main branch is protected** by rulesets. Agent freedom comes from automation and review, not from removing protection.
 - Prefer **small atomic changes** over large mixed commits.
-- **Independent review is mandatory**, but it may be performed by an authorized independent agent. The author must not approve their own change. Implementation and review must use separate contexts.
-- The **Implementation Agent arms merge-when-ready** on Level A/B Origin PRs (`origin pr merge --auto`). That is not self-approval. Origin rulesets must still require independent approval and required CI before the merge. Immediate/unconditional merge and bypass of Origin `main` are forbidden.
-- Once CI exists, **CI must pass before merge**. Canonical CI is attached to Origin, not to the GitHub backup.
-- **Level A and Level B** pull requests merge unattended when review, CI, and ruleset requirements are met. No human merge click. See [`docs/processes/autonomous-development.md`](docs/processes/autonomous-development.md).
+- There is **no** formal Origin non-author `APPROVE` merge gate (PO ACCEPT 2026-10-26). There is no second Origin reviewer principal. ChatGPT advises the Product Owner only; it does not issue Origin `APPROVE` and is not a manual merge gate.
+- **Level B** still requires Bugbot and a **substantive AI review** in a **separate context** from implementation (process gate, not an Origin approval count). If HEAD changes after that review, re-check affected findings before arming merge-when-ready.
+- The **Implementation Agent arms merge-when-ready** (`origin pr merge --auto`) only when the level’s process gates allow it (see table below). That is not a substitute for required Depot CI. Immediate/unconditional merge and bypass of Origin `main` are forbidden.
+- **Required Depot CI must pass before merge**. Canonical CI is attached to Origin, not to the GitHub backup. Protect Origin `main` stays on.
+- **Level A and Level B** pull requests merge unattended when their process gates and Depot CI are met. No human merge click. See [`docs/processes/autonomous-development.md`](docs/processes/autonomous-development.md).
 - Hosting and cutover steps live in [`docs/processes/origin-github-hosting.md`](docs/processes/origin-github-hosting.md) and [ADR-0004](docs/decisions/ADR-0004-origin-source-of-truth.md).
 
 ### Autonomy levels
 
-| Level | Human owner on each PR? | Review | Merge |
-| --- | --- | --- | --- |
-| **A — Autonomous** | No | Independent Review Agent | Implementation Agent arms merge-when-ready; ruleset merges after review+CI |
-| **B — Guarded Autonomous** | No | Independent specialist Review Agent (invariants required) | Implementation Agent arms merge-when-ready; ruleset merges after review+CI |
-| **C — Owner decision** | Yes, on the **decision** (ADR/proposal), not necessarily on merge | Independent Review Agent after owner decision | Implementation Agent may arm merge-when-ready only after the owner decision is recorded; ruleset merges after review+CI |
+| Level | Human owner on each PR? | Process review | When to arm merge-when-ready | Origin merge |
+| --- | --- | --- | --- | --- |
+| **A — Autonomous** | No | Optional / light; not a formal Origin APPROVE | Immediately after opening the PR | Ruleset merges after **Depot CI** |
+| **B — Guarded Autonomous** | No | **Bugbot** + **substantive AI review** (separate context; invariants required). Re-check if HEAD moves | Only after Bugbot + substantive AI review on the **current HEAD**, with blocking findings cleared | Ruleset merges after **Depot CI** |
+| **C — Owner decision** | Yes, on the **decision** (ADR/proposal), not necessarily on merge | PO ACCEPT first; then Level B-quality review discipline where applicable | Only after **PO ACCEPT** is recorded, then after applicable review gates on current HEAD | Ruleset merges after **Depot CI** |
 
 Level A: ordinary bug fixes, UI inside an approved design, tests, documentation, safe refactors, small implementation changes that do not change public contracts or architecture.
 
@@ -125,9 +126,9 @@ Minimum delivery roles:
 
 | Role | Responsibility |
 | --- | --- |
-| Implementation Agent | Classify autonomy level, implement agreed scope on an Origin branch, test, document, open Origin PR, **arm merge-when-ready** on Level A/B (Level C only after owner decision). Must not merge immediately, bypass Origin protections, remove required Depot CI, or push to GitHub. |
-| Review Agent | Separate context (process). Checks correctness, scope, regressions, architecture, tests, migrations, security, money/inventory invariants, compatibility, docs, and declared level. Returns process `APPROVE` or `REQUEST CHANGES` in PR notes — not an Origin approval-count gate. |
-| Fix Agent | Same implementation identity after `REQUEST CHANGES`: fix threads, re-test, push, re-arm merge-when-ready. Must not merge immediately. |
+| Implementation Agent | Classify autonomy level, implement agreed scope on an Origin branch, test, document, open Origin PR, **arm merge-when-ready** when the level allows (A: after PR open; B: after Bugbot + substantive AI review on current HEAD; C: after PO ACCEPT, then applicable review). Must not merge immediately, bypass Origin protections, remove required Depot CI, or push to GitHub. |
+| Review Agent | Separate context (process). Checks correctness, scope, regressions, architecture, tests, migrations, security, money/inventory invariants, compatibility, docs, and declared level. Returns process `APPROVE` or `REQUEST CHANGES` in PR notes — not an Origin approval-count gate. Does not arm merge-when-ready. |
+| Fix Agent | Same implementation identity after `REQUEST CHANGES` / blocking Bugbot: fix, re-test, push; for Level B re-run review on new HEAD before re-arming merge-when-ready. Must not merge immediately. |
 
 Specialist roles (Product Analyst, System Architect, QA, Security, Documentation, and others) may act as the Review Agent when the change is Level B in their domain.
 
@@ -154,7 +155,7 @@ A task is complete only when all of the following are true:
 - migrations are checked when schema changes are involved
 - the Pull Request is linked to the relevant Cloud Agent run and/or tracked Origin work item and declares autonomy level A, B, or C
 - required Depot CI passes
-- Level A/B PRs have merge-when-ready armed by the Implementation Agent; Level C has a recorded owner decision before merge-when-ready
+- Merge-when-ready armed per level order (A after PR open; B after Bugbot + substantive AI review on current HEAD; C after PO ACCEPT then applicable review); required Depot CI green
 
 ## 12. Decision-Making
 

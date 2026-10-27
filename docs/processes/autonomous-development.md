@@ -17,7 +17,7 @@ Rules:
 - Level **B**: Depot CI (Origin gate) **plus** Bugbot **plus** substantive AI review (process gate) before treating the change as done.
 - Level **C**: owner PO ACCEPT on the proposal/ADR before implementation proceeds to mergeable work. After ACCEPT, CI + review discipline apply; owner does not have to click merge.
 - A review context returns guidance as `APPROVE` / `REQUEST CHANGES` **in process notes** (PR comment). That is not the old Origin approval-count gate.
-- ChatGPT strategic packets support the PO; they are not Origin reviews.
+- ChatGPT review packets are **PO consultation only** — not Origin reviews and not a required manual merge gate.
 
 ## Autonomy levels
 
@@ -41,11 +41,11 @@ Examples:
 
 Pipeline:
 
-`Implementation Agent → Origin PR + merge-when-ready → mandatory Depot CI → automatic merge → Origin→GitHub backup`
+`Implementation Agent → Origin PR → arm merge-when-ready → mandatory Depot CI → automatic merge → Origin→GitHub backup`
 
 ### Level B — Guarded Autonomous
 
-Human Origin `APPROVE` is **not** required. Bugbot and a substantive AI review (separate context) are required as process gates.
+Human Origin `APPROVE` is **not** required. Bugbot and a substantive AI review (separate context) are required as process gates **before** arming merge-when-ready.
 
 Examples:
 
@@ -62,15 +62,17 @@ Examples:
 
 Pipeline:
 
-`Implementation Agent → Origin PR + merge-when-ready → Bugbot + substantive AI review → mandatory Depot CI → automatic merge → Origin→GitHub backup`
+`Implementation Agent → Origin PR → Bugbot + substantive AI review on HEAD → clear blockers → arm merge-when-ready → mandatory Depot CI → automatic merge → Origin→GitHub backup`
+
+If HEAD changes after Bugbot or substantive AI review, **re-check affected findings** on the new HEAD before arming or re-arming merge-when-ready.
 
 ### Continuous Level A/B delivery (PO 2026-10-24; review gate updated 2026-10-26)
 
-For Level **A** and **B**, when the change stays inside approved scope, Accepted ADRs, and current Notion PO decisions, the Implementation Agent runs the **full** cycle without stopping after each intermediate gate:
+For Level **A** and **B**, when the change stays inside approved scope, Accepted ADRs, and current Notion PO decisions, the Implementation Agent runs the **full** cycle without stopping for owner GO at each intermediate step:
 
-`Origin branch → implementation → tests → Origin PR → (Level B: Bugbot + substantive AI review) → fixes → mandatory Depot CI → merge-when-ready → GitHub backup (MillQ Origin Backup App; see origin-github-backup-runbook.md)`
+`Origin branch → implementation → tests → Origin PR → (A: arm MWR) / (B: Bugbot + substantive AI review → clear blockers → arm MWR) → mandatory Depot CI → merge → GitHub backup (MillQ Origin Backup App; see origin-github-backup-runbook.md)`
 
-Do **not** pause for owner GO after PR open or after green CI alone, unless a gate fails or the work escalates.
+Do **not** pause for owner GO after PR open or after green CI alone, unless a gate fails or the work escalates. Do **not** arm Level B merge-when-ready before Bugbot + substantive AI review on the current HEAD.
 
 Allowed: small accompanying fixes required to finish the same task (tests, CI mirrors, docs drift, review threads) **without** expanding business functionality.
 
@@ -98,9 +100,9 @@ Examples:
 
 Pipeline:
 
-`Proposal / ADR → OWNER DECISION (PO ACCEPT) → Implementation Agent → Origin PR + merge-when-ready → Bugbot + substantive AI review as applicable → CI/ruleset → automatic merge`
+`Proposal / ADR → OWNER DECISION (PO ACCEPT) → Implementation Agent → Origin PR → Bugbot + substantive AI review as applicable on HEAD → arm merge-when-ready → CI/ruleset → automatic merge`
 
-After the owner accepts the decision, implementation is autonomous again. The owner does not have to merge the implementation PR. Merge-when-ready may be armed only after that owner decision is recorded.
+After the owner accepts the decision, implementation is autonomous again. The owner does not have to merge the implementation PR. Merge-when-ready may be armed only after that owner decision is recorded **and** applicable review gates on the current HEAD are satisfied.
 
 Changing this file, `PROJECT_CHARTER.md`, `AGENTS.md`, or ADR-0004 is Level C.
 
@@ -113,8 +115,11 @@ Changing this file, `PROJECT_CHARTER.md`, `AGENTS.md`, or ADR-0004 is Level C.
 - Implement only the agreed scope on a branch from Origin `main`.
 - Run relevant tests and update documentation.
 - Open an Origin pull request. Declare the autonomy level.
-- **Arm merge-when-ready** on that PR when allowed (`origin pr merge --auto`). This is required for unattended Level A/B delivery. Origin merges after **required Depot CI** (and other active rulesets), not after a formal non-author `APPROVE` count.
-- Level C: arm merge-when-ready only after the owner decision is recorded on the PR.
+- **Arm merge-when-ready** when the level allows (`origin pr merge --auto`):
+  - **A:** right after opening the PR.
+  - **B:** only after Bugbot + substantive AI review on the **current HEAD**, blocking findings cleared (re-check if HEAD moves).
+  - **C:** only after PO ACCEPT is recorded, then after applicable review on current HEAD.
+- Origin merges after **required Depot CI** (and other active rulesets), not after a formal non-author `APPROVE` count.
 - Must **not**:
   - pretend a second Origin principal approved the change;
   - perform an immediate or unconditional merge;
@@ -149,9 +154,9 @@ After process `REQUEST CHANGES` or blocking Bugbot:
 
 - Address every unresolved thread / finding.
 - Re-run tests.
-- Push to the same Origin branch.
-- Re-request substantive review as needed.
-- Re-arm merge-when-ready if it was disabled (`origin pr merge --auto`). Do not merge immediately.
+- Push to the same Origin branch (HEAD moved).
+- Re-run Bugbot / substantive AI review on the **new HEAD** as needed; clear blockers.
+- Then re-arm merge-when-ready (`origin pr merge --auto`). Do not merge immediately.
 
 ## Auto-merge
 
@@ -163,17 +168,18 @@ Level A and Level B pull requests **must be able to merge automatically** once O
 
 | Actor | Arms `origin pr merge --auto`? | Formal Origin APPROVE? | Merges immediately? |
 | --- | --- | --- | --- |
-| Implementation Agent (and Fix Agent) | **Yes** — required on Level A/B after opening or updating the PR. Level C only after the owner decision is recorded | **Not used** as merge gate (PO ACCEPT 2026-10-26) | **No** |
+| Implementation Agent (and Fix Agent) | **Yes**, in level order: A after PR open; B after Bugbot + substantive AI review on current HEAD; C after PO ACCEPT then applicable review | **Not used** as merge gate (PO ACCEPT 2026-10-26) | **No** |
 | Review Agent (process context) | No | N/A — process notes only | No |
 | Owner | Not required for A/B | Not required for A/B. Level C: PO ACCEPT on proposal/ADR | Not required |
-| ChatGPT | No | Never — strategic advisor to PO only | No |
+| ChatGPT | No | Never — PO consultation only; not a merge gate | No |
 
 Arming merge-when-ready is not a substitute for required CI. The ruleset, not the implementer, performs the merge after required checks.
 
 Merge actually happens only when all of the following are true:
 
+- merge-when-ready was armed only after the level’s process gates (see above)
 - required Depot CI / Origin checks pass
-- no unresolved blocking review threads / Bugbot blockers for Level B (process)
+- no unresolved blocking review threads / Bugbot blockers for Level B (process) on the HEAD being merged
 - the branch is current with `main` if the Origin ruleset requires it
 - the change is not Level C without a recorded owner decision
 

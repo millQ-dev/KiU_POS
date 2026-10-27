@@ -18,7 +18,7 @@
 | C0-PAY1 ReceiveCash UI | **MERGED** Origin #110 |
 | C0-FISC2 Fiscal → CompleteOrder | **MERGED** #112 — SettlementCheckout issue/reconcile + CheckoutOrchestrator advance; terminal monotonic `businessOrder`; disposable E2E 9/9 |
 | GitHub backup parity | **MATCH** Origin/GitHub `3434878…` via MillQ Origin Backup App (drift-repair / App path; no new Automations) |
-| Origin review policy | **PO ACCEPT 2026-10-26** — formal non-author APPROVE ruleset **removed**; A=CI, B=CI+Bugbot+AI review, C=PO ACCEPT; see `origin-independent-review.md` |
+| Origin review policy | **PO ACCEPT 2026-10-26** — formal non-author APPROVE ruleset **removed**; A=arm MWR→CI, B=Bugbot+AI review→arm MWR→CI, C=PO ACCEPT then review/CI; ChatGPT packet = PO consultation only; see `origin-independent-review.md` |
 | ADR-0014 Fiscalization delta | **ACCEPTED** 2026-10-10 |
 | ADR-0014 / ADR-0013 Chronology Delta | **ACCEPTED** 2026-10-11 |
 | ADR-0038 C0 CASH+CARD PCE | **ACCEPTED** 2026-10-11 |
@@ -69,8 +69,8 @@
 
 ## Next
 
-1. Land governance docs for PO ACCEPT 2026-10-26 review policy (this PR) → CI → MWR → Origin→GitHub backup
-2. Continue C0 cafe operability inside Accepted ADRs; Level C only with separate PO ACCEPT
+1. Continue C0 cafe operability inside Accepted ADRs; Level C only with separate PO ACCEPT
+2. Obey MWR arming order (A after PR open; B after Bugbot+AI review on HEAD; C after PO ACCEPT)
 3. No real VN provider / G2 / DeviceIdentity / R1.1 / refunds without separate decisions; no prod deploy / persistent migrate without separate PO GO
 
 Preserve:
