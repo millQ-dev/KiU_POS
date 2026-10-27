@@ -1,10 +1,10 @@
 # MillQ Current State
 
-**Checkpoint:** C0-FISC2 **MERGED** Origin #112 @ `343487819aa669798dbe1c38426d03c7f6023c2a` — GitHub backup **MATCH** (App FF 2026-10-26)  
+**Checkpoint:** C0-CHRONO1 **MERGED** Origin #116 @ `488bd049d2ab460ee63c9a7079ae06d9d0df0d95` — follow-up C0-CHRONO1.1 (Web Locks only) in flight  
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)  
 **GitHub backup (sole):** `https://github.com/millQ-dev/KiU_POS.git`  
   (`millQ-dev/MillQ` = legacy rename redirect to the same repository ID)  
-**Updated:** 2026-10-26
+**Updated:** 2026-10-27
 
 ## Runtime / CI / backup
 
@@ -17,8 +17,9 @@
 | Fiscalization (FISC1.1) | **MERGED** Core Runtime; production adapter default **unavailable**; C0-FISC1 test-satisfying adapter only with `MILLQ_ALLOW_FISCAL_TEST_ADAPTER=1` + disposable `millq_ci_pos_*` (no real provider / no G2) |
 | C0-PAY1 ReceiveCash UI | **MERGED** Origin #110 |
 | C0-FISC2 Fiscal → CompleteOrder | **MERGED** #112 — SettlementCheckout issue/reconcile + CheckoutOrchestrator advance; terminal monotonic `businessOrder`; disposable E2E |
-| C0-CHRONO1 Terminal businessOrder | **IN PR** — Web Locks / busy-lock allocation; session-persisted locked chronology for UNKNOWN/reload; concurrent tests |
-| GitHub backup parity | **MATCH** Origin/GitHub `3434878…` via MillQ Origin Backup App (drift-repair / App path; no new Automations) |
+| C0-CHRONO1 Terminal businessOrder | **MERGED** #116 @ `488bd04…` — device monotonic `businessOrder`; session-locked Complete chronology; concurrent tests |
+| C0-CHRONO1.1 Web Locks only | **IN PR** — remove unsafe localStorage busy-lock; fail closed without `navigator.locks`; durable sessionStorage for Complete key/chrono |
+| GitHub backup parity | **MATCH** Origin/GitHub (post-#116 `488bd04…`; refresh after each merge) |
 | Origin review policy | **PO ACCEPT 2026-10-26** — formal non-author APPROVE ruleset **removed**; A=arm MWR→CI, B=Bugbot+AI review→arm MWR→CI, C=PO ACCEPT then review/CI; ChatGPT packet = PO consultation only; see `origin-independent-review.md` |
 | ADR-0014 Fiscalization delta | **ACCEPTED** 2026-10-10 |
 | ADR-0014 / ADR-0013 Chronology Delta | **ACCEPTED** 2026-10-11 |

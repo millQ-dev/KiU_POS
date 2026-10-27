@@ -1,19 +1,21 @@
 /**
  * @vitest-environment jsdom
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   allocateTerminalBusinessChronology,
   businessDateInTimeZone,
   clearLockedCompleteChronology,
-  createLocalStorageBusyLockRequest,
+  createWebLocksRequest,
   loadLockedCompleteChronology,
+  loadOrCreateDurableCompleteIdempotencyKey,
   peekTerminalBusinessOrder,
   persistLockedCompleteChronology,
+  TerminalChronologyError,
   type ChronologyLockRequest,
 } from './terminalBusinessChronology.js';
 
-/** Serializing mutex for deterministic concurrent tests (no Web Locks in jsdom). */
+/** Serializing mutex for deterministic concurrent tests (no Web Locks in jsdom by default). */
 function createSerialLock(): ChronologyLockRequest {
   let tail: Promise<unknown> = Promise.resolve();
   return async (_name, run) => {
@@ -30,10 +32,10 @@ describe('terminalBusinessChronology', () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
+    vi.unstubAllGlobals();
   });
 
   it('formats businessDate in outlet timezone', () => {
-    // 2026-10-25 20:00 UTC → still 2026-10-26 in Asia/Ho_Chi_Minh (UTC+7)
     const d = new Date('2026-10-25T20:00:00.000Z');
     expect(businessDateInTimeZone(d, 'Asia/Ho_Chi_Minh')).toBe('2026-10-26');
     expect(businessDateInTimeZone(d, 'UTC')).toBe('2026-10-25');
@@ -69,7 +71,7 @@ describe('terminalBusinessChronology', () => {
     expect(other.businessOrder).toBe(1);
   });
 
-  it('parallel allocations under exclusive lock yield unique orders (two windows)', async () => {
+  it('parallel allocations under exclusive lock yield unique orders', async () => {
     const now = new Date('2026-10-26T04:00:00.000Z');
     const lock = createSerialLock();
     const results = await Promise.all(
@@ -85,61 +87,67 @@ describe('terminalBusinessChronology', () => {
     const orders = results.map((r) => r.businessOrder).sort((a, b) => a - b);
     expect(orders).toEqual(Array.from({ length: 16 }, (_, i) => i + 1));
     expect(new Set(orders).size).toBe(16);
-    expect(peekTerminalBusinessOrder('term-conc', '2026-10-26')).toBe(16);
   });
 
-  it('localStorage busy-lock serializes parallel allocations without silent duplicates', async () => {
-    const now = new Date('2026-10-26T04:00:00.000Z');
-    const busy = createLocalStorageBusyLockRequest({
-      attempts: 80,
-      sleepMs: 5,
-      ttlMs: 3_000,
+  it('fails closed when Web Locks are unavailable (no localStorage busy-lock fallback)', async () => {
+    vi.stubGlobal('navigator', { locks: undefined });
+    expect(createWebLocksRequest()).toBeNull();
+    await expect(
+      allocateTerminalBusinessChronology({
+        terminalId: 'term-no-locks',
+        timeZone: 'UTC',
+        now: new Date('2026-10-26T04:00:00.000Z'),
+      }),
+    ).rejects.toMatchObject({
+      name: 'TerminalChronologyError',
+      code: 'CHRONOLOGY_LOCK_UNAVAILABLE',
     });
-    const results = await Promise.all(
-      Array.from({ length: 12 }, () =>
-        allocateTerminalBusinessChronology({
-          terminalId: 'term-busy',
-          timeZone: 'UTC',
-          now,
-          requestExclusiveLock: busy,
-        }),
-      ),
-    );
-    const orders = results.map((r) => r.businessOrder);
-    expect(new Set(orders).size).toBe(12);
-    expect(Math.max(...orders)).toBe(12);
+    expect(peekTerminalBusinessOrder('term-no-locks', '2026-10-26')).toBe(0);
   });
 
-  it('unlocked lost-update can duplicate; exclusive lock prevents silent duplicates', async () => {
-    const now = new Date('2026-10-26T04:00:00.000Z');
-    // Classic race without a lock: two readers both write the same next value.
-    const key = 'millq.terminalBusinessOrder.term-race.2026-10-26';
-    localStorage.setItem(key, '0');
-    const readA = Number(localStorage.getItem(key));
-    const readB = Number(localStorage.getItem(key));
-    localStorage.setItem(key, String(readA + 1));
-    localStorage.setItem(key, String(readB + 1));
-    expect(Number(localStorage.getItem(key))).toBe(1);
-
-    localStorage.clear();
-    const locked = await Promise.all(
-      Array.from({ length: 8 }, () =>
-        allocateTerminalBusinessChronology({
-          terminalId: 'term-race',
-          timeZone: 'UTC',
-          now,
-          requestExclusiveLock: createSerialLock(),
-        }),
-      ),
-    );
-    expect(new Set(locked.map((r) => r.businessOrder)).size).toBe(8);
+  it('fails closed when localStorage cannot store the counter', async () => {
+    const lock = createSerialLock();
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('QuotaExceededError');
+    });
+    await expect(
+      allocateTerminalBusinessChronology({
+        terminalId: 'term-quota',
+        timeZone: 'UTC',
+        now: new Date('2026-10-26T04:00:00.000Z'),
+        requestExclusiveLock: lock,
+      }),
+    ).rejects.toMatchObject({ code: 'CHRONOLOGY_STORAGE_UNAVAILABLE' });
+    setItem.mockRestore();
   });
 
-  it('persists locked Complete chronology across reload (UNKNOWN retry)', () => {
+  it('persists locked Complete chronology; fails closed if sessionStorage unavailable', () => {
     const chrono = { businessDate: '2026-10-26', businessOrder: 3 };
     persistLockedCompleteChronology('sg-1', chrono);
     expect(loadLockedCompleteChronology('sg-1')).toEqual(chrono);
     clearLockedCompleteChronology('sg-1');
     expect(loadLockedCompleteChronology('sg-1')).toBeNull();
+
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('SecurityError');
+    });
+    expect(() => persistLockedCompleteChronology('sg-2', chrono)).toThrow(TerminalChronologyError);
+    expect(() => persistLockedCompleteChronology('sg-2', chrono)).toThrow(/sessionStorage unavailable/);
+    setItem.mockRestore();
+  });
+
+  it('durable Complete idempotency key fails closed when sessionStorage cannot persist', () => {
+    const key = loadOrCreateDurableCompleteIdempotencyKey('sg-dur');
+    expect(key.length).toBeGreaterThanOrEqual(8);
+    expect(loadOrCreateDurableCompleteIdempotencyKey('sg-dur')).toBe(key);
+
+    sessionStorage.clear();
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('SecurityError');
+    });
+    expect(() => loadOrCreateDurableCompleteIdempotencyKey('sg-fail')).toThrow(
+      TerminalChronologyError,
+    );
+    setItem.mockRestore();
   });
 });

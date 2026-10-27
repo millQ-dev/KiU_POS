@@ -5,6 +5,7 @@ import {
   allocateTerminalBusinessChronology,
   clearLockedCompleteChronology,
   loadLockedCompleteChronology,
+  loadOrCreateDurableCompleteIdempotencyKey,
   persistLockedCompleteChronology,
   TerminalChronologyError,
 } from './terminalBusinessChronology.js';
@@ -213,10 +214,27 @@ export function SettlementCheckoutPanel({
     [live?.settlementGroupId],
   );
 
-  const completeKey = useMemo(
-    () => (live ? loadOrCreateKeyed(COMPLETE_KEY_PREFIX, live.settlementGroupId) : ''),
-    [live?.settlementGroupId],
-  );
+  const [completeKey, setCompleteKey] = useState('');
+  const [completeKeyError, setCompleteKeyError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!live) {
+      setCompleteKey('');
+      setCompleteKeyError(null);
+      return;
+    }
+    try {
+      setCompleteKey(loadOrCreateDurableCompleteIdempotencyKey(live.settlementGroupId));
+      setCompleteKeyError(null);
+    } catch (err) {
+      setCompleteKey('');
+      setCompleteKeyError(
+        err instanceof TerminalChronologyError
+          ? err.message
+          : 'sessionStorage unavailable for CompleteOrder idempotency',
+      );
+    }
+  }, [live?.settlementGroupId]);
 
   useEffect(() => {
     if (!live) {
@@ -486,6 +504,13 @@ export function SettlementCheckoutPanel({
       setCompleteError('CompleteOrder requires server FiscalCheckoutGate SATISFIED (or NOT_REQUIRED).');
       return;
     }
+    if (!completeKey || completeKeyError) {
+      setCompleteError(
+        completeKeyError ??
+          'CompleteOrder idempotency key unavailable; refuse unsafe retry without durable sessionStorage',
+      );
+      return;
+    }
     setCompleteBusy(true);
     setCompleteError(null);
     setCompleteUnknown(null);
@@ -497,8 +522,10 @@ export function SettlementCheckoutPanel({
           timeZone: outletTimeZone || 'Asia/Ho_Chi_Minh',
         });
       }
-      setLockedChronology(chrono);
+      // Persist before network — if sessionStorage fails, do not call CompleteOrder
+      // (reload would otherwise mint a new key/chronology while a prior attempt may exist).
       persistLockedCompleteChronology(live.settlementGroupId, chrono);
+      setLockedChronology(chrono);
     } catch (err) {
       const msg =
         err instanceof TerminalChronologyError
@@ -592,6 +619,8 @@ export function SettlementCheckoutPanel({
     paymentSatisfied &&
     fiscalSatisfied &&
     !!terminalId &&
+    !!completeKey &&
+    !completeKeyError &&
     !completeBusy &&
     !fiscalBusy &&
     !busy &&
@@ -922,6 +951,11 @@ export function SettlementCheckoutPanel({
                 <p className="pos-settlement__hint" data-testid="complete-chronology-locked">
                   Chronology locked for retry: {lockedChronology.businessDate} #
                   {lockedChronology.businessOrder}
+                </p>
+              ) : null}
+              {completeKeyError ? (
+                <p role="alert" data-testid="complete-storage-error">
+                  {completeKeyError}
                 </p>
               ) : null}
               {completeError ? (

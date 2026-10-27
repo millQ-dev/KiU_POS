@@ -26,6 +26,12 @@ import { ClosingCashScreen } from './cashier/ClosingCashScreen.js';
 import { OpeningCashScreen } from './cashier/OpeningCashScreen.js';
 import { PinAuthScreen } from './cashier/PinAuthScreen.js';
 import { GuestMenuPage } from './guest/GuestMenuPage.js';
+import { installTerminalChronologyTestHooks } from './cashier/terminalBusinessChronology.js';
+
+// DEV / disposable E2E: Playwright calls the production chronology helper (no inlined algorithm).
+if (import.meta.env.DEV) {
+  installTerminalChronologyTestHooks(window);
+}
 
 function readDevStored(): CashierContext | null {
   if (!isDevCashierPathEnabled()) return null;

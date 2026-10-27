@@ -47,8 +47,18 @@ describe('SettlementCheckoutPanel fiscal → CompleteOrder', () => {
     sessionStorage.clear();
     localStorage.clear();
     sessionFetch.mockReset();
+    // jsdom has no Web Locks — production requires them; tests inject a serial exclusive lock.
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async (_name: string, _opts: unknown, callback: () => unknown) => callback(),
+      },
+    });
   });
-  afterEach(() => cleanup());
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    cleanup();
+  });
 
   it('issues fiscal, unlocks CompleteOrder only after gate SATISFIED, posts advance-checkout', async () => {
     const onOrderCompleted = vi.fn();
