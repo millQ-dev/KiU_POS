@@ -649,6 +649,7 @@ describe('Block D1.3B Sale GoodsIssue via Orders (PostgreSQL)', () => {
     expect(facts.rows[0]!.c).toBe('0');
   });
 
+  // C0-CHRONO1 server half: UNKNOWN/reload retry with same complete key must not create a second GoodsIssue.
   it('6 — same-key retry → duplicate, zero extra movements', async () => {
     await receiveMilkStock(5, '10000');
     const order = await openMilkOrder('1');

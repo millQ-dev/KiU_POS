@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { sessionFetch } from '../api/sessionClient.js';
 import type { SettlementProjection } from '../api/types.js';
-import { allocateTerminalBusinessChronology } from './terminalBusinessChronology.js';
+import {
+  allocateTerminalBusinessChronology,
+  clearLockedCompleteChronology,
+  loadLockedCompleteChronology,
+  persistLockedCompleteChronology,
+  TerminalChronologyError,
+} from './terminalBusinessChronology.js';
 import './SettlementCheckout.css';
 
 export type CashTenderOption = {
@@ -189,11 +195,13 @@ export function SettlementCheckoutPanel({
   const [completeError, setCompleteError] = useState<string | null>(null);
   const [completeUnknown, setCompleteUnknown] = useState<string | null>(null);
   const [completeResult, setCompleteResult] = useState<CompleteResultView | null>(null);
-  /** Chronology locked after first Complete attempt — UNKNOWN retry must reuse it. */
+  /** Chronology locked after first Complete attempt — UNKNOWN/reload retry must reuse it. */
   const [lockedChronology, setLockedChronology] = useState<{
     businessDate: string;
     businessOrder: number;
-  } | null>(null);
+  } | null>(() =>
+    live ? loadLockedCompleteChronology(live.settlementGroupId) : null,
+  );
 
   const receiveKey = useMemo(
     () => (primaryCheck ? loadOrCreateReceiveKey(primaryCheck.settlementCheckId) : ''),
@@ -209,6 +217,15 @@ export function SettlementCheckoutPanel({
     () => (live ? loadOrCreateKeyed(COMPLETE_KEY_PREFIX, live.settlementGroupId) : ''),
     [live?.settlementGroupId],
   );
+
+  useEffect(() => {
+    if (!live) {
+      setLockedChronology(null);
+      return;
+    }
+    const persisted = loadLockedCompleteChronology(live.settlementGroupId);
+    if (persisted) setLockedChronology(persisted);
+  }, [live?.settlementGroupId]);
 
   const refreshFiscalGate = useCallback(async () => {
     if (!live) {
@@ -472,13 +489,25 @@ export function SettlementCheckoutPanel({
     setCompleteBusy(true);
     setCompleteError(null);
     setCompleteUnknown(null);
-    const chrono =
-      lockedChronology ??
-      allocateTerminalBusinessChronology({
-        terminalId,
-        timeZone: outletTimeZone || 'Asia/Ho_Chi_Minh',
-      });
-    setLockedChronology(chrono);
+    let chrono = lockedChronology ?? loadLockedCompleteChronology(live.settlementGroupId);
+    try {
+      if (!chrono) {
+        chrono = await allocateTerminalBusinessChronology({
+          terminalId,
+          timeZone: outletTimeZone || 'Asia/Ho_Chi_Minh',
+        });
+      }
+      setLockedChronology(chrono);
+      persistLockedCompleteChronology(live.settlementGroupId, chrono);
+    } catch (err) {
+      const msg =
+        err instanceof TerminalChronologyError
+          ? err.message
+          : 'Could not allocate terminal businessOrder';
+      setCompleteError(msg);
+      setCompleteBusy(false);
+      return;
+    }
     try {
       const res = await sessionFetch(
         `/api/v1/settlements/${encodeURIComponent(live.settlementGroupId)}/advance-checkout`,
@@ -516,6 +545,7 @@ export function SettlementCheckoutPanel({
       if (res.ok && orderId && orderStatus) {
         clearKeyed(ISSUE_KEY_PREFIX, live.settlementGroupId);
         clearKeyed(COMPLETE_KEY_PREFIX, live.settlementGroupId);
+        clearLockedCompleteChronology(live.settlementGroupId);
         const result: CompleteResultView = {
           orderId,
           status: orderStatus,
@@ -545,6 +575,7 @@ export function SettlementCheckoutPanel({
       // Non-unknown validation failures unlock chronology for a corrected retry.
       if (code !== 'IDEMPOTENCY_CONFLICT') {
         setLockedChronology(null);
+        clearLockedCompleteChronology(live.settlementGroupId);
       }
     } catch {
       setCompleteUnknown(
