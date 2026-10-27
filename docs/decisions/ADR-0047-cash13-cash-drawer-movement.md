@@ -4,11 +4,11 @@
 - **Date:** 2026-10-25
 - **Package alias:** **CASH1.3**
 - **Decision owners:** Product Owner and System Architect
-- **Related:** ADR-0002; ADR-0013; ADR-0036; ADR-0038; ADR-0046 (Accepted CASH1.2); Proposed ADR-0048 (Payments Refund); domain-module-map Cash Management
+- **Related:** ADR-0002; ADR-0013; ADR-0036; ADR-0038; ADR-0046 (Accepted CASH1.2); **ADR-0048 Accepted WITH DELTAS 2026-10-27** (Payments Refund); domain-module-map Cash Management
 - **Autonomy:** Level **C** docs only until Accept
 - **Origin main at proposal:** `6b97f3dcb650882135d5e29450cdf14c622ab547`
-- **Companion packets:** `docs/processes/review-packets/2026-10-25-cash13-refund-level-c-decision-packet.md`; F4Б reconciliation `docs/processes/review-packets/2026-10-25-cash13-refund-po-f4b-reconciliation.md`
-- **Note (2026-10-25):** F4Б / ADR-0048 refund deltas do **not** change CashDrawerMovement ownership; refund still must **not** twin as CASH_OUT
+- **Companion packets:** `docs/processes/review-packets/2026-10-25-cash13-refund-level-c-decision-packet.md`; F4Б reconciliation `docs/processes/review-packets/2026-10-25-cash13-refund-po-f4b-reconciliation.md`; ADR-0048 Accept stamp `docs/processes/review-packets/2026-10-27-adr-0048-po-accept-with-deltas.md`
+- **Note (2026-10-25 / updated 2026-10-27):** ADR-0048 Accept does **not** change CashDrawerMovement ownership; CASH refund must **not** twin as CASH_OUT / CashDrawerMovement. ADR-0047 remains **PROPOSED**.
 
 ---
 

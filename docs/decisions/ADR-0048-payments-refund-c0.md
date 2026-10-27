@@ -1,235 +1,271 @@
-# ADR-0048: Payments Refund (C0 CASH path) — Proposed
+# ADR-0048: Payments Refund (C0 CASH + VietQR pilot)
 
-- **Status:** **PROPOSED** (non-authoritative; does not change Accepted rules or runtime)
-- **Date:** 2026-10-25
+- **Status:** **Accepted WITH DELTAS** (PO **ACCEPT WITH DELTAS** 2026-10-27)
+- **Date:** 2026-10-25 (proposed); **Accepted:** 2026-10-27
 - **Package alias:** **PAY-REFUND-C0**
 - **Decision owners:** Product Owner and System Architect
-- **Related:** ADR-0002; ADR-0013; ADR-0014 (fiscal correction chains — separate); ADR-0028 (refund ≠ rewrite Order commercial); ADR-0032 (abort ≠ refund); ADR-0036; ADR-0038 (refunds RELEASE-BLOCKING OPEN); ADR-0046; Proposed ADR-0047 (CashDrawerMovement)
-- **Autonomy:** Level **C** docs only until Accept
-- **Origin main at proposal:** `6b97f3dcb650882135d5e29450cdf14c622ab547`
-- **Companion packets:** `docs/processes/review-packets/2026-10-25-cash13-refund-level-c-decision-packet.md`; **F4Б reconciliation** `docs/processes/review-packets/2026-10-25-cash13-refund-po-f4b-reconciliation.md`
-- **Revised (PROPOSED delta):** 2026-10-25 — reconcile R1/R3/R4/R6/R7 with PO-20261025-C0-F4 / F4Б (partial refund mandatory for pilot)
+- **Related:** ADR-0002; ADR-0013; ADR-0014 (+ LEGAL GATE G2); ADR-0028; ADR-0032; ADR-0036; ADR-0038; ADR-0046; Proposed ADR-0047 (CashDrawerMovement — anti double-count); F4Б PO-20261025-C0-F4
+- **Autonomy:** Level **C** (this Accept). Runtime under this Accepted ADR is Level **B** (separate authorization). Production deploy / persistent DB migrate / real payouts / G2 claim require **separate** PO GO.
+- **Origin main at Accept baseline:** `c3ef13407d0ce77eb94c5a70eda638704b088954`
+- **Companion packets:** `docs/processes/review-packets/2026-10-25-cash13-refund-level-c-decision-packet.md`; F4Б reconciliation `docs/processes/review-packets/2026-10-25-cash13-refund-po-f4b-reconciliation.md`; Accept stamp `docs/processes/review-packets/2026-10-27-adr-0048-po-accept-with-deltas.md`
 
 ---
 
-## Authority map (this ADR)
+## Authority map
 
 | Class | Content |
 | --- | --- |
-| **EXISTING Accepted ADR** | 0013 non-custody + PCE ownership; 0014 fiscal + LEGAL GATE G2; 0038 cash refunds out of FISC1.1 / compensating ReceiveCash forbidden as refund; 0046 expected reserves `− Σ refunds` but implements none; 0028 refund alone must not rewrite Order commercial; 0032 abort ≠ void/refund |
-| **PO ACCEPTED (product)** | Manager: cancellations/returns/discounts within grant/limit, above → Owner approval; close discrepancy immutable. POS-REFUND UI-161 Spec Accepted / Figma Partial — **API not Origin-verified**. **PO-20261025-C0-F4 / F4Б:** partial monetary refund after paid **COMPLETED** Order is **mandatory** for first pilot ([Notion](https://app.notion.com/p/40430d51715181d1b2adf41282cc41db)) |
-| **PROPOSED (this document)** | Payments-owned refund evidence linked to original Payment; CASH drawer effect once via **current OPEN** `cash_shift_id`; no historical Payment/PCE/Fiscal/Revenue mutation; R3 option D; soft Order/line refs |
-| **OPEN / BLOCKED** | Remaining owner choices (R3 Accept D, R5, R8, …); VietQR refund capability gate; LEGAL GATE G2 + fiscal correction execution policy; Accounting |
+| **EXISTING Accepted ADR** | 0013 non-custody + PCE; 0014 fiscal + G2; 0028 refund ≠ rewrite Order commercial; 0032 abort ≠ refund; 0036 grants; 0038 no compensating ReceiveCash-as-refund; 0046 Close immutable + expected may subtract confirmed CASH refunds |
+| **PO ACCEPTED (product)** | **F4Б:** partial monetary refund after paid **COMPLETED** Order is **mandatory** for first pilot. POS-REFUND UI-161 Spec Accepted / Figma Partial — API not Origin-verified at Accept time |
+| **THIS ACCEPT (architecture)** | Reservation / anti-over-refund; durable payout attempts; CASH human confirmation; VietQR per-attempt evidence rules; FinancialRefundStatus ⊥ FiscalCorrectionStatus; R1–R9 + Interview #37/#47 as recorded below |
+| **OPEN / EXTERNAL (not closed by this Accept)** | R8 numeric thresholds + threshold-approval flow; VietQR merchant eligibility + per-attempt bank correlation evidence; LEGAL GATE G2; FiscalCorrectionPolicy contents; manual bank refund (needs separate Owner + legal GO); Accounting Engine |
 
-**STOP:** PROPOSED merge ≠ Accept. No refund runtime/migrations until Accepted revision + PO GO.
+**STOP:** This Accept freezes architecture. It does **not** authorize runtime merge by itself, production deploy, persistent production DB migrations, real CASH/VietQR payouts, test fiscal adapter in production, G2 clearance, VietQR adapter without contractual/technical evidence, CHRONO1.1 changes, or backup/rules/Automations changes.
 
 ---
 
 ## Context
 
-Origin Payments today:
+Origin Payments at Accept baseline: `ReceiveCash` → immutable PCE + SUCCEEDED Payment; lifecycle refuses SUCCEEDED→void without compensating architecture; no PaymentRefund runtime; ADR-0046 expected documents `− Σ refunds` but migration 034 implements opening + Σ CASH PCE only.
 
-- `ReceiveCash` → immutable PCE + SUCCESS Payment
-- Lifecycle refuses SUCCEEDED → void without compensating architecture
-- ADR-0038 lists cash refunds as RELEASE-BLOCKING OPEN
-- ADR-0046 expected formula documents `− Σ confirmed CASH refunds` but CASH1.2 must not invent them
-
-Product needs returns that leave cash from the **current OPEN drawer** without rewriting sale history or fiscal facts.
+Prior PROPOSED revisions (2026-10-25) and C0-REFUND FINAL REVIEW CORRECTIONS (reservation, CASH human confirmation, VietQR per-attempt reconciliation) are superseded by this Accepted text where they conflict.
 
 ---
 
-## Proposed decision (non-binding until Accept)
+## Decision (Accepted — PO ACCEPT WITH DELTAS)
 
 ### D1. Ownership
 
-**Payments** owns refund acceptance evidence and link to **original** Payment.  
-**Cash** owns expected impact when instrument is CASH (via refund row’s `cash_shift_id` — **not** a parallel `CashDrawerMovement`).  
-**Fiscalization** owns any fiscal correction document — **not** invented by this ADR’s Accept alone (R6).
+| Concern | Owner |
+| --- | --- |
+| RefundRequest, RefundAuthorization, RefundReservation, PayoutAttempt, FinancialRefundStatus, link to original Payment | **Payments** |
+| CASH expected impact on **current OPEN** CashShift (once per confirmed CASH money effect); no twin CashDrawerMovement for same refund | **Cash** |
+| FiscalDocument / correction chains; FiscalCorrectionStatus | **Fiscalization** |
+| VietQR adapter I/O; never decides MONEY_RETURNED alone | **Integrations** |
 
-### D2. Command sketch
+Payments remains the financial evidence owner for refund money effects. CashShift expected is a **derived consumer** of confirmed CASH refund facts — not a second money source of truth. Fiscal is independent.
 
-```text
-RecordCashRefund {
-  originalPaymentId
-  amountRefundedMinor
-  currencyCode
-  minorUnitExponent
-  reasonText
-  refundIdempotencyKey
-  // cash_shift_id derived from Session Terminal OPEN shift — never client-trusted actor
-}
-```
+### D2. Core concepts (binding)
 
-### D3. Hard non-effects
+1. **RefundAuthorization** — grant-checked permission to refund a specific amount against an original SUCCEEDED Payment in its related Settlement/sale context.
+2. **RefundReservation** — reserved amount that reduces remaining capacity until released or converted to a confirmed money effect.
+3. **PayoutAttemptIdentity** — durable unique attempt id plus client idempotency key (unique per LegalEntity); distinct keys = distinct attempts.
+4. **ExecutionStatus / FinancialRefundStatus** — lifecycle of money-side refund (below).
+5. **ConfirmedMoneyEffect** — MONEY_RETURNED only with instrument-specific verified evidence.
+6. **ImmutableFinancialEvidence** — append-only authorization, reservation, attempt, confirmation, and reconcile records; no silent rewrite.
 
-- Do **not** UPDATE/DELETE original Payment amounts or SUCCEEDED lifecycle
-- Do **not** mutate original PCE
-- Do **not** rewrite Revenue / Order commercial (ADR-0028)
-- Do **not** create/alter FiscalDocument in this package unless R6 Accept says otherwise
-- Do **not** insert `CashDrawerMovement` for the same cash leave (ADR-0047 anti double-count)
-- Do **not** apply CASH refund to a **CLOSED** CashShift
+### D3. Capacity & reservation invariant (PO delta)
 
-### D4. Expected impact (after Accept)
+Refund capacity is computed **per original Payment** and the Settlement/sale obligation that Payment belongs to. Do **not** refund money attributable to other obligations.
 
 ```text
-− Σ amount_refunded_minor of SUCCEEDED CASH refunds where cash_shift_id = this shift
+qualifying = original Payment qualifying collected amount (instrument-scoped)
+consumed  = Σ ConfirmedMoneyEffect (MONEY_RETURNED) on that Payment
+reserved  = Σ ActiveReservations on that Payment
+invariant: consumed + reserved <= qualifying
+remaining_capacity = qualifying − consumed − reserved
 ```
 
-Exactly once. Exact minor units (ADR-0002).  
-`cash_shift_id` is always the **current OPEN** shift that pays out cash (see R3-D) — never a rewrite of a CLOSED shift’s frozen expected.
+Partial amounts must be `> 0` and `≤ remaining_capacity`. Fail closed otherwise.
 
-### D4b. Remaining refundable (after Accept; F4Б)
+**Active reservation statuses** (amount stays reserved):
+
+- AUTHORIZED
+- EXECUTION_PENDING
+- EXECUTION_UNKNOWN
+- RECONCILE_BLOCKED
+
+**Release reservation only when:**
+
+- EXECUTION_FAILED with **proven non-payment**, or
+- authorization cancelled/expired under policy **before** any payout attempt that could have paid, or
+- reservation converted into MONEY_RETURNED (reserved → consumed; not double-counted)
+
+**EXECUTION_UNKNOWN does not auto-release.** Reservation creation is **strictly atomic** with semantic idempotency-key check under exclusive Payment lock (e.g. `FOR UPDATE`). Same key → replay existing attempt/reservation; distinct keys → concurrent capacity check.
+
+### D4. FinancialRefundStatus (Payments)
 
 ```text
-remaining = original_payment_qualifying_amount
-          − Σ SUCCEEDED refunds on that payment
+REQUESTED
+  → DENIED                         (terminal; no reservation)
+  → AUTHORIZED                     (reservation active)
+  → EXECUTION_PENDING              (durable attempt started)
+       ├→ EXECUTION_UNKNOWN        (ambiguous; reservation held)
+       ├→ RECONCILE_BLOCKED        (manual; reservation held)
+       ├→ EXECUTION_FAILED         (release only if non-payment proven)
+       └→ MONEY_RETURNED           (confirmed money effect)
 ```
 
-Partial refund amounts must be `> 0` and `≤ remaining`. Fail closed otherwise.
+### D5. FiscalCorrectionStatus (Fiscalization) — independent (R6)
 
-### D5. Concurrency
+```text
+NOT_STARTED
+  → REQUIRED_PENDING
+  → SUBMITTED
+       ├→ CONFIRMED
+       ├→ REJECTED
+       └→ UNKNOWN
+```
 
-Single transaction: lock original Payment `FOR UPDATE` → lock **current OPEN** `cash_shift` `FOR UPDATE` → insert refund evidence → commit. Compatible with ReceiveCash `FOR SHARE` (waits) and Close `FOR UPDATE` (serialize). Idempotent key unique per LegalEntity. Do **not** lock or mutate CLOSED shift rows for expected rewrite.
+**FiscalCorrectionPolicy** (separate Accept / Level C follow-up; required before production fiscal-safe claim) MUST define at least:
 
-### D6. Proposed permission
+- REQUIRED, CONFIRMED, UNKNOWN, REJECTED
+- confirmed **NOT_REQUIRED** (when lawfully applicable — never Vietnam restaurant shortcut abuse)
+- **LEGAL_BLOCKED**
+- timing, source fiscal documents, and allowed action sequences
 
-`payments.refund_cash` (+ `pos.operate` on POS). Over-limit / approve key — R8.
+Binding:
+
+- FinancialRefundStatus ⊥ FiscalCorrectionStatus.
+- MONEY_RETURNED **may** precede Fiscal CONFIRMED **only if** Vietnam counsel / G2 and accepted FiscalCorrectionPolicy permit that ordering.
+- Production execution claiming fiscal-safe refund UX is **forbidden** until G2 **and** FiscalCorrectionPolicy.
+- UI shows fiscal state separately when UNKNOWN / PENDING / REJECTED / LEGAL_BLOCKED.
+- **Fiscal retries must never re-execute money payout.**
+
+### D6. Hard non-effects (R7)
+
+- Do not UPDATE/DELETE original Payment amounts or SUCCEEDED lifecycle.
+- Do not mutate original PCE, Order commercial snapshot / Revenue Basis, or GoodsIssue from refund alone.
+- Soft optional `order_id` / line refs only.
+- Do not invent Fiscal CONFIRMED/SATISFIED from money SUCCESS.
+- Do not insert CashDrawerMovement for the same CASH refund payout (ADR-0047 anti double-count).
+- Do not apply CASH payout to a CLOSED CashShift; do not rewrite CLOSED expected / close evidence.
+- Do not create a parallel customer wallet / custody balance (ADR-0013).
+
+### D7. Instrument & outlet restrictions
+
+- **Interview #37 (binding):** refund execution path must match **original Payment tender** (CASH→CASH; VietQR→VietQR). No cross-tender substitution in this Accept.
+- **Interview #47 (binding):** authorization and payout only at the **original sale Outlet**.
+
+### D8. CASH payout protocol (human confirmation)
+
+Stages must not collapse into “insert row = paid”:
+
+1. Authorization (actor + Owner-issued scoped grant)
+2. Financial intent / RefundRequest
+3. Reservation (capacity lock)
+4. Physical cash handover intent on **current OPEN** CashShift
+5. **Explicit employee confirmation** of exact amount handed over (immutable actor_id, confirmed_at, amount, reason, attempt_id, cash_shift_id)
+6. ConfirmedMoneyEffect → MONEY_RETURNED
+7. CashShift expected consumes that confirmed amount **exactly once**
+
+Rules:
+
+- Actor + scoped grant; original Outlet; current OPEN CashShift of Session Terminal (server-derived; never client-trusted actor for shift binding).
+- UNKNOWN / reload / retry must **not** automatically repeat physical payout.
+- Uncertain physical handover → RECONCILE_BLOCKED until `payments.refund.reconcile`.
+- A database row alone is **not** proof that cash reached the guest — confirmation evidence is required.
+- No duplicate CashDrawerMovement; CLOSED shifts immutable.
+
+### D9. VietQR execution protocol (per-attempt reconciliation)
+
+Layers (not one atomic PostgreSQL + bank API transaction):
+
+```text
+KiU RefundRequest
+  → KiU RefundReservation
+  → durable ProviderRefundAttempt
+  → Provider HTTP response (evidence only)
+  → Provider inquiry
+  → VerifiedRefundEvidence → MONEY_RETURNED
+```
+
+Rules:
+
+- HTTP `SUCCESS` is **not** automatic guest credit confirmation.
+- Public Check Transaction aggregates (`refundCount`, `amountRefunded`) on the original payment are **insufficient alone** to prove a specific KiU attempt when multiple refunds may exist.
+- **Single-flight is not sufficient proof of payout.** Without unambiguous correlation of the specific attempt to a confirmed bank effect → **RECONCILE_BLOCKED**, not MONEY_RETURNED; no further external Refund calls until cleared.
+- Prefer unique provider refund reference bound 1:1 to attempt_id (confirm with provider). Store any returned reference; never log secrets.
+- Timeout-after-success → EXECUTION_UNKNOWN → inquire; never blind re-POST Refund.
+- `multiTimes`: set on first refund attempt when multiple partials are required; do not change multiTimes semantics for the same original transaction without confirmed provider procedure.
+- Secrets server-side only; redact sensitive material from logs.
+- VietQR **runtime adapter remains blocked** until contractual + technical provider evidence (eligibility, secrets issuance, per-attempt correlation model, sandbox).
+
+### D10. Manual bank refund
+
+**Not** auto-authorized by this Accept. Requires a **separate Owner + legal GO** and proven compatibility with original-tender (#37) and original-outlet (#47) rules, using the same reservation/attempt/evidence invariants.
+
+### D11. CashShift expected impact (CASH)
+
+After Level B runtime under this ADR:
+
+```text
+expected = opening_float
+         + Σ CASH PCE amount_collected_minor
+         − Σ ConfirmedMoneyEffect CASH refunds for this cash_shift_id
+```
+
+Apply subtraction **once** per MONEY_RETURNED CASH effect. Historical Payment may predate current shift (R3-D); payout shift is always current OPEN at original Outlet.
+
+### D12. Permissions (R8 — Accepted keys; thresholds OPEN)
+
+Owner-issued scoped grants (job title alone grants nothing):
+
+| Key | Purpose |
+| --- | --- |
+| `payments.refund_cash` | Execute CASH refund path when Owner-assigned |
+| `payments.refund_vietqr` | Execute VietQR refund path when Owner-assigned **and** provider gate open |
+| `payments.refund.approve` | Sensitive / future over-limit approve (thresholds **not** set by this Accept) |
+| `payments.refund.reconcile` | Clear RECONCILE_BLOCKED / UNKNOWN with audited decision |
+
+**First slice:** only explicitly Owner-authorized actors; limited by `remaining_capacity`. Numeric limits and additional threshold-approval flow are **not** invented here — remain OPEN for later Owner config.
+
+Also require `pos.operate` (or equivalent) when executing on POS surface.
+
+### D13. R9
+
+Refund commands are strictly separate from Settlement Abort (ADR-0032). No silent abort→refund.
 
 ---
 
-## PO decision matrix R1–R9
+## PO decision matrix R1–R9 (Accepted 2026-10-27)
 
-### R1 — Partial CASH refunds
-
-| | |
-| --- | --- |
-| **Options** | (a) Full original amount only; (b) Partial ≤ remaining refundable; (c) Partial only with Manager grant |
-| **Authority** | **PO ACCEPTED (F4Б)** supersedes prior pilot-(a) shrink |
-| **Recommendation** | **(b)** mandatory for first pilot — remaining = original qualifying − Σ SUCCEEDED refunds; optional Manager grant composition is R8, not a substitute for partial |
-| **Risks** | Partial without remaining invariant → over-refund; do not invent line commercial return here (R7) |
-| **Pilot** | Partial monetary refund on paid COMPLETED Order path (F4Б) |
-| **Impact** | Payments; Cash expected on **current** OPEN shift; Fiscal if R6 |
-| **Requires PO?** | **No further** for “partial vs full-only” — F4Б closed that ask. Thresholds → R8 |
-
-### R2 — Drawer payout shift (OPEN required)
-
-| | |
-| --- | --- |
-| **Options** | (a) Cash leaves **current OPEN** CashShift only; (b) Rewrite prior CLOSED expected; (c) Pay into next OPEN without binding current |
-| **Recommendation** | **(a)** — required for R3-D; matches ADR-0046 CLOSED immutable |
-| **Risks** | (b) forensic hole; (c) unbound drawer |
-| **Pilot** | Always bind refund.cash_shift_id to current OPEN |
-| **Impact** | Payments + Cash |
-| **Requires PO?** | Only if rejecting (a) |
-
-### R3 — Historical original Payment / cross-shift
-
-| | |
-| --- | --- |
-| **Options** | (a) Forbidden if Payment’s collection shift ≠ current OPEN; (b) Manager correction aggregate; (c) Force reopen CLOSED (**forbidden** under 0046); **(d)** Historical original Payment **allowed**; CASH paid from **current OPEN**; original CLOSED shift **immutable** |
-| **Recommendation** | **(d)** — enables post-close customer return without rewriting closed expected; pairs with F4Б |
-| **Risks** | Operator confusion (which drawer lost cash); must not double-count or touch CLOSED evidence |
-| **Pilot** | Allow refund of yesterday’s Payment from today’s OPEN drawer |
-| **Impact** | Cash Close immutability preserved; Payments links historical Payment |
-| **Requires PO?** | **Yes** — confirm **(d)** vs keep **(a)** |
-
-### R4 — CARD / VietQR refund
-
-| | |
-| --- | --- |
-| **Options** | (a) Same ADR with provider async; (b) Separate ADR after CASH path; (c) Out of C0 entirely |
-| **Recommendation** | **(b)** for CARD **runtime**; **pilot-complete gate:** verified VietQR refund **capability/method** documented fail-closed (external provider) before declaring first pilot complete — even if implementation is a later ADR |
-| **Risks** | Claiming pilot complete with unverified VietQR refund; mixing provider async into cash TX |
-| **Pilot** | CASH path implements; VietQR capability **verified** as checklist item |
-| **Impact** | Payments + Integrations; Cash expected unchanged for electronic |
-| **Requires PO?** | Sequencing + pilot-complete definition **Yes** |
-
-### R5 — Voids vs refunds
-
-| | |
-| --- | --- |
-| **Options** | (a) Distinct commands (void pre-SUCCESS vs refund post-SUCCESS); (b) One “reverse payment” umbrella; (c) Defer voids |
-| **Recommendation** | **(a)** + **(c)** for first pilot (refund SUCCESS only; void stays lifecycle reject) |
-| **Risks** | Umbrella blurs Settlement abort (0032) and fiscal |
-| **Pilot** | Refund SUCCEEDED Payment only (partial per R1) |
-| **Impact** | Payments lifecycle; Settlement abort unchanged |
-| **Requires PO?** | **Yes** if voids in same package |
-
-### R6 — Fiscal correction coupling
-
-| | |
-| --- | --- |
-| **Options** | (a) Same TX as refund; (b) Async fiscal correction required before refund SUCCEEDED; (c) Out of PAY-REFUND — separate FISC Level C; (d) Omit until G2 |
-| **Recommendation** | **Ownership (c):** Fiscalization owns FiscalDocument / correction chains (ADR-0014). **Execution policy OPEN:** name Vietnam **LEGAL GATE G2** + correction workflow before claiming fiscal-safe refund UX. Money/drawer refund MUST NOT invent fiscal SATISFIED |
-| **Risks** | Illegal e-invoice state; Payments writing Fiscal tables; fake success UX |
-| **Pilot** | Explicit fiscal-follow-up OPEN; no fabricated fiscal success |
-| **Impact** | Fiscalization; Legal G2; Payments non-owner |
-| **Requires PO?** | **Yes** for execution timing; **G2** is external legal gate |
-
-### R7 — Order / commercial / inventory
-
-| | |
-| --- | --- |
-| **Options** | (a) Payment+drawer only (no Order fields); (b) Line return + commercial/inventory correction same package; (c) Soft OrderId / line refs **without** rewriting historical commercial or inventory |
-| **Recommendation** | **(c)** — supports F4Б COMPLETED Order context without ADR-0028 / GoodsIssue mutation |
-| **Risks** | (b) silent rewrite; (a) weaker audit trail for “which order” |
-| **Pilot** | Store optional `order_id` / line refs on refund evidence; no CompleteOrder reverse; no stock reverse in this package |
-| **Impact** | Payments refs; Orders/Inventory **read-only** |
-| **Requires PO?** | **Yes** only if merchandise/inventory return in same package |
-
-### R8 — Permission + over-limit
-
-| | |
-| --- | --- |
-| **Options** | (a) `payments.refund_cash` only; (b) + `payments.refund_cash.approve` / Owner Approval over limit; (c) reuse Manager generic approval |
-| **Recommendation** | **(b)** aligned with Manager Notion limits |
-| **Risks** | Cashier unlimited refunds; overloading Task complete as approve (Gate0 forbid) |
-| **Pilot** | (a) with Manager-only grant composition, or (b) if Approval ready |
-| **Impact** | Identity + Payments; not TaskService payment approve |
-| **Requires PO?** | **Yes** for keys + thresholds |
-
-### R9 — Refund vs Settlement abort / unpaid cancel
-
-| | |
-| --- | --- |
-| **Options** | (a) Strictly separate from Settlement abort (0032); (b) Abort may trigger auto-refund if cash already collected; (c) Conflate cancel UX |
-| **Recommendation** | **(a)**; if cash already collected, require explicit RecordCashRefund — no silent abort→refund |
-| **Risks** | Double money motion; orphan coverage |
-| **Pilot** | Documented separate POS flows |
-| **Impact** | Settlement + Payments + Cash |
-| **Requires PO?** | **Yes** for abort+collected edge |
+| ID | Decision | Status |
+| --- | --- | --- |
+| **R1** | Partial monetary refunds ≤ `remaining_capacity` (confirmed + active reservations) | **ACCEPTED** (F4Б + this Accept) |
+| **R2** | CASH payout only from current OPEN CashShift | **ACCEPTED** |
+| **R3** | Option **D**: historical Payment allowed; pay from current OPEN at **original Outlet**; CLOSED CashShift immutable | **ACCEPTED** |
+| **R4** | CASH + VietQR in pilot target scope; CARD deferred; VietQR execution blocked until provider evidence | **ACCEPTED** |
+| **R5** | Void is independent; out of first refund slice | **ACCEPTED** |
+| **R6** | Financial ⊥ Fiscal; money-before-fiscal only after counsel/G2 + FiscalCorrectionPolicy | **ACCEPTED** (policy contents OPEN) |
+| **R7** | Original Payment / PCE / OrderCommercialSnapshot / GoodsIssue immutable; no auto stock reversal | **ACCEPTED** |
+| **R8** | Scoped keys above; Owner assigns; no invented numeric thresholds | **ACCEPTED** (thresholds OPEN) |
+| **R9** | Refund ≠ Settlement Abort | **ACCEPTED** |
+| **#37** | Original tender only | **ACCEPTED** |
+| **#47** | Original outlet only | **ACCEPTED** |
 
 ---
 
-## Consequences if Accepted later
+## Consequences
 
 ### Positive
 
-- Closes ADR-0038 refund OPEN for narrow CASH path without fake compensating ReceiveCash
-- Makes ADR-0046 expected subtraction real
-- Preserves immutable Payment/PCE/Close evidence
+- Closes ADR-0038 cash-refund architectural OPEN for a narrow pilot shape without fake compensating ReceiveCash.
+- Prevents over-refund under concurrent distinct idempotency keys via reservations.
+- Separates money proof from fiscal proof and from UI/HTTP optimism.
 
 ### Negative / follow-ups
 
-- Fiscal/CARD/partial commercial still Level C
-- CLOSED CashShift expected rewrite remains unsupported; historical Payment via **R3-D** (pay from current OPEN) is PROPOSED pending PO confirm — not a reopen of CLOSED
-- UI POS-REFUND still needs API contract after Accept
-- VietQR refund capability + LEGAL GATE G2 / fiscal correction policy remain external pilot-complete gates
+- Level B runtime still required (schema, CASH path, tests).
+- VietQR adapter gated on provider evidence; may remain RECONCILE_BLOCKED without per-attempt correlation.
+- FiscalCorrectionPolicy + G2 remain external before production fiscal-safe claim.
+- ADR-0047 remains PROPOSED; refund must not twin as CashDrawerMovement.
 
-### Explicitly out
+### Explicitly out of this Accept
 
-- Accounting Engine; custody/wallet; gift cards; Document Engine; offline refund (0045)
+- Accounting Engine; custody/wallet; gift cards; QR claim codes; mixed-tender proportional first slice; offline refund SUCCESS; DeviceIdentity; CHRONO1.1 changes; Floor/Table; aggregators; production deploy; persistent production migrate; real payouts; test fiscal adapter in production.
 
 ---
 
-## Acceptance checklist (for future Accept only)
+## Acceptance checklist
 
-- [ ] PO answers R1–R9 recorded
-- [ ] Status → Accepted with date + main SHA
-- [ ] Arch/DB/FinSec review of Accepted text
-- [ ] Coordination with ADR-0047 Accept if expected includes both terms
-- [ ] Level B runtime separately authorized
+- [x] PO answers R1–R9 + #37/#47 recorded (ACCEPT WITH DELTAS 2026-10-27)
+- [x] Status → Accepted WITH DELTAS + baseline Origin main SHA
+- [ ] Level B runtime separately authorized (next)
+- [ ] FiscalCorrectionPolicy Accept + LEGAL GATE G2 before production fiscal-safe claim
+- [ ] VietQR provider evidence before adapter execution
+- [ ] Coordination with ADR-0047 if/when Accepted (no double drawer effect)
 
 ## STOP
 
-**PROPOSED ≠ Accepted.** No PaymentRefund migration/service under this file alone. No change to live expected formula until Accept + Level B.
+Accepted architecture ≠ Level B merge authorization by this file alone. No production deploy / persistent production DB migrate / real payouts / G2 claim from this Accept.

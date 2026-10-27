@@ -1,10 +1,10 @@
 # Level C decision packet — CASH1.3 CashDrawerMovement + Payments Refund
 
-- **Status:** **Proposed** — awaiting PO / Architecture Accept (no runtime)
-- **Date:** 2026-10-25
+- **Status:** **Partially superseded** — **ADR-0048 Accepted WITH DELTAS 2026-10-27**; **ADR-0047 remains Proposed**. Prefer live ADR-0048 text over refund sections here.
+- **Date:** 2026-10-25 (original); note 2026-10-27
 - **Autonomy:** Level **C** (docs / contracts only)
-- **Baseline Origin main:** `6b97f3dcb650882135d5e29450cdf14c622ab547` (CASH1.2 ADR-0046 merged)
-- **STOP:** Do **not** start CASH1.3 or Refund migrations/services until corresponding ADR(s) are **Accepted**. Do **not** expand CASH1.2 runtime beyond ADR-0046.
+- **Baseline Origin main (original):** `6b97f3dcb650882135d5e29450cdf14c622ab547` (CASH1.2 ADR-0046 merged)
+- **STOP:** Do **not** start CASH1.3 migrations until ADR-0047 Accepted. ADR-0048 Level B runtime is separately authorized after Accept (disposable PG first; no production migrate GO from Accept alone). Do **not** expand CASH1.2 runtime beyond ADR-0046 + later refund expected term from ADR-0048 Level B.
 
 ---
 

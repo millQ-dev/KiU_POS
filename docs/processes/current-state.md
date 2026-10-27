@@ -1,6 +1,7 @@
 # MillQ Current State
 
-**Checkpoint:** C0-CHRONO1.1 **MERGED** Origin #117 @ `2ae14722dbf00513c861d90218437b155dd2be18` — GitHub backup **MATCH**  
+**Checkpoint:** ADR-0048 **Accepted WITH DELTAS** (PO 2026-10-27) — docs-only; runtime not yet  
+**Prior runtime tip:** C0-CHRONO1.1 **MERGED** Origin #117/#118 @ `c3ef13407d0ce77eb94c5a70eda638704b088954`  
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)  
 **GitHub backup (sole):** `https://github.com/millQ-dev/KiU_POS.git`  
   (`millQ-dev/MillQ` = legacy rename redirect to the same repository ID)  
@@ -10,7 +11,8 @@
 
 | Item | State |
 | --- | --- |
-| Migration head | **034** `034_cash12_close_cash_shift.sql` (no new migration in C0-FISC2) |
+| Migration head | **034** `034_cash12_close_cash_shift.sql` (no refund migration in this Accept) |
+| ADR-0048 Payments Refund | **ACCEPTED WITH DELTAS** 2026-10-27 — architecture only; Level B runtime separate; VietQR adapter blocked on provider evidence; G2 / FiscalCorrectionPolicy still OPEN |
 | TAX1.1 Tax runtime | **MERGED** Origin PR#74 — canonical closed |
 | ADR-0033 / ADR-0034 / ADR-0037 | **ACCEPTED** |
 | CASHIER-1 Production Front Door | **MERGED** Origin PR#76 |
@@ -19,7 +21,7 @@
 | C0-FISC2 Fiscal → CompleteOrder | **MERGED** #112 — SettlementCheckout issue/reconcile + CheckoutOrchestrator advance; terminal monotonic `businessOrder`; disposable E2E |
 | C0-CHRONO1 Terminal businessOrder | **MERGED** #116 @ `488bd04…` — device monotonic `businessOrder`; session-locked Complete chronology |
 | C0-CHRONO1.1 Web Locks only | **MERGED** #117 @ `2ae1472…` — Web Locks only (no localStorage busy-lock); fail closed without `navigator.locks`; durable sessionStorage for Complete key/chrono; Playwright uses production hooks |
-| GitHub backup parity | **MATCH** Origin/GitHub `2ae1472…` |
+| GitHub backup parity | **MATCH** Origin/GitHub `c3ef134…` (pre-docs Accept tip; refresh after this docs merge) |
 | Origin review policy | **PO ACCEPT 2026-10-26** — formal non-author APPROVE ruleset **removed**; A=arm MWR→CI, B=Bugbot+AI review→arm MWR→CI, C=PO ACCEPT then review/CI; ChatGPT packet = PO consultation only; see `origin-independent-review.md` |
 | ADR-0014 Fiscalization delta | **ACCEPTED** 2026-10-10 |
 | ADR-0014 / ADR-0013 Chronology Delta | **ACCEPTED** 2026-10-11 |
@@ -50,7 +52,7 @@
 
 **Explicitly out:** DeviceIdentity; Quick Lock; FE Tax math; fiscal success fabrication; Favorites / Stop/Go-list; production send policy; Floor/Table.
 
-**CASH1.2 CloseCashShift:** ADR-0046 Accepted; runtime `OPEN→CLOSED` with server expected (opening + Σ CASH PCE `amount_collected_minor`); shortage grant `cash_shift.close.shortage`. Refunds / cash-in-out / RECONCILED still out.
+**CASH1.2 CloseCashShift:** ADR-0046 Accepted; runtime `OPEN→CLOSED` with server expected (opening + Σ CASH PCE `amount_collected_minor`); shortage grant `cash_shift.close.shortage`. ADR-0048 Accepted architecture reserves `− Σ confirmed CASH refunds` after Level B; cash-in-out (ADR-0047) / RECONCILED still out.
 
 ## Fiscal track
 
@@ -71,16 +73,19 @@
 
 ## Next
 
-1. Continue C0 cafe operability inside Accepted ADRs; Level C only with separate PO ACCEPT
-2. Obey MWR arming order (A after PR open; B after Bugbot+AI review on HEAD; C after PO ACCEPT)
-3. No real VN provider / G2 / DeviceIdentity / R1.1 / refunds without separate decisions; no prod deploy / persistent migrate without separate PO GO
+1. Level B: ADR-0048 refund reservation / schema / financial invariants on **disposable** PostgreSQL (separate PR; not production migrate GO)
+2. Continue C0 cafe operability inside Accepted ADRs; further Level C only with separate PO ACCEPT
+3. Obey MWR arming order (A after PR open; B after Bugbot+AI review on HEAD; C after PO ACCEPT)
+4. No real VN provider payouts / G2 claim / DeviceIdentity / R1.1 / VietQR adapter without evidence; no prod deploy / persistent migrate without separate PO GO
 
 Preserve:
 
 - no DeviceIdentity
 - no Quick Lock
-- no cash refunds / mid-shift cash-in-out without separate ADR
+- no mid-shift cash-in-out without ADR-0047 Accept
+- no real CASH/VietQR refund payouts until Level B + applicable GO
 - no FE Tax math
 - no fiscal success fabrication
 - no LEGAL GATE G2 claim
 - Vietnam restaurant → `NOT_REQUIRED` shortcut forbidden
+- no CHRONO1.1 model reopen
