@@ -46,7 +46,8 @@ describeB1('C0-REFUND-B1 reservation + capacity (disposable PostgreSQL)', () => 
     assertPosDisposableDatabaseUrl(DATABASE_URL);
     await pool.query(`
       TRUNCATE
-        payment_refund_evidence, payment_refund_payout_attempt, payment_refund,
+        payment_refund_cash_handover_evidence, payment_refund_evidence,
+        payment_refund_payout_attempt, payment_refund,
         payment_collection_event, payment_cash_collection_evidence,
         payment_allocation, payment_provider_outcome, payment, tender_definition,
         settlement_check_line_allocation, settlement_check, settlement_group,
@@ -603,5 +604,81 @@ describeB1('C0-REFUND-B1 reservation + capacity (disposable PostgreSQL)', () => 
         refundIdempotencyKey: `mm-${randomUUID()}`,
       }),
     ).rejects.toMatchObject({ code: 'ALLOCATION_AMBIGUOUS' });
+  });
+
+  it('P0: concurrent same idempotency key across two Payments → conflict/replay without 25P02', async () => {
+    const a = await seedCollectedPayment({ collectedMinor: '8000' });
+    const b = await seedCollectedPayment({ collectedMinor: '9000' });
+    const key = `cross-pay-${randomUUID()}`;
+    const results = await Promise.allSettled([
+      refunds.authorizeAndReserve({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        originalPaymentId: a.paymentId,
+        settlementCheckId: a.checkId,
+        outletId: fx.outletId,
+        amountMinor: '1000',
+        reasonText: 'a',
+        refundIdempotencyKey: key,
+      }),
+      refunds.authorizeAndReserve({
+        tenantId: fx.tenantId,
+        legalEntityId: fx.legalEntityId,
+        originalPaymentId: b.paymentId,
+        settlementCheckId: b.checkId,
+        outletId: fx.outletId,
+        amountMinor: '1000',
+        reasonText: 'b',
+        refundIdempotencyKey: key,
+      }),
+    ]);
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(fulfilled.length).toBe(1);
+    expect(rejected.length).toBe(1);
+    const reason = (rejected[0] as PromiseRejectedResult).reason as {
+      code?: string;
+      codePg?: string;
+      message?: string;
+    };
+    expect(reason.code).toBe('IDEMPOTENCY_CONFLICT');
+    const msg = String(reason.message ?? reason);
+    expect(msg).not.toMatch(/25P02/);
+    expect(String((rejected[0] as PromiseRejectedResult).reason)).not.toMatch(/current transaction is aborted/);
+
+    const count = await pool.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM payment_refund
+       WHERE legal_entity_id = $1 AND refund_idempotency_key = $2`,
+      [fx.legalEntityId, key],
+    );
+    expect(count.rows[0]!.c).toBe(1);
+  });
+
+  it('P1: payment_refund_evidence is append-only (UPDATE/DELETE forbidden)', async () => {
+    const seeded = await seedCollectedPayment({ collectedMinor: '5000' });
+    const r = await refunds.authorizeAndReserve({
+      tenantId: fx.tenantId,
+      legalEntityId: fx.legalEntityId,
+      originalPaymentId: seeded.paymentId,
+      settlementCheckId: seeded.checkId,
+      outletId: fx.outletId,
+      amountMinor: '1000',
+      reasonText: 'ev',
+      refundIdempotencyKey: `ev-${randomUUID()}`,
+    });
+    const ev = await pool.query<{ payment_refund_evidence_id: string }>(
+      `SELECT payment_refund_evidence_id FROM payment_refund_evidence
+       WHERE payment_refund_id = $1 LIMIT 1`,
+      [r.paymentRefundId],
+    );
+    const id = ev.rows[0]!.payment_refund_evidence_id;
+    await expect(
+      pool.query(`UPDATE payment_refund_evidence SET evidence_kind = 'TAMPER' WHERE payment_refund_evidence_id = $1`, [
+        id,
+      ]),
+    ).rejects.toThrow(/append-only/);
+    await expect(
+      pool.query(`DELETE FROM payment_refund_evidence WHERE payment_refund_evidence_id = $1`, [id]),
+    ).rejects.toThrow(/append-only/);
   });
 });

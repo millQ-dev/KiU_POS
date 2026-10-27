@@ -46,7 +46,7 @@ export type CashShiftProjection = {
   varianceKind: CashShiftVarianceKind | null;
   closeReasonText: string | null;
   closeIdempotencyKey: string | null;
-  expectedSourceRefs: string[] | null;
+  expectedSourceRefs: unknown[] | null;
 };
 
 type CashShiftRow = {
@@ -76,11 +76,11 @@ type CashShiftRow = {
   expected_source_refs: unknown;
 };
 
-function parseSourceRefs(raw: unknown): string[] | null {
+function parseSourceRefs(raw: unknown): unknown[] | null {
   if (raw == null) return null;
   const arr = typeof raw === 'string' ? (JSON.parse(raw) as unknown) : raw;
   if (!Array.isArray(arr)) return null;
-  return arr.map((x) => String(x));
+  return arr;
 }
 
 function mapRow(r: CashShiftRow): CashShiftProjection {
@@ -729,13 +729,14 @@ export class CashShiftService {
   }
 
   /**
-   * Fail-closed expected: opening + Σ amount_collected_minor of CASH_RECEIVE PCE
-   * bound via payment_cash_collection_evidence.cash_shift_id.
+   * Fail-closed expected (ADR-0046 + ADR-0048):
+   * opening + Σ CASH_RECEIVE PCE amount_collected_minor
+   *       − Σ MONEY_RETURNED CASH refunds bound to this cash_shift_id.
    */
   private async computeExpectedFromCashPce(
     client: PoolClient,
     shift: CashShiftRow,
-  ): Promise<{ expectedAmountMinor: string; sourceRefs: string[] }> {
+  ): Promise<{ expectedAmountMinor: string; sourceRefs: unknown[] }> {
     const res = await client.query<{
       payment_collection_event_id: string;
       amount_collected_minor: string;
@@ -758,7 +759,7 @@ export class CashShiftService {
     );
 
     let sum = BigInt(shift.opening_amount_minor);
-    const sourceRefs: string[] = [];
+    const sourceRefs: unknown[] = [];
     for (const row of res.rows) {
       if (!/^[0-9]+$/.test(row.amount_collected_minor)) {
         throw new CashDomainError(
@@ -777,6 +778,49 @@ export class CashShiftService {
       }
       sum += BigInt(row.amount_collected_minor);
       sourceRefs.push(row.payment_collection_event_id);
+    }
+
+    const refunds = await client.query<{
+      payment_refund_id: string;
+      amount_minor: string;
+      currency_code: string;
+      minor_unit_exponent: number;
+    }>(
+      `SELECT payment_refund_id, amount_minor, currency_code, minor_unit_exponent
+       FROM payment_refund
+       WHERE cash_shift_id = $1
+         AND tenant_id = $2
+         AND financial_status = 'MONEY_RETURNED'
+         AND instrument_family = 'CASH'
+         AND reservation_holds_capacity = FALSE
+       ORDER BY confirmed_at ASC NULLS LAST, payment_refund_id ASC
+       FOR SHARE`,
+      [shift.cash_shift_id, shift.tenant_id],
+    );
+    for (const row of refunds.rows) {
+      if (!/^[1-9][0-9]*$/.test(row.amount_minor)) {
+        throw new CashDomainError(
+          'EXPECTED_BASE_INCOMPLETE',
+          'Confirmed CASH refund amount_minor is not a positive digit string',
+        );
+      }
+      if (
+        row.currency_code !== shift.currency_code ||
+        row.minor_unit_exponent !== shift.minor_unit_exponent
+      ) {
+        throw new CashDomainError(
+          'CURRENCY_MISMATCH',
+          'CASH refund currency/exponent incompatible with OPEN CashShift',
+        );
+      }
+      sum -= BigInt(row.amount_minor);
+      if (sum < 0n) {
+        throw new CashDomainError(
+          'EXPECTED_BASE_INCOMPLETE',
+          'Confirmed CASH refunds exceed opening + collections for CashShift',
+        );
+      }
+      sourceRefs.push({ kind: 'CASH_REFUND', payment_refund_id: row.payment_refund_id });
     }
 
     return { expectedAmountMinor: sum.toString(), sourceRefs };

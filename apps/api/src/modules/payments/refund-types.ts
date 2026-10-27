@@ -50,11 +50,15 @@ export type PaymentRefundProjection = {
   reasonText: string;
   authorizedByUserId: string | null;
   payoutAttemptId: string | null;
+  cashShiftId: string | null;
   confirmedAt: string | null;
   createdAt: string;
   updatedAt: string;
   duplicate?: boolean;
 };
+
+/** Production CASH handover evidence kind (ADR-0048 B2). */
+export const CASH_HANDOVER_CONFIRM_EVIDENCE = 'CASH_HANDOVER_CONFIRM' as const;
 
 export type RefundCapacitySnapshot = {
   originalPaymentId: string;

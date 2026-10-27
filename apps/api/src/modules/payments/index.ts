@@ -12,6 +12,7 @@ export { ReceiveCashService, type ReceiveCashResult } from './receive-cash-servi
 export { RefundService, type RefundServiceOptions } from './refund-service.js';
 export {
   ACTIVE_RESERVATION_STATUSES,
+  CASH_HANDOVER_CONFIRM_EVIDENCE,
   DISPOSABLE_TEST_MONEY_EFFECT_PROOF,
   type FinancialRefundStatus,
   type PaymentRefundProjection,
