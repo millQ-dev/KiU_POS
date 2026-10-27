@@ -5,6 +5,7 @@ import {
   loadEnv,
   resolveAllowedOrigins,
   resolveCookieSecure,
+  resolveListenHost,
   resolvePinPepper,
 } from './config.js';
 import { createPool } from './db/pool.js';
@@ -111,8 +112,9 @@ async function main() {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  await app.listen({ port: env.PORT, host: '0.0.0.0' });
-  app.log.info({ port: env.PORT }, 'MillQ API listening');
+  const listenHost = resolveListenHost(env);
+  await app.listen({ port: env.PORT, host: listenHost });
+  app.log.info({ port: env.PORT, host: listenHost }, 'MillQ API listening');
 }
 
 main().catch((err) => {

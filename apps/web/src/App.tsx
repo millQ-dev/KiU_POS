@@ -33,6 +33,23 @@ if (import.meta.env.DEV) {
   installTerminalChronologyTestHooks(window);
 }
 
+/** Visible on vite.e2e / demo:serve only — does not change server truth or suppress gates. */
+function useMillqTestBanner() {
+  useEffect(() => {
+    if (import.meta.env.VITE_MILLQ_TEST_BANNER !== '1') return;
+    const el = document.createElement('div');
+    el.dataset.testid = 'millq-test-banner';
+    el.setAttribute('role', 'status');
+    el.textContent = 'TEST / NOT LEGAL OR REAL PAYMENT';
+    el.style.cssText =
+      'position:fixed;top:0;left:0;right:0;z-index:99999;background:#7a1f1f;color:#fff;text-align:center;padding:4px 8px;font:600 12px/1.4 system-ui,sans-serif;pointer-events:none';
+    document.body.prepend(el);
+    return () => {
+      el.remove();
+    };
+  }, []);
+}
+
 function readDevStored(): CashierContext | null {
   if (!isDevCashierPathEnabled()) return null;
   try {
@@ -56,6 +73,7 @@ type SessionPhase = 'idle' | 'resolving' | 'ready';
  * Company ID → PIN Session → Terminal → OPEN CashShift → server-derived CashierContext → CashierShell
  */
 export function App() {
+  useMillqTestBanner();
   const guestToken = guestTokenFromPath();
   const preferDev = isDevCashierPathEnabled();
 

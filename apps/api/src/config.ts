@@ -17,6 +17,11 @@ const envSchema = z
       .enum(['true', 'false'])
       .optional()
       .transform((v) => (v === undefined ? undefined : v === 'true')),
+    /**
+     * Bind address. Non-production defaults to loopback. Production keeps 0.0.0.0 unless set.
+     * When MILLQ_ALLOW_FISCAL_TEST_ADAPTER=1, host MUST be 127.0.0.1 or ::1 (fail-closed).
+     */
+    MILLQ_LISTEN_HOST: z.string().min(1).optional(),
   })
   .superRefine((val, ctx) => {
     if (val.NODE_ENV === 'production' && !val.IDENTITY_PIN_PEPPER) {
@@ -51,4 +56,25 @@ export function resolveAllowedOrigins(env: Env): string[] {
   return env.CORS_ORIGINS.split(',')
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+
+/**
+ * Resolve API listen host with fail-closed fiscal-test guard (DEMO-29 / disposable).
+ * - production default: 0.0.0.0 (unchanged deploy posture)
+ * - development/test default: 127.0.0.1
+ * - MILLQ_ALLOW_FISCAL_TEST_ADAPTER=1 ⇒ must be loopback or throw
+ */
+export function resolveListenHost(env: Env): string {
+  const fiscalTest = process.env.MILLQ_ALLOW_FISCAL_TEST_ADAPTER === '1';
+  const requested =
+    env.MILLQ_LISTEN_HOST?.trim() ||
+    (env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
+  if (fiscalTest && !LOOPBACK_HOSTS.has(requested)) {
+    throw new Error(
+      'MILLQ_ALLOW_FISCAL_TEST_ADAPTER=1 requires MILLQ_LISTEN_HOST loopback (127.0.0.1 or ::1); refusing non-loopback bind',
+    );
+  }
+  return requested === 'localhost' ? '127.0.0.1' : requested;
 }

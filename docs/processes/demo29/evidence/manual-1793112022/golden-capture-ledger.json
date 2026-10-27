@@ -1,0 +1,22 @@
+{
+  "startedAt": "2026-10-27T14:40:28.666Z",
+  "steps": [
+    "company",
+    "pin",
+    "open_shift",
+    "add_egg",
+    "accept_commercial",
+    "receive_cash",
+    "fiscal_blocked_then_issue",
+    "complete_order",
+    "close_shift"
+  ],
+  "ids": {
+    "fiscalDocId": "27905302-d01b-4d79-9d45-3c1fa0cd37c7",
+    "orderId": "e913a65c-f97b-4917-acd3-ecf388f51037",
+    "goodsIssueId": "82b9e67a-e7cc-40c4-84df-3248dd0d9a83",
+    "cashShiftId": "2177ba85-13c9-4f31-b001-5b28efb7400a"
+  },
+  "finishedAt": "2026-10-27T14:40:32.024Z",
+  "ok": true
+}
