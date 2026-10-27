@@ -2,7 +2,7 @@
 
 | ID | Criterion | Evidence | Pass? |
 | --- | --- | --- | --- |
-| A1 | Counter POS open → sell → cash → fiscal → complete → GI → close BALANCED | Golden capture + DB readback | **PASS** |
+| A1 | Counter POS open → sell → cash → fiscal → complete → GI → close BALANCED | `manual-1793112022` ledger `ok:true` + `db-readback.txt` | **PASS** |
 | A2 | Loopback-only serve; fiscal test adapter fail-closed off-loopback | `resolveListenHost` + unit tests + runbook | **PASS** |
 | A3 | TEST banner visible in demo/e2e web | `VITE_MILLQ_TEST_BANNER` / `useMillqTestBanner` | **PASS** |
 | A4 | Disposable `millq_ci_pos_*` only | Runbook + evidence DB name | **PASS** |

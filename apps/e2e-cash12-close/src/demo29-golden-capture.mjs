@@ -106,10 +106,18 @@ try {
   ledger.ids.cashShiftId = shiftMeta.shift?.cashShiftId ?? null;
 
   await page.getByTestId('open-close-cash-shift').click();
+  await expect(page.getByTestId('closing-cash-count')).toBeVisible({ timeout: 20_000 });
   const expected = String(BigInt(fx.openingAmountMinor) + BigInt(fx.eggPriceMinor));
-  await page.getByTestId('closing-actual-input').fill(expected);
-  await page.getByTestId('closing-submit').click();
-  await shot(page, '09-post-close');
+  await page.getByTestId('close-actual-input').fill(expected);
+  await page.getByTestId('close-submit').click();
+  await expect(page.getByTestId('closing-cash-success')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('close-variance')).toHaveText('BALANCED');
+  const expectedTxt = await page.getByTestId('close-expected').innerText();
+  writeFileSync(
+    join(evidenceDir, 'close-result.json'),
+    JSON.stringify({ variance: 'BALANCED', expectedTxt, expected }, null, 2),
+  );
+  await shot(page, '09-close-balanced');
 
   ledger.steps = [
     'company',

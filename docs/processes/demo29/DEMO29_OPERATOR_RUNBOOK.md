@@ -46,11 +46,19 @@ Credentials: company code printed; PIN only in `$DEMO29_EVIDENCE_DIR/fixture.jso
 8. **Complete order** once → note GoodsIssue id  
 9. **Close cash shift** → actual = opening + Σ CASH PCE (no refunds) → BALANCED  
 
-Optional capture:
+Optional one-shot golden (prepare + serve + capture + teardown; preferred for evidence):
+
+```bash
+export DEMO29_EVIDENCE_DIR="$PWD/docs/processes/demo29/evidence/manual-$(date +%s)"
+pnpm --filter @millq/e2e-cash12-close exec node src/demo29-golden-oneshot.mjs
+```
+
+Against a running `demo:serve`, capture using the **live** temp fixture path printed at READY (not the redacted evidence copy):
 
 ```bash
 export E2E_BASE_URL=http://127.0.0.1:18081
-export E2E_FIXTURE_PATH="$DEMO29_EVIDENCE_DIR/fixture.json"
+export E2E_FIXTURE_PATH=/path/from/READY/log/fixture.json
+export DEMO29_EVIDENCE_DIR=...
 pnpm --filter @millq/e2e-cash12-close exec node src/demo29-golden-capture.mjs
 ```
 

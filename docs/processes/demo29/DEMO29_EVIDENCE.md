@@ -1,51 +1,43 @@
 # DEMO29_EVIDENCE — G3 ledger
 
-**Run id:** `manual-1793111407`  
-**DB:** `millq_ci_pos_demo29_1793111406` (disposable; dropped after capture)  
-**Origin base:** `7225085a7cef9e8ec6b98dc44d29781139163f23`
+**Run id:** `manual-1793112022`  
+**DB:** `millq_ci_pos_demo29_1793112022` (disposable; dropped after readback)  
+**Origin base:** `7225085a7cef9e8ec6b98dc44d29781139163f23`  
+**Capture:** `demo29-golden-oneshot.mjs` → `demo29-golden-capture.mjs` (`ok: true`)
 
-## Golden IDs (from evidence)
+## Golden IDs
 
 | Artifact | Value |
 | --- | --- |
-| Company | from fixture (redacted in PR) |
-| Terminal | Cash12 E2E Terminal |
-| Shift | opened → **CLOSED / BALANCED** |
-| Order | **COMPLETED** |
-| PaymentCaptureEvent | **CASH 5000**, unique |
-| Fiscal | **SATISFIED** (test adapter) |
-| GoodsIssue | **POSTED** |
-| Expected close | opening + ΣCASH PCE − refunds = **105000** (opening 100000 + 5000) |
-| Close result | **BALANCED** (`close-result.json`) |
+| Order | `e913a65c-f97b-4917-acd3-ecf388f51037` **COMPLETED** |
+| PCE | CASH **5000** (`CASH_RECEIVE`) |
+| Fiscal | `27905302-…` **SATISFIED** |
+| GoodsIssue | `82b9e67a-…` **POSTED** |
+| CashShift | `2177ba85-…` **CLOSED / BALANCED** expected=actual=105000 |
 | Refunds | **0** |
+| Close UI | `close-result.json` variance BALANCED |
 
 ## Screenshots
 
-Path: `docs/processes/demo29/evidence/manual-1793111407/`
+Path: `docs/processes/demo29/evidence/manual-1793112022/`
 
 | File | Step |
 | --- | --- |
-| `01-banner-company.png` | TEST banner + company entry |
-| `02-after-pin.png` | After PIN (credentials redacted in fixture) |
+| `01-banner-company.png` | TEST banner + company |
+| `02-after-pin.png` | After PIN |
 | `03-cashier-open.png` | Open shift |
 | `04-egg-line.png` | Eggs in basket |
 | `05-receive-cash.png` | ReceiveCash |
 | `06-fiscal-blocked.png` | Fiscal gate blocked |
-| `07-fiscal-satisfied.png` | Fiscal SATISFIED after issue |
+| `07-fiscal-satisfied.png` | Fiscal SATISFIED |
 | `08-complete-order.png` | Complete + GI |
 | `09-close-balanced.png` | Close BALANCED |
 
-Also: `fixture.json` (**PIN redacted**), `close-result.json`, DB readback notes.
+Also: redacted `fixture.json`, `golden-capture-ledger.json` (`ok: true`), `close-result.json`, `db-readback.txt`.
 
-## Capture method
+## Non-evidence
 
-- `demo:serve` loopback API+web  
-- `demo29-golden-capture.mjs` + follow-up close via Playwright selectors (`close-actual-input`)  
-- SQL inspection aligned with pack `10_DB_READBACK_INSPECTION.sql` patterns
-
-## Non-evidence (explicit)
-
-- No production DB  
-- No migration 036 on shared/prod  
+- No production DB / migrate 036 on shared/prod  
 - No real fiscal/payment provider  
-- No Refund B2 UI path in this demo
+- No Refund B2 UI path  
+- Live PINs never written under `evidence/` (redacted at copy)

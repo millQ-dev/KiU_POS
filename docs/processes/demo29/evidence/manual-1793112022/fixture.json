@@ -1,0 +1,23 @@
+{
+  "tenantId": "377777e7-308f-443b-ac6c-2963f00d1a5f",
+  "outletId": "17ea913d-e98d-4e04-a162-6ca0e0d69b1e",
+  "legalEntityId": "1622516f-b1e9-4214-ad5c-541ec0d80dd0",
+  "brandId": "6c6792b3-e3e8-43b5-8653-91b2088ac6cf",
+  "terminalId": "c9d66b93-f1d2-44ea-8830-2913cf87fa1e",
+  "eggCatalogItemId": "e1bf1f50-557b-46b9-968a-0f83733998e5",
+  "eggPriceMinor": "5000",
+  "tenderDefinitionId": "13f0562f-c8d9-4100-80a1-1403152cbd74",
+  "disabledTenderDefinitionId": "d7ae1450-ac41-4ce9-bddf-4564ee40368c",
+  "companyCode": "377777E7308F443BAC6C2963F00D1A5F",
+  "companyDisplayName": "MillQ Demo",
+  "cashierPin": "[REDACTED]",
+  "managerPin": "[REDACTED]",
+  "noReceivePin": "[REDACTED]",
+  "foreignCompanyCode": "4D4742BFC49C46FD8239304341DEC6B1",
+  "foreignTerminalId": "955157fd-861c-44c4-9c92-4814a985838e",
+  "openingAmountMinor": "100000",
+  "overpayTenderedMinor": "10000",
+  "expectedChangeMinor": "5000",
+  "expectedCollectedMinor": "5000",
+  "expectedCloseMinor": "105000"
+}

@@ -53,3 +53,5 @@ reports/
 
 # DEMO-29 local secrets / disposable fixtures
 docs/processes/demo29/evidence/**/fixture.secrets.env
+docs/processes/demo29/evidence/**/ZZ-failure.png
+docs/processes/demo29/evidence/**/serve-urls.json

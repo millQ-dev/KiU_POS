@@ -9,7 +9,7 @@
  */
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
-import { mkdtempSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,7 +63,23 @@ function start(cmd, args, env, cwd = ROOT) {
   });
   child.stdout.on('data', (d) => process.stdout.write(d));
   child.stderr.on('data', (d) => process.stderr.write(d));
+  child.on('exit', (code, signal) => {
+    if (shuttingDown || !serversReady) return;
+    console.error(`child exited after READY code=${code} signal=${signal}; tearing down`);
+    void shutdown(1);
+  });
   return child;
+}
+
+function writeRedactedFixture(srcPath, destPath) {
+  const raw = JSON.parse(readFileSync(srcPath, 'utf8'));
+  const redacted = {
+    ...raw,
+    cashierPin: '[REDACTED]',
+    managerPin: '[REDACTED]',
+    noReceivePin: '[REDACTED]',
+  };
+  writeFileSync(destPath, `${JSON.stringify(redacted, null, 2)}\n`);
 }
 
 async function waitHttp(url, timeoutMs = 90_000) {
@@ -87,8 +103,12 @@ mkdirSync(evidenceDir, { recursive: true });
 const work = mkdtempSync(join(tmpdir(), 'millq-demo29-serve-'));
 const fixturePath = join(work, 'fixture.json');
 const children = [];
+let shuttingDown = false;
+let serversReady = false;
 
 async function shutdown(code = 0) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   for (const c of children) {
     try {
       c.kill('SIGTERM');
@@ -114,8 +134,9 @@ try {
     join(ROOT, 'apps/api'),
   );
   const durableFixture = join(evidenceDir, 'fixture.json');
-  copyFileSync(fixturePath, durableFixture);
-  console.log(`fixture copied to ${durableFixture} (redact before sharing)`);
+  writeRedactedFixture(fixturePath, durableFixture);
+  console.log(`redacted fixture written to ${durableFixture} (PINs not stored under evidence/)`);
+  console.log(`live PINs only in temp ${fixturePath} (not git-tracked)`);
 
   const apiPort = Number(process.env.DEMO29_API_PORT) || (await freePort());
   const webPort = Number(process.env.DEMO29_WEB_PORT) || (await freePort());
@@ -174,13 +195,16 @@ try {
   );
   await waitHttp(webUrl);
 
+  serversReady = true;
+  writeFileSync(join(evidenceDir, 'serve-urls.json'), `${JSON.stringify({ webUrl, apiUrl, liveFixturePath: fixturePath }, null, 2)}\n`);
   console.log('');
   console.log('=== DEMO-29 READY (loopback) ===');
   console.log(`WEB:  ${webUrl}`);
   console.log(`API:  ${apiUrl}`);
   console.log(`DB:   disposable millq_ci_pos_* (see DATABASE_URL)`);
   console.log(`Company code: ${fixture.companyCode}`);
-  console.log('PIN: see fixture.json (do not commit / do not paste into chat)');
+  console.log(`Live fixture (PINs): ${fixturePath}`);
+  console.log(`Redacted evidence fixture: ${durableFixture}`);
   console.log('Banner: treat UI as TEST / NOT LEGAL OR REAL PAYMENT');
   console.log('Stop: Ctrl+C (tears down API+Vite only; drop DB manually when done)');
   console.log('===============================');
