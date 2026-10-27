@@ -490,7 +490,7 @@ export class RefundService {
    * Flow: AUTHORIZED → EXECUTION_PENDING → confirmCashHandover → MONEY_RETURNED.
    *
    * Lock order (compatible with CloseCashShift):
-   *   1) cash_shift FOR UPDATE
+   *   1) cash_shift FOR UPDATE (OPEN shift of Session Terminal — ADR-0048 D8)
    *   2) payment FOR UPDATE
    *   3) payment_refund FOR UPDATE
    * Close takes cash_shift FOR UPDATE then payment_refund FOR SHARE — same CashShift-first order.
@@ -500,7 +500,8 @@ export class RefundService {
    */
   async confirmCashHandover(input: {
     paymentRefundId: string;
-    cashShiftId: string;
+    /** Session Terminal — OPEN CashShift is resolved server-side (never client-trusted shift id). */
+    terminalId: string;
     amountMinor: string;
     currencyCode: string;
     minorUnitExponent: number;
@@ -518,6 +519,9 @@ export class RefundService {
     assertPositiveDigits('amountMinor', input.amountMinor);
     if (!input.confirmIdempotencyKey.trim()) {
       throw new DomainValidationError('VALIDATION', 'confirmIdempotencyKey required');
+    }
+    if (!input.terminalId.trim()) {
+      throw new DomainValidationError('VALIDATION', 'terminalId required');
     }
     if (!/^[A-Z]{3}$/.test(input.currencyCode)) {
       throw new DomainValidationError('VALIDATION', 'currencyCode must be ISO-4217 alpha-3');
@@ -537,39 +541,50 @@ export class RefundService {
     try {
       await client.query('BEGIN');
 
-      // 1) CashShift first — serialize vs Close / concurrent confirm on same drawer.
+      // 1) OPEN CashShift of Session Terminal (D8) — never bind by client-supplied cashShiftId.
+      const terminal = await client.query<{
+        terminal_id: string;
+        outlet_id: string;
+        tenant_id: string;
+      }>(
+        `SELECT terminal_id, outlet_id, tenant_id FROM terminal
+         WHERE terminal_id = $1 AND tenant_id = $2
+         FOR SHARE`,
+        [input.terminalId, input.principal.tenantId],
+      );
+      if (!terminal.rows[0]) {
+        throw new DomainValidationError('NOT_FOUND', 'Terminal not found');
+      }
+      if (terminal.rows[0].outlet_id !== input.outletId) {
+        throw new DomainValidationError(
+          'OUTLET_MISMATCH',
+          'Session Terminal outlet must equal sale / confirmation outlet',
+        );
+      }
+
       const shiftRes = await client.query<{
         cash_shift_id: string;
         tenant_id: string;
         outlet_id: string;
         terminal_id: string;
         status: string;
+        opening_amount_minor: string;
         currency_code: string;
         minor_unit_exponent: number;
       }>(
         `SELECT cash_shift_id, tenant_id, outlet_id, terminal_id, status,
-                currency_code, minor_unit_exponent
+                opening_amount_minor, currency_code, minor_unit_exponent
          FROM cash_shift
-         WHERE cash_shift_id = $1
+         WHERE tenant_id = $1 AND terminal_id = $2 AND status = 'OPEN'
          FOR UPDATE`,
-        [input.cashShiftId],
+        [input.principal.tenantId, input.terminalId],
       );
       const shift = shiftRes.rows[0];
-      if (!shift) throw new DomainValidationError('NOT_FOUND', 'CashShift not found');
-      if (shift.status === 'CLOSED') {
-        throw new DomainValidationError(
-          'CASH_SHIFT_ALREADY_CLOSED',
-          'CLOSED CashShift cannot be mutated for CASH refund payout',
-        );
-      }
-      if (shift.status !== 'OPEN') {
+      if (!shift) {
         throw new DomainValidationError(
           'CASH_SHIFT_NOT_OPEN',
-          `CashShift status ${shift.status} cannot confirm CASH handover`,
+          'No OPEN CashShift for Session Terminal',
         );
-      }
-      if (shift.tenant_id !== input.principal.tenantId) {
-        throw new DomainValidationError('CROSS_ENTITY', 'CashShift tenant mismatch');
       }
       if (shift.outlet_id !== input.outletId) {
         throw new DomainValidationError(
@@ -607,6 +622,15 @@ export class RefundService {
         throw new DomainValidationError('FORBIDDEN', 'Permission denied for CASH refund handover');
       }
 
+      // Fail closed if payout would drive Close expected negative (Bugbot High / ADR D11).
+      const availableMinor = await this.computeOpenShiftAvailableCashMinor(client, shift);
+      if (cmpMinor(input.amountMinor, availableMinor) > 0) {
+        throw new DomainValidationError(
+          'INSUFFICIENT_CASH_SHIFT_FLOAT',
+          `CASH handover ${input.amountMinor} exceeds available expected float ${availableMinor} on OPEN CashShift`,
+        );
+      }
+
       // Idempotent confirm by LE + key (before mutating refund).
       const priorHandover = await client.query<{
         payment_refund_id: string;
@@ -628,7 +652,7 @@ export class RefundService {
         if (
           h.payment_refund_id !== input.paymentRefundId ||
           h.amount_minor !== input.amountMinor ||
-          h.cash_shift_id !== input.cashShiftId ||
+          h.cash_shift_id !== shift.cash_shift_id ||
           h.confirmed_by_user_id !== input.principal.userId
         ) {
           throw new DomainValidationError(
@@ -665,7 +689,7 @@ export class RefundService {
       const row = await this.lockRefund(client, input.paymentRefundId);
 
       if (row.financial_status === 'MONEY_RETURNED') {
-        if (row.cash_shift_id === input.cashShiftId && row.amount_minor === input.amountMinor) {
+        if (row.cash_shift_id === shift.cash_shift_id && row.amount_minor === input.amountMinor) {
           await client.query('COMMIT');
           return mapRefund(row, true);
         }
@@ -735,7 +759,7 @@ export class RefundService {
          WHERE payment_refund_id = $1
            AND financial_status = 'EXECUTION_PENDING'
            AND reservation_holds_capacity = TRUE`,
-        [input.paymentRefundId, input.cashShiftId, confirmedAt],
+        [input.paymentRefundId, shift.cash_shift_id, confirmedAt],
       );
       const updated = await client.query<{ financial_status: string }>(
         `SELECT financial_status FROM payment_refund WHERE payment_refund_id = $1`,
@@ -775,7 +799,7 @@ export class RefundService {
             row.currency_code,
             row.minor_unit_exponent,
             row.outlet_id,
-            input.cashShiftId,
+            shift.cash_shift_id,
             input.principal.userId,
             confirmedAt,
             input.confirmIdempotencyKey,
@@ -802,7 +826,7 @@ export class RefundService {
           if (
             h &&
             h.amount_minor === input.amountMinor &&
-            h.cash_shift_id === input.cashShiftId &&
+            h.cash_shift_id === shift.cash_shift_id &&
             h.confirmed_by_user_id === input.principal.userId
           ) {
             const doneDup = await this.lockRefund(client, input.paymentRefundId);
@@ -826,7 +850,8 @@ export class RefundService {
         toStatus: 'MONEY_RETURNED',
         recordedByActorId: input.principal.userId,
         payload: {
-          cashShiftId: input.cashShiftId,
+          cashShiftId: shift.cash_shift_id,
+          terminalId: shift.terminal_id,
           payoutAttemptId: attemptId,
           amountMinor: row.amount_minor,
           currencyCode: row.currency_code,
@@ -839,7 +864,7 @@ export class RefundService {
       // Re-assert shift still OPEN under same FOR UPDATE (concurrent close cannot have slipped).
       const shiftAfter = await client.query<{ status: string }>(
         `SELECT status FROM cash_shift WHERE cash_shift_id = $1`,
-        [input.cashShiftId],
+        [shift.cash_shift_id],
       );
       if (shiftAfter.rows[0]?.status !== 'OPEN') {
         throw new DomainValidationError(
@@ -1118,6 +1143,79 @@ export class RefundService {
     );
     if (!r.rows[0]) throw new DomainValidationError('NOT_FOUND', 'PaymentRefund not found');
     return r.rows[0];
+  }
+
+  /**
+   * Available expected float on an OPEN CashShift (same formula as Close expected before this payout):
+   * opening + Σ CASH_RECEIVE PCE − Σ MONEY_RETURNED CASH already bound to the shift.
+   */
+  private async computeOpenShiftAvailableCashMinor(
+    client: PoolClient,
+    shift: {
+      cash_shift_id: string;
+      tenant_id: string;
+      opening_amount_minor: string;
+      currency_code: string;
+      minor_unit_exponent: number;
+    },
+  ): Promise<string> {
+    if (!/^[0-9]+$/.test(shift.opening_amount_minor)) {
+      throw new DomainValidationError(
+        'EXPECTED_BASE_INCOMPLETE',
+        'CashShift opening_amount_minor is not a digit string',
+      );
+    }
+    let sum = BigInt(shift.opening_amount_minor);
+    const pce = await client.query<{ amount_collected_minor: string }>(
+      `SELECT pce.amount_collected_minor
+       FROM payment_collection_event pce
+       INNER JOIN payment_cash_collection_evidence e
+         ON e.payment_cash_collection_evidence_id = pce.payment_cash_collection_evidence_id
+       WHERE e.cash_shift_id = $1
+         AND pce.tenant_id = $2
+         AND pce.collection_evidence_kind = 'CASH_RECEIVE'
+         AND pce.instrument_family = 'CASH'
+         AND pce.currency_code = $3
+         AND pce.minor_unit_exponent = $4
+       FOR SHARE`,
+      [shift.cash_shift_id, shift.tenant_id, shift.currency_code, shift.minor_unit_exponent],
+    );
+    for (const row of pce.rows) {
+      if (!/^[0-9]+$/.test(row.amount_collected_minor)) {
+        throw new DomainValidationError(
+          'EXPECTED_BASE_INCOMPLETE',
+          'Cash PCE amount_collected_minor is not a digit string',
+        );
+      }
+      sum += BigInt(row.amount_collected_minor);
+    }
+    const refunds = await client.query<{ amount_minor: string }>(
+      `SELECT amount_minor
+       FROM payment_refund
+       WHERE cash_shift_id = $1
+         AND tenant_id = $2
+         AND financial_status = 'MONEY_RETURNED'
+         AND instrument_family = 'CASH'
+         AND reservation_holds_capacity = FALSE
+       FOR SHARE`,
+      [shift.cash_shift_id, shift.tenant_id],
+    );
+    for (const row of refunds.rows) {
+      if (!/^[1-9][0-9]*$/.test(row.amount_minor)) {
+        throw new DomainValidationError(
+          'EXPECTED_BASE_INCOMPLETE',
+          'Confirmed CASH refund amount_minor is not a positive digit string',
+        );
+      }
+      sum -= BigInt(row.amount_minor);
+    }
+    if (sum < 0n) {
+      throw new DomainValidationError(
+        'EXPECTED_BASE_INCOMPLETE',
+        'OPEN CashShift already has confirmed refunds exceeding opening + collections',
+      );
+    }
+    return sum.toString();
   }
 
   private async transitionHolding(

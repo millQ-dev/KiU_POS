@@ -143,9 +143,15 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
     });
   }
 
-  async function seedCashCollected(opts?: { collectedMinor?: string; outletId?: string }) {
+  async function seedCashCollected(opts?: {
+    collectedMinor?: string;
+    outletId?: string;
+    /** When false, PCE evidence binds to a synthetic CLOSED shift (historical sale; R3-D). */
+    bindPceToOpenShift?: boolean;
+  }) {
     const collected = opts?.collectedMinor ?? '50000';
     const outletId = opts?.outletId ?? fx.outletId;
+    const bindPceToOpenShift = opts?.bindPceToOpenShift !== false;
     const orderId = randomUUID();
     const snapId = randomUUID();
     const groupId = randomUUID();
@@ -226,20 +232,46 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
         `alloc-${randomUUID()}`,
       ],
     );
-    const shiftPeek = await pool.query<{ cash_shift_id: string }>(
-      `SELECT cash_shift_id FROM cash_shift
-       WHERE tenant_id = $1 AND outlet_id = $2 AND status = 'OPEN'
-       ORDER BY opened_at DESC LIMIT 1`,
-      [fx.tenantId, outletId],
-    );
-    const cashShiftId = shiftPeek.rows[0]?.cash_shift_id;
-    if (!cashShiftId) {
-      throw new Error('seedCashCollected requires an OPEN CashShift for the outlet');
+    let cashShiftId: string;
+    let evidenceTerminalId: string;
+    if (bindPceToOpenShift) {
+      const shiftPeek = await pool.query<{ cash_shift_id: string; terminal_id: string }>(
+        `SELECT cash_shift_id, terminal_id FROM cash_shift
+         WHERE tenant_id = $1 AND outlet_id = $2 AND status = 'OPEN'
+         ORDER BY opened_at DESC LIMIT 1`,
+        [fx.tenantId, outletId],
+      );
+      if (!shiftPeek.rows[0]) {
+        throw new Error('seedCashCollected requires an OPEN CashShift for the outlet');
+      }
+      cashShiftId = shiftPeek.rows[0].cash_shift_id;
+      evidenceTerminalId = shiftPeek.rows[0].terminal_id;
+    } else {
+      // Historical CLOSED shift for collection evidence (not current drawer float).
+      cashShiftId = randomUUID();
+      evidenceTerminalId = terminalId;
+      await pool.query(
+        `INSERT INTO cash_shift (
+           cash_shift_id, tenant_id, outlet_id, terminal_id, status,
+           opening_amount_minor, currency_code, minor_unit_exponent,
+           opened_by_user_id, auth_mode, operation_fingerprint, open_idempotency_key,
+           closed_at, closed_by_user_id, actual_amount_minor, expected_amount_minor,
+           difference_minor, variance_kind, close_idempotency_key, expected_source_refs
+         ) VALUES (
+           $1,$2,$3,$4,'CLOSED','0','VND',0,$5,'DIRECT_PERMISSION','{}'::jsonb,$6,
+           NOW(),$5,'0','0','0','BALANCED',$7,'[]'::jsonb
+         )`,
+        [
+          cashShiftId,
+          fx.tenantId,
+          outletId,
+          evidenceTerminalId,
+          userId,
+          `hist-open-${randomUUID()}`,
+          `hist-close-${randomUUID()}`,
+        ],
+      );
     }
-    const term = await pool.query<{ terminal_id: string }>(
-      `SELECT terminal_id FROM cash_shift WHERE cash_shift_id = $1`,
-      [cashShiftId],
-    );
     await pool.query(
       `INSERT INTO payment_cash_collection_evidence (
          payment_cash_collection_evidence_id, payment_id, tenant_id, legal_entity_id,
@@ -257,7 +289,7 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
         checkId,
         groupId,
         cashShiftId,
-        term.rows[0]!.terminal_id,
+        evidenceTerminalId,
         outletId,
         userId,
         collected,
@@ -294,17 +326,17 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
 
   function confirmArgs(
     pending: Awaited<ReturnType<typeof authorizePending>>,
-    cashShiftId: string,
     overrides: Partial<{
       amountMinor: string;
       outletId: string;
+      terminalId: string;
       confirmIdempotencyKey: string;
       principal: AuthenticatedPrincipal;
     }> = {},
   ) {
     return {
       paymentRefundId: pending.paymentRefundId,
-      cashShiftId,
+      terminalId: overrides.terminalId ?? terminalId,
       amountMinor: overrides.amountMinor ?? pending.amountMinor,
       currencyCode: 'VND',
       minorUnitExponent: 0,
@@ -321,7 +353,7 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
     const pending = await authorizePending('20000', seeded.paymentId, seeded.checkId);
     expect(pending.financialStatus).toBe('EXECUTION_PENDING');
 
-    const done = await refunds.confirmCashHandover(confirmArgs(pending, shift.cashShiftId));
+    const done = await refunds.confirmCashHandover(confirmArgs(pending));
     expect(done.financialStatus).toBe('MONEY_RETURNED');
     expect(done.reservationHoldsCapacity).toBe(false);
     expect(done.cashShiftId).toBe(shift.cashShiftId);
@@ -355,7 +387,7 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
 
     // Partial second refund
     const pending2 = await authorizePending('10000', seeded.paymentId, seeded.checkId);
-    await refunds.confirmCashHandover(confirmArgs(pending2, shift.cashShiftId));
+    await refunds.confirmCashHandover(confirmArgs(pending2));
 
     const closed = await cash.closeShift(principal, {
       cashShiftId: shift.cashShiftId,
@@ -377,8 +409,8 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
     const seeded = await seedCashCollected({ collectedMinor: '30000' });
     const pending = await authorizePending('5000', seeded.paymentId, seeded.checkId);
     const key = `dup-${randomUUID()}`;
-    const a = await refunds.confirmCashHandover(confirmArgs(pending, shift.cashShiftId, { confirmIdempotencyKey: key }));
-    const b = await refunds.confirmCashHandover(confirmArgs(pending, shift.cashShiftId, { confirmIdempotencyKey: key }));
+    const a = await refunds.confirmCashHandover(confirmArgs(pending, { confirmIdempotencyKey: key }));
+    const b = await refunds.confirmCashHandover(confirmArgs(pending, { confirmIdempotencyKey: key }));
     expect(a.paymentRefundId).toBe(b.paymentRefundId);
     expect(b.duplicate).toBe(true);
     const count = await pool.query<{ c: number }>(
@@ -402,7 +434,7 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
     const pending = await authorizePending('7000', seeded.paymentId, seeded.checkId);
     const results = await Promise.allSettled(
       Array.from({ length: 8 }, () =>
-        refunds.confirmCashHandover(confirmArgs(pending, shift.cashShiftId)),
+        refunds.confirmCashHandover(confirmArgs(pending)),
       ),
     );
     const ok = results.filter((r) => r.status === 'fulfilled');
@@ -426,11 +458,11 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
     const pending = await authorizePending('8000', seeded.paymentId, seeded.checkId);
 
     await expect(
-      refunds.confirmCashHandover(confirmArgs(pending, shift.cashShiftId, { amountMinor: '7999' })),
+      refunds.confirmCashHandover(confirmArgs(pending, { amountMinor: '7999' })),
     ).rejects.toMatchObject({ code: 'AMOUNT_MISMATCH' });
 
     await expect(
-      refunds.confirmCashHandover(confirmArgs(pending, shift.cashShiftId, { outletId: otherOutletId })),
+      refunds.confirmCashHandover(confirmArgs(pending, { outletId: otherOutletId })),
     ).rejects.toMatchObject({ code: 'OUTLET_MISMATCH' });
 
     const noPerm = await identity.provisionUserWithPin({
@@ -444,7 +476,7 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
     });
     await expect(
       refunds.confirmCashHandover(
-        confirmArgs(pending, shift.cashShiftId, {
+        confirmArgs(pending, {
           principal: {
             sessionId: randomUUID(),
             tenantId: fx.tenantId,
@@ -457,7 +489,7 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
       ),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
 
-    // Wrong LE: principal from another tenant cannot confirm
+    // Wrong tenant principal cannot see Session Terminal / OPEN shift
     const otherTenant = randomUUID();
     await pool.query(`INSERT INTO tenant (tenant_id, name, company_code) VALUES ($1,'X',$2)`, [
       otherTenant,
@@ -465,11 +497,11 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
     ]);
     await expect(
       refunds.confirmCashHandover(
-        confirmArgs(pending, shift.cashShiftId, {
+        confirmArgs(pending, {
           principal: { ...principal, tenantId: otherTenant, userId: randomUUID() },
         }),
       ),
-    ).rejects.toMatchObject({ code: 'CROSS_ENTITY' });
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
 
     await cash.closeShift(principal, {
       cashShiftId: shift.cashShiftId,
@@ -480,8 +512,46 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
       expectedAmountMinor: '125000',
     });
     await expect(
-      refunds.confirmCashHandover(confirmArgs(pending, shift.cashShiftId)),
-    ).rejects.toMatchObject({ code: 'CASH_SHIFT_ALREADY_CLOSED' });
+      refunds.confirmCashHandover(confirmArgs(pending)),
+    ).rejects.toMatchObject({ code: 'CASH_SHIFT_NOT_OPEN' });
+  });
+
+  it('rejects payout exceeding OPEN shift expected float; binds Session Terminal only', async () => {
+    // Historical PCE (not on current drawer): opening 1000 only → refund 5000 fails float gate.
+    const shift = await openShift('1000');
+    const seeded = await seedCashCollected({
+      collectedMinor: '50000',
+      bindPceToOpenShift: false,
+    });
+    const pending = await authorizePending('5000', seeded.paymentId, seeded.checkId);
+    await expect(refunds.confirmCashHandover(confirmArgs(pending))).rejects.toMatchObject({
+      code: 'INSUFFICIENT_CASH_SHIFT_FLOAT',
+    });
+    expect(shift.status).toBe('OPEN');
+
+    // Sibling terminal OPEN shift — payout binds only to Session Terminal passed in.
+    const t2 = randomUUID();
+    await pool.query(
+      `INSERT INTO terminal (terminal_id, tenant_id, outlet_id, code, name)
+       VALUES ($1,$2,$3,'T-X','Sibling')`,
+      [t2, fx.tenantId, fx.outletId],
+    );
+    const sibling = await cash.openShift(principal, {
+      outletId: fx.outletId,
+      terminalId: t2,
+      openIdempotencyKey: `open-t2-${randomUUID()}`,
+      openingCash: { amountMinor: '999999', currencyCode: 'VND', minorUnitExponent: 0 },
+    });
+    const done = await refunds.confirmCashHandover(confirmArgs(pending, { terminalId: t2 }));
+    expect(done.financialStatus).toBe('MONEY_RETURNED');
+    expect(done.cashShiftId).toBe(sibling.cashShiftId);
+    // Primary terminal shift must remain unbound / not mutated by sibling confirm.
+    const primaryRefunds = await pool.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM payment_refund
+       WHERE cash_shift_id = $1 AND financial_status = 'MONEY_RETURNED'`,
+      [shift.cashShiftId],
+    );
+    expect(primaryRefunds.rows[0]!.c).toBe(0);
   });
 
   it('UNKNOWN and RECONCILE_BLOCKED forbid confirmation; disposable proof blocked for CASH', async () => {
@@ -490,13 +560,13 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
     const pending = await authorizePending('3000', seeded.paymentId, seeded.checkId);
     await refunds.markExecutionUnknown(pending.paymentRefundId);
     await expect(
-      refunds.confirmCashHandover(confirmArgs(pending, shift.cashShiftId)),
+      refunds.confirmCashHandover(confirmArgs(pending)),
     ).rejects.toMatchObject({ code: 'REFUND_STATUS_INVALID' });
 
     const pending2 = await authorizePending('3000', seeded.paymentId, seeded.checkId);
     await refunds.markReconcileBlocked(pending2.paymentRefundId);
     await expect(
-      refunds.confirmCashHandover(confirmArgs(pending2, shift.cashShiftId)),
+      refunds.confirmCashHandover(confirmArgs(pending2)),
     ).rejects.toMatchObject({ code: 'REFUND_STATUS_INVALID' });
 
     const pending3 = await authorizePending('2000', seeded.paymentId, seeded.checkId);
@@ -514,7 +584,7 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
     const pending = await authorizePending('4000', seeded.paymentId, seeded.checkId);
 
     const results = await Promise.allSettled([
-      refunds.confirmCashHandover(confirmArgs(pending, shift.cashShiftId)),
+      refunds.confirmCashHandover(confirmArgs(pending)),
       cash.closeShift(principal, {
         cashShiftId: shift.cashShiftId,
         closeIdempotencyKey: `race-close-${randomUUID()}`,
@@ -555,8 +625,8 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
     // CLOSED shift never mutated after close by a late confirm
     if (shiftRow.rows[0]!.status === 'CLOSED') {
       await expect(
-        refunds.confirmCashHandover(confirmArgs(pending, shift.cashShiftId)),
-      ).rejects.toMatchObject({ code: 'CASH_SHIFT_ALREADY_CLOSED' });
+        refunds.confirmCashHandover(confirmArgs(pending)),
+      ).rejects.toMatchObject({ code: 'CASH_SHIFT_NOT_OPEN' });
       const after = await pool.query<{ expected_amount_minor: string }>(
         `SELECT expected_amount_minor FROM cash_shift WHERE cash_shift_id = $1`,
         [shift.cashShiftId],
@@ -571,7 +641,7 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
     const pending = await authorizePending('6000', seeded.paymentId, seeded.checkId);
 
     await expect(
-      refunds.confirmCashHandover(confirmArgs(pending, shift.cashShiftId, { amountMinor: '1' })),
+      refunds.confirmCashHandover(confirmArgs(pending, { amountMinor: '1' })),
     ).rejects.toMatchObject({ code: 'AMOUNT_MISMATCH' });
 
     const row = await pool.query<{ financial_status: string }>(
@@ -600,7 +670,7 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
     const shift = await openShift();
     const seeded = await seedCashCollected({ collectedMinor: '12000' });
     const pending = await authorizePending('2000', seeded.paymentId, seeded.checkId);
-    await refunds.confirmCashHandover(confirmArgs(pending, shift.cashShiftId));
+    await refunds.confirmCashHandover(confirmArgs(pending));
     const id = (
       await pool.query<{ payment_refund_cash_handover_evidence_id: string }>(
         `SELECT payment_refund_cash_handover_evidence_id FROM payment_refund_cash_handover_evidence
