@@ -405,14 +405,19 @@ describeB2('C0-REFUND-B2 CASH handover confirmation (disposable PostgreSQL)', ()
   });
 
   it('duplicate confirmation is idempotent (no second financial effect)', async () => {
-    const shift = await openShift();
-    const seeded = await seedCashCollected({ collectedMinor: '30000' });
+    // Full-float payout (opening = refund) must still replay safely after float gate.
+    const shift = await openShift('5000');
+    const seeded = await seedCashCollected({
+      collectedMinor: '5000',
+      bindPceToOpenShift: false,
+    });
     const pending = await authorizePending('5000', seeded.paymentId, seeded.checkId);
     const key = `dup-${randomUUID()}`;
     const a = await refunds.confirmCashHandover(confirmArgs(pending, { confirmIdempotencyKey: key }));
     const b = await refunds.confirmCashHandover(confirmArgs(pending, { confirmIdempotencyKey: key }));
     expect(a.paymentRefundId).toBe(b.paymentRefundId);
     expect(b.duplicate).toBe(true);
+    expect(a.cashShiftId).toBe(shift.cashShiftId);
     const count = await pool.query<{ c: number }>(
       `SELECT count(*)::int AS c FROM payment_refund_cash_handover_evidence WHERE payment_refund_id = $1`,
       [a.paymentRefundId],

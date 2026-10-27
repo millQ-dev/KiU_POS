@@ -622,16 +622,7 @@ export class RefundService {
         throw new DomainValidationError('FORBIDDEN', 'Permission denied for CASH refund handover');
       }
 
-      // Fail closed if payout would drive Close expected negative (Bugbot High / ADR D11).
-      const availableMinor = await this.computeOpenShiftAvailableCashMinor(client, shift);
-      if (cmpMinor(input.amountMinor, availableMinor) > 0) {
-        throw new DomainValidationError(
-          'INSUFFICIENT_CASH_SHIFT_FLOAT',
-          `CASH handover ${input.amountMinor} exceeds available expected float ${availableMinor} on OPEN CashShift`,
-        );
-      }
-
-      // Idempotent confirm by LE + key (before mutating refund).
+      // Idempotent confirm by LE + key (before float gate / mutating refund).
       const priorHandover = await client.query<{
         payment_refund_id: string;
         amount_minor: string;
@@ -742,6 +733,16 @@ export class RefundService {
         throw new DomainValidationError(
           'AMOUNT_MISMATCH',
           'Confirmation amount/currency must exactly equal Refund',
+        );
+      }
+
+      // After idempotent / MONEY_RETURNED short-circuits: fail closed if this new payout
+      // would drive Close expected negative (Bugbot High / ADR D11).
+      const availableMinor = await this.computeOpenShiftAvailableCashMinor(client, shift);
+      if (cmpMinor(input.amountMinor, availableMinor) > 0) {
+        throw new DomainValidationError(
+          'INSUFFICIENT_CASH_SHIFT_FLOAT',
+          `CASH handover ${input.amountMinor} exceeds available expected float ${availableMinor} on OPEN CashShift`,
         );
       }
 
