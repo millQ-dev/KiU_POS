@@ -230,10 +230,31 @@ export class RefundService {
       } catch (e: unknown) {
         const err = e as { code?: string };
         if (err.code === '23505') {
-          throw new DomainValidationError(
-            'IDEMPOTENCY_CONFLICT',
-            'Concurrent refund idempotency insert conflict',
+          // Concurrent same-key loser: re-read winner and replay or conflict (cash-shift pattern).
+          const winner = await client.query<RefundRow>(
+            `SELECT * FROM payment_refund
+             WHERE legal_entity_id = $1 AND refund_idempotency_key = $2
+             FOR UPDATE`,
+            [input.legalEntityId, input.refundIdempotencyKey],
           );
+          const row = winner.rows[0];
+          if (!row) throw e;
+          if (
+            row.semantic_fingerprint !== fingerprint ||
+            row.original_payment_id !== input.originalPaymentId ||
+            row.settlement_check_id !== input.settlementCheckId ||
+            row.amount_minor !== input.amountMinor ||
+            row.outlet_id !== input.outletId ||
+            row.tenant_id !== input.tenantId ||
+            row.legal_entity_id !== input.legalEntityId
+          ) {
+            throw new DomainValidationError(
+              'IDEMPOTENCY_CONFLICT',
+              'Refund idempotency key reused with different semantics',
+            );
+          }
+          await client.query('COMMIT');
+          return mapRefund(row, true);
         }
         throw e;
       }
@@ -375,6 +396,15 @@ export class RefundService {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+      // Lock order matches authorize: Payment first, then refund row (avoid deadlock).
+      const peek = await client.query<{ original_payment_id: string }>(
+        `SELECT original_payment_id FROM payment_refund WHERE payment_refund_id = $1`,
+        [paymentRefundId],
+      );
+      if (!peek.rows[0]) throw new DomainValidationError('NOT_FOUND', 'PaymentRefund not found');
+      await client.query(`SELECT payment_id FROM payment WHERE payment_id = $1 FOR UPDATE`, [
+        peek.rows[0].original_payment_id,
+      ]);
       const row = await this.lockRefund(client, paymentRefundId);
       if (row.financial_status === 'MONEY_RETURNED') {
         await client.query('COMMIT');
@@ -386,10 +416,6 @@ export class RefundService {
           `Cannot confirm money returned from ${row.financial_status}`,
         );
       }
-      // Re-lock payment to prevent double confirmed effect under races
-      await client.query(`SELECT payment_id FROM payment WHERE payment_id = $1 FOR UPDATE`, [
-        row.original_payment_id,
-      ]);
       await this.ensureAttempt(client, row, 'MONEY_RETURNED');
       const clock = await client.query<{ now: Date }>(`SELECT NOW() AS now`);
       const confirmedAt = clock.rows[0]!.now;

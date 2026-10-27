@@ -266,6 +266,39 @@ describeB1('C0-REFUND-B1 reservation + capacity (disposable PostgreSQL)', () => 
     expect(cap2.remainingCapacityMinor).toBe('30000');
   });
 
+  it('concurrent same idempotency key → single reservation (replay)', async () => {
+    const seeded = await seedCollectedPayment({ collectedMinor: '10000' });
+    const key = `conc-same-${randomUUID()}`;
+    const results = await Promise.allSettled(
+      Array.from({ length: 8 }, () =>
+        refunds.authorizeAndReserve({
+          tenantId: fx.tenantId,
+          legalEntityId: fx.legalEntityId,
+          originalPaymentId: seeded.paymentId,
+          settlementCheckId: seeded.checkId,
+          outletId: fx.outletId,
+          amountMinor: '2500',
+          reasonText: 'same-key',
+          refundIdempotencyKey: key,
+        }),
+      ),
+    );
+    const ok = results.filter((r) => r.status === 'fulfilled') as PromiseFulfilledResult<
+      Awaited<ReturnType<RefundService['authorizeAndReserve']>>
+    >[];
+    expect(ok.length).toBe(8);
+    const ids = new Set(ok.map((r) => r.value.paymentRefundId));
+    expect(ids.size).toBe(1);
+    const cap = await refunds.getCapacity({
+      tenantId: fx.tenantId,
+      legalEntityId: fx.legalEntityId,
+      originalPaymentId: seeded.paymentId,
+      settlementCheckId: seeded.checkId,
+      outletId: fx.outletId,
+    });
+    expect(cap.activeReservationsMinor).toBe('2500');
+  });
+
   it('same-key replay returns existing; same-key semantic conflict fails', async () => {
     const seeded = await seedCollectedPayment();
     const key = `idem-${randomUUID()}`;
