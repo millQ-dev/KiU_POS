@@ -9,13 +9,12 @@
  * (same instant family as CashierShell salesContext.businessDateTime). Cross-terminal
  * reconciliation remains Block F / ADR-0003 ORDER_UNRESOLVED — out of C0 scope.
  *
- * C0-CHRONO1: cross-tab allocation is serialized via Web Locks (preferred) or a
- * localStorage busy-lock with verified CAS. Silent duplicate `businessOrder` across
- * parallel windows of the same terminal is rejected; unsupported environments fail closed.
+ * C0-CHRONO1.1: cross-tab allocation uses **Web Locks only**. There is no localStorage
+ * busy-lock fallback (not atomic across browser contexts). If `navigator.locks` is
+ * unavailable, allocation fails closed via `CHRONOLOGY_LOCK_UNAVAILABLE`.
  */
 
 const STORAGE_PREFIX = 'millq.terminalBusinessOrder.';
-const LOCK_SUFFIX = '.lock';
 
 export type TerminalBusinessChronology = {
   businessDate: string;
@@ -76,8 +75,8 @@ function readCounter(key: string): number {
 }
 
 /**
- * Read → increment → write with post-write verification.
- * Caller must hold an exclusive lock (Web Lock or busy-lock).
+ * Read → increment → write under an exclusive Web Lock.
+ * Post-write verification catches corrupted/unexpected storage; it is not a lock substitute.
  */
 function allocateUnderLock(key: string): number {
   const current = readCounter(key);
@@ -94,7 +93,7 @@ function allocateUnderLock(key: string): number {
   if (verified !== next) {
     throw new TerminalChronologyError(
       'CHRONOLOGY_ALLOCATION_BUSY',
-      'Concurrent tab mutated businessOrder counter during allocation; retry',
+      'businessOrder counter changed unexpectedly during Web Lock allocation; retry',
     );
   }
   return next;
@@ -110,89 +109,25 @@ export function createWebLocksRequest(): ChronologyLockRequest | null {
     >;
 }
 
-/**
- * Best-effort exclusive busy-lock in localStorage.
- * `Date.now()` is used only for lock TTL — never as businessOrder.
- */
-export function createLocalStorageBusyLockRequest(options?: {
-  ttlMs?: number;
-  attempts?: number;
-  ownerId?: string;
-  sleepMs?: number;
-}): ChronologyLockRequest {
-  const ttlMs = options?.ttlMs ?? 2_000;
-  const attempts = options?.attempts ?? 40;
-  const sleepMs = options?.sleepMs ?? 25;
-  const ownerId = options?.ownerId ?? crypto.randomUUID();
-
-  return async (name, run) => {
-    const lockKey = `${name}${LOCK_SUFFIX}`;
-    for (let i = 0; i < attempts; i++) {
-      const now = Date.now();
-      let heldByOther = false;
-      try {
-        const raw = localStorage.getItem(lockKey);
-        if (raw) {
-          const parsed = JSON.parse(raw) as { owner?: string; until?: number };
-          if (
-            typeof parsed.until === 'number' &&
-            parsed.until > now &&
-            parsed.owner &&
-            parsed.owner !== ownerId
-          ) {
-            heldByOther = true;
-          }
-        }
-        if (!heldByOther) {
-          const payload = JSON.stringify({ owner: ownerId, until: now + ttlMs });
-          localStorage.setItem(lockKey, payload);
-          const check = localStorage.getItem(lockKey);
-          if (check === payload) {
-            try {
-              return await run();
-            } finally {
-              try {
-                const cur = localStorage.getItem(lockKey);
-                if (cur === payload) localStorage.removeItem(lockKey);
-              } catch {
-                /* ignore */
-              }
-            }
-          }
-        }
-      } catch {
-        /* storage denied */
-      }
-      await new Promise((r) => setTimeout(r, sleepMs));
-    }
-    throw new TerminalChronologyError(
-      'CHRONOLOGY_ALLOCATION_BUSY',
-      'Could not acquire exclusive businessOrder lock across terminal windows; retry',
-    );
-  };
-}
-
 function resolveLockRequest(explicit?: ChronologyLockRequest): ChronologyLockRequest {
   if (explicit) return explicit;
   const web = createWebLocksRequest();
   if (web) return web;
-  // Fail closed for multi-document without Web Locks: busy-lock still tries;
-  // if it cannot acquire, allocate throws CHRONOLOGY_ALLOCATION_BUSY (no silent dup).
-  return createLocalStorageBusyLockRequest();
+  throw new TerminalChronologyError(
+    'CHRONOLOGY_LOCK_UNAVAILABLE',
+    'Web Locks API required for terminal businessOrder allocation; unsupported browser context',
+  );
 }
 
 /**
  * Allocate the next monotonic businessOrder for this terminal + businessDate.
- * Persists in localStorage so reload/retry after UNKNOWN keeps sequence once locked
- * chronology is also persisted by the checkout UI.
- *
- * Cross-tab safe when Web Locks or busy-lock succeeds. Never uses Date.now() as order.
+ * Requires Web Locks (or an injected exclusive lock in tests). Never uses Date.now() as order.
  */
 export async function allocateTerminalBusinessChronology(input: {
   terminalId: string;
   timeZone: string;
   now?: Date;
-  /** Inject exclusive lock (tests). Default: Web Locks → localStorage busy-lock. */
+  /** Inject exclusive lock (unit tests). Production uses Web Locks only. */
   requestExclusiveLock?: ChronologyLockRequest;
 }): Promise<TerminalBusinessChronology> {
   const now = input.now ?? new Date();
@@ -234,17 +169,26 @@ export function loadLockedCompleteChronology(
   return null;
 }
 
+/**
+ * Persist locked chronology. Fail closed if sessionStorage cannot round-trip the value —
+ * otherwise reload would lose chronology while Complete may already be in flight.
+ */
 export function persistLockedCompleteChronology(
   settlementGroupId: string,
   chrono: TerminalBusinessChronology,
 ): void {
+  const key = `${COMPLETE_CHRONO_PREFIX}${settlementGroupId}`;
+  const payload = JSON.stringify(chrono);
   try {
-    sessionStorage.setItem(
-      `${COMPLETE_CHRONO_PREFIX}${settlementGroupId}`,
-      JSON.stringify(chrono),
-    );
+    sessionStorage.setItem(key, payload);
+    if (sessionStorage.getItem(key) !== payload) {
+      throw new Error('round-trip mismatch');
+    }
   } catch {
-    /* ignore */
+    throw new TerminalChronologyError(
+      'CHRONOLOGY_STORAGE_UNAVAILABLE',
+      'sessionStorage unavailable; cannot lock CompleteOrder chronology for safe retry',
+    );
   }
 }
 
@@ -254,4 +198,64 @@ export function clearLockedCompleteChronology(settlementGroupId: string): void {
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * Ensure a CompleteOrder idempotency key is durable in sessionStorage.
+ * Creating a new key when storage is unavailable would make reload retries unsafe.
+ */
+export function loadOrCreateDurableCompleteIdempotencyKey(
+  settlementGroupId: string,
+  prefix = 'millq.completeOrderIdempotency.',
+): string {
+  const storageKey = `${prefix}${settlementGroupId}`;
+  try {
+    const existing = sessionStorage.getItem(storageKey);
+    if (existing && existing.length >= 8) return existing;
+  } catch {
+    throw new TerminalChronologyError(
+      'CHRONOLOGY_STORAGE_UNAVAILABLE',
+      'sessionStorage unavailable; cannot read CompleteOrder idempotency key',
+    );
+  }
+  const next = `cmpl-${settlementGroupId}-${crypto.randomUUID()}`.slice(0, 128);
+  try {
+    sessionStorage.setItem(storageKey, next);
+    if (sessionStorage.getItem(storageKey) !== next) {
+      throw new Error('round-trip mismatch');
+    }
+  } catch {
+    throw new TerminalChronologyError(
+      'CHRONOLOGY_STORAGE_UNAVAILABLE',
+      'sessionStorage unavailable; cannot persist CompleteOrder idempotency key for safe retry',
+    );
+  }
+  return next;
+}
+
+/** DEV/E2E: expose production helpers so Playwright does not inline a copy of the algorithm. */
+export type TerminalChronologyTestHooks = {
+  allocateTerminalBusinessChronology: typeof allocateTerminalBusinessChronology;
+  peekTerminalBusinessOrder: typeof peekTerminalBusinessOrder;
+  loadLockedCompleteChronology: typeof loadLockedCompleteChronology;
+  persistLockedCompleteChronology: typeof persistLockedCompleteChronology;
+  clearLockedCompleteChronology: typeof clearLockedCompleteChronology;
+};
+
+declare global {
+  interface Window {
+    __millqTerminalChronology?: TerminalChronologyTestHooks;
+  }
+}
+
+export function installTerminalChronologyTestHooks(
+  target: Pick<Window, '__millqTerminalChronology'> = globalThis as Window,
+): void {
+  target.__millqTerminalChronology = {
+    allocateTerminalBusinessChronology,
+    peekTerminalBusinessOrder,
+    loadLockedCompleteChronology,
+    persistLockedCompleteChronology,
+    clearLockedCompleteChronology,
+  };
 }

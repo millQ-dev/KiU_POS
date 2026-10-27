@@ -525,35 +525,40 @@ test('tendered less than due stays rejected in UI', async ({ page }) => {
 });
 
 /**
- * C0-CHRONO1: two same-origin windows must not silently share businessOrder.
- * Uses Web Locks exclusive + verified counter write (same algorithm as terminalBusinessChronology).
- * Runs against disposable stack so localStorage/Web Locks match production browser.
+ * C0-CHRONO1.1: two same-origin windows must not silently share businessOrder.
+ * Calls the production helper via window.__millqTerminalChronology (installed in DEV App).
  */
-test('two parallel windows allocate distinct terminal businessOrders', async ({ browser }) => {
+test('two parallel windows allocate distinct terminal businessOrders via production helper', async ({
+  browser,
+}) => {
   const context = await browser.newContext();
   const pageA = await context.newPage();
   const pageB = await context.newPage();
   await pageA.goto('/');
   await pageB.goto('/');
+  await expect
+    .poll(async () =>
+      pageA.evaluate(() => Boolean(window.__millqTerminalChronology?.allocateTerminalBusinessChronology)),
+    )
+    .toBe(true);
   await pageA.evaluate(() => localStorage.clear());
 
   const allocateInPage = (page: Page, terminalId: string, n: number) =>
     page.evaluate(
       async ({ terminalId, n }) => {
-        const key = `millq.terminalBusinessOrder.${terminalId}.2026-10-27`;
-        const lockName = `millq-chrono:${terminalId}:2026-10-27`;
+        const hooks = window.__millqTerminalChronology;
+        if (!hooks?.allocateTerminalBusinessChronology) {
+          throw new Error('production chronology hooks missing');
+        }
+        const now = new Date('2026-10-27T04:00:00.000Z');
         const out: number[] = [];
         for (let i = 0; i < n; i++) {
-          const order = await navigator.locks.request(lockName, { mode: 'exclusive' }, async () => {
-            const raw = localStorage.getItem(key);
-            const cur = raw != null && /^[0-9]+$/.test(raw) ? Number(raw) : 0;
-            const next = cur + 1;
-            localStorage.setItem(key, String(next));
-            const verified = Number(localStorage.getItem(key));
-            if (verified !== next) throw new Error('CAS_FAIL');
-            return next;
+          const chrono = await hooks.allocateTerminalBusinessChronology({
+            terminalId,
+            timeZone: 'UTC',
+            now,
           });
-          out.push(order);
+          out.push(chrono.businessOrder);
         }
         return out;
       },
