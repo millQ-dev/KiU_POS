@@ -523,3 +523,50 @@ test('tendered less than due stays rejected in UI', async ({ page }) => {
   await page.getByTestId('receive-human-confirm').check();
   await expect(page.getByTestId('receive-cash-submit')).toBeDisabled();
 });
+
+/**
+ * C0-CHRONO1: two same-origin windows must not silently share businessOrder.
+ * Uses Web Locks exclusive + verified counter write (same algorithm as terminalBusinessChronology).
+ * Runs against disposable stack so localStorage/Web Locks match production browser.
+ */
+test('two parallel windows allocate distinct terminal businessOrders', async ({ browser }) => {
+  const context = await browser.newContext();
+  const pageA = await context.newPage();
+  const pageB = await context.newPage();
+  await pageA.goto('/');
+  await pageB.goto('/');
+  await pageA.evaluate(() => localStorage.clear());
+
+  const allocateInPage = (page: Page, terminalId: string, n: number) =>
+    page.evaluate(
+      async ({ terminalId, n }) => {
+        const key = `millq.terminalBusinessOrder.${terminalId}.2026-10-27`;
+        const lockName = `millq-chrono:${terminalId}:2026-10-27`;
+        const out: number[] = [];
+        for (let i = 0; i < n; i++) {
+          const order = await navigator.locks.request(lockName, { mode: 'exclusive' }, async () => {
+            const raw = localStorage.getItem(key);
+            const cur = raw != null && /^[0-9]+$/.test(raw) ? Number(raw) : 0;
+            const next = cur + 1;
+            localStorage.setItem(key, String(next));
+            const verified = Number(localStorage.getItem(key));
+            if (verified !== next) throw new Error('CAS_FAIL');
+            return next;
+          });
+          out.push(order);
+        }
+        return out;
+      },
+      { terminalId, n },
+    );
+
+  const [a, b] = await Promise.all([
+    allocateInPage(pageA, fx.terminalId, 8),
+    allocateInPage(pageB, fx.terminalId, 8),
+  ]);
+  const all = [...a, ...b].sort((x, y) => x - y);
+  expect(all).toEqual(Array.from({ length: 16 }, (_, i) => i + 1));
+  expect(new Set(all).size).toBe(16);
+
+  await context.close();
+});
