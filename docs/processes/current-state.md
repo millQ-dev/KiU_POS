@@ -1,7 +1,7 @@
 # MillQ Current State
 
-**Checkpoint:** ADR-0048 **Accepted WITH DELTAS** (PO 2026-10-27) — docs-only; runtime not yet  
-**Prior runtime tip:** C0-CHRONO1.1 **MERGED** Origin #117/#118 @ `c3ef13407d0ce77eb94c5a70eda638704b088954`  
+**Checkpoint:** C0-REFUND-B2 CASH handover (Level B) — branch/PR in flight after B1 #120  
+**Prior tip:** Origin/GitHub MATCH @ `1054c524b73a8322f5389cbb8d75149706fac754` (B1 #120)  
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)  
 **GitHub backup (sole):** `https://github.com/millQ-dev/KiU_POS.git`  
   (`millQ-dev/MillQ` = legacy rename redirect to the same repository ID)  
@@ -11,8 +11,8 @@
 
 | Item | State |
 | --- | --- |
-| Migration head | **035** `035_payments_refund_reservation_c0.sql` (C0-REFUND-B1 reservation foundation; disposable PG / CI — not production migrate GO) |
-| ADR-0048 Payments Refund | **ACCEPTED WITH DELTAS** 2026-10-27; B1 reservation/schema in progress/merged separately; VietQR adapter blocked; G2 / FiscalCorrectionPolicy still OPEN; no real payouts |
+| Migration head | **036** `036_payments_refund_cash_handover_b2.sql` (CASH handover evidence + append-only triggers; disposable PG / CI — **not** production migrate GO) |
+| ADR-0048 Payments Refund | **ACCEPTED WITH DELTAS** 2026-10-27; B1 #120 merged; B2 = human CASH confirm → MONEY_RETURNED + expected − at Close; VietQR adapter blocked; G2 / FiscalCorrectionPolicy still OPEN; no HTTP payout API; no prod migrate GO |
 | TAX1.1 Tax runtime | **MERGED** Origin PR#74 — canonical closed |
 | ADR-0033 / ADR-0034 / ADR-0037 | **ACCEPTED** |
 | CASHIER-1 Production Front Door | **MERGED** Origin PR#76 |
@@ -52,7 +52,7 @@
 
 **Explicitly out:** DeviceIdentity; Quick Lock; FE Tax math; fiscal success fabrication; Favorites / Stop/Go-list; production send policy; Floor/Table.
 
-**CASH1.2 CloseCashShift:** ADR-0046 Accepted; runtime `OPEN→CLOSED` with server expected (opening + Σ CASH PCE `amount_collected_minor`); shortage grant `cash_shift.close.shortage`. ADR-0048 Accepted architecture reserves `− Σ confirmed CASH refunds` after Level B; cash-in-out (ADR-0047) / RECONCILED still out.
+**CASH1.2 CloseCashShift:** ADR-0046 Accepted; runtime `OPEN→CLOSED` with server expected = opening + Σ CASH PCE `amount_collected_minor` − Σ MONEY_RETURNED CASH refunds bound to `cash_shift_id` (ADR-0048 B2); shortage grant `cash_shift.close.shortage`. Cash-in-out (ADR-0047) / RECONCILED still out.
 
 ## Fiscal track
 
@@ -73,17 +73,17 @@
 
 ## Next
 
-1. Level B: ADR-0048 refund reservation / schema / financial invariants on **disposable** PostgreSQL (separate PR; not production migrate GO)
+1. Merge C0-REFUND-B2 (Level B) after Bugbot + AI FinSec + Depot CI; no production migrate GO
 2. Continue C0 cafe operability inside Accepted ADRs; further Level C only with separate PO ACCEPT
 3. Obey MWR arming order (A after PR open; B after Bugbot+AI review on HEAD; C after PO ACCEPT)
-4. No real VN provider payouts / G2 claim / DeviceIdentity / R1.1 / VietQR adapter without evidence; no prod deploy / persistent migrate without separate PO GO
+4. No VietQR refund adapter / G2 claim / DeviceIdentity / R1.1 without evidence; no prod deploy / persistent migrate without separate PO GO
 
 Preserve:
 
 - no DeviceIdentity
 - no Quick Lock
 - no mid-shift cash-in-out without ADR-0047 Accept
-- no real CASH/VietQR refund payouts until Level B + applicable GO
+- no fictitious CASH MONEY_RETURNED (handover evidence required); no VietQR payout without provider evidence
 - no FE Tax math
 - no fiscal success fabrication
 - no LEGAL GATE G2 claim
