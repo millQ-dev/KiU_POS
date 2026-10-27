@@ -106,11 +106,15 @@ Do not let docs drift from implemented behavior.
 - Allowed branch prefixes are `feature/`, `fix/`, and `chore/`.
 - Commits must be atomic and use Conventional Commit style.
 - Pull Requests must include summary, scope, testing, risks, linked work item, and autonomy level.
-- **Do not push directly to Origin `main`.** Protection stays on. Autonomy is merge-when-ready after required Depot CI (and Level B process review), not an unprotected default branch.
-- **No formal Origin non-author APPROVE gate (PO ACCEPT 2026-10-26).** There is no second Origin reviewer principal. Do not claim one. ChatGPT advises the PO only; it does not issue Origin `APPROVE`. See `docs/processes/origin-independent-review.md`.
-- **Do arm merge-when-ready** on your own Level A/B Origin PR (`origin pr merge --auto`) after opening it. Required for unattended merge. Do not perform an immediate/unconditional merge, bypass Origin protections, or remove required Depot CI. Level C: arm merge-when-ready only after the owner decision is recorded.
-- **Level gates:** **A** = Depot CI → auto-merge. **B** = Depot CI + Bugbot + substantive AI review (separate context) → auto-merge. **C** = separate PO ACCEPT for new architectural / financial / legal semantics before implementation merge. Production deploy and persistent-DB migrate need a **separate** PO GO.
-- **Level A/B continuous cycle (PO 2026-10-24; review policy 2026-10-26):** when scope fits Accepted ADRs and current Notion PO decisions, run branch → tests → PR → (B: Bugbot + substantive AI review) → fixes → required Depot CI → merge-when-ready → GitHub backup without pausing for owner GO at each intermediate step. STOP on architecture conflict, Level C, material new risk, failed gates, or any need for bypass/force. Still no production deploy or persistent-DB migrate without a separate explicit GO.
+- **Do not push directly to Origin `main`.** Protection stays on. Autonomy is merge-when-ready plus required Depot CI (and Level B process review), not an unprotected default branch.
+- **No formal Origin non-author APPROVE gate (PO ACCEPT 2026-10-26).** There is no second Origin reviewer principal. Do not claim one. ChatGPT advises the PO only; it does not issue Origin `APPROVE` and is **not** a required manual merge gate. See `docs/processes/origin-independent-review.md`.
+- **When to arm merge-when-ready** (`origin pr merge --auto`):
+  - **Level A:** immediately after opening the PR.
+  - **Level B:** only after Bugbot and substantive AI review on the **current HEAD**, with blocking findings cleared. If HEAD changes after review, re-check affected findings before arming or re-arming.
+  - **Level C:** only after recorded **PO ACCEPT**, then after applicable review/CI process gates on current HEAD.
+  - Never immediate/unconditional merge; never bypass Protect main or remove required Depot CI.
+- **Level gates:** **A** = Depot CI → auto-merge. **B** = Bugbot + substantive AI review (separate context), then Depot CI → auto-merge. **C** = PO ACCEPT first for new architectural / financial / legal semantics; then review/CI as applicable. Production deploy and persistent-DB migrate need a **separate** PO GO.
+- **Level A/B continuous cycle (PO 2026-10-24; review policy 2026-10-26):** when scope fits Accepted ADRs and current Notion PO decisions, run branch → tests → PR → (A: arm MWR) / (B: Bugbot + substantive AI review → clear blockers → arm MWR) → required Depot CI → merge → GitHub backup without pausing for owner GO at each intermediate step. STOP on architecture conflict, Level C, material new risk, failed gates, or any need for bypass/force. Still no production deploy or persistent-DB migrate without a separate explicit GO.
 - **Do not push to GitHub.** After cutover only the backup automation identity writes to GitHub. It is the sole bypass on the GitHub `main` branch ruleset and on the release/protected-tag ruleset. Implementation agents receive neither bypass. Dual-write is forbidden.
 - Follow `docs/processes/origin-github-hosting.md`, `docs/processes/autonomous-development.md`, and ADR-0004. Do not use Origin’s Sync-from-GitHub mode (that keeps GitHub as source).
 
@@ -122,9 +126,9 @@ Do not let docs drift from implemented behavior.
 - For Level **B**, implementation and substantive AI review for the same change must use separate **contexts** (not a second Origin account).
 - Process review result is `APPROVE` or `REQUEST CHANGES` in PR notes. That is **not** a formal Origin approval-count gate.
 - The Review Agent does not arm merge-when-ready. Human owner Origin review is not required on Level A or B PRs.
-- Level C needs an owner decision (PO ACCEPT) on the proposal/ADR. After that, the Implementation Agent arms merge-when-ready; the owner does not have to merge.
-- Strategic Product Owner review may happen in an external ChatGPT thread. ChatGPT does **not** issue Origin `APPROVE`. Cursor does not auto-sync to that thread.
-- Before merge of a development block, the Cursor agent must produce a **safe ChatGPT review packet** (Russian, copy-paste ready) using `docs/processes/chatgpt-review-packet-template.md`.
+- Level C needs an owner decision (PO ACCEPT) on the proposal/ADR. After that, the Implementation Agent follows Level B-quality review discipline where applicable, then arms merge-when-ready; the owner does not have to merge.
+- Strategic Product Owner consultation may happen in an external ChatGPT thread. The **ChatGPT review packet is PO consultation only** — not Origin `APPROVE` and not a required manual merge gate. Cursor does not auto-sync to that thread.
+- Before merge of a development block (or when the PO asks), the Cursor agent should produce a **safe ChatGPT review packet** (Russian, copy-paste ready) using `docs/processes/chatgpt-review-packet-template.md` so the PO can optionally consult ChatGPT. Absence of a ChatGPT reply does **not** block Origin merge when level gates and Depot CI are satisfied.
 - The packet must never include secrets, `.env` values, credentials, PII, or full Cursor chat history.
 
 ## 10. Definition of Done
@@ -141,7 +145,7 @@ A change is complete only when:
 - Level B: Bugbot completed and substantive AI review recorded (process); blocking findings cleared
 - unresolved blocking review threads are empty
 - required Depot CI passes
-- Level A/B PRs have merge-when-ready armed by the Implementation Agent (`origin pr merge --auto`)
+- Merge-when-ready armed in the correct order for the declared level (see §8)
 
 ## 11. Required completion report
 
@@ -154,7 +158,7 @@ At the end of every task, the agent must report:
 - known limitations or follow-up work
 - autonomy level (A/B/C)
 - whether substantive AI review / Bugbot was performed (Level B)
-- whether merge-when-ready was armed (required for Level A/B; Level C only after owner decision)
+- whether merge-when-ready was armed and at which process step (A after PR open; B after Bugbot+AI review; C after PO ACCEPT)
 
 At the end of every **merge-candidate development block** (and whenever the Product Owner asks), the agent must additionally end with a clearly marked section:
 
