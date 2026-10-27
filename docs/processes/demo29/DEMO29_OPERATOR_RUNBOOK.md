@@ -32,7 +32,7 @@ pnpm --filter @millq/e2e-cash12-close run demo:serve
 
 Wait for `=== DEMO-29 READY (loopback) ===`. Open printed `WEB` URL in Chromium.
 
-Credentials: company code printed; PIN only in `$DEMO29_EVIDENCE_DIR/fixture.json` (local).
+Credentials: company code printed at READY. Live PINs are only in the temp fixture path printed as `Live fixture (PINs): …` — not in `$DEMO29_EVIDENCE_DIR/fixture.json` (that copy is **redacted** for evidence).
 
 ## Operator golden route
 

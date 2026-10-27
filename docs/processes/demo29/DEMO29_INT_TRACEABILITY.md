@@ -4,7 +4,7 @@
 
 | INT band | Demo stance | Proof |
 | --- | --- | --- |
-| INT-001… core POS open/sell/cash/fiscal/GI/close | **In scope** — golden route | Evidence `manual-1793111407` |
+| INT-001… core POS open/sell/cash/fiscal/GI/close | **In scope** — golden route | Evidence `manual-1793112022` |
 | Cash12 close BALANCED | **In scope** | close-result + E2E |
 | Fiscal test adapter | **In scope** (demo only) | Issue → SATISFIED |
 | Refund B1/B2 / ADR-0048 | **Regression only** | vitest B1+B2; **0 refunds** on golden |

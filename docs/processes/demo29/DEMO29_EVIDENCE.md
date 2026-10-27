@@ -33,7 +33,7 @@ Path: `docs/processes/demo29/evidence/manual-1793112022/`
 | `08-complete-order.png` | Complete + GI |
 | `09-close-balanced.png` | Close BALANCED |
 
-Also: redacted `fixture.json`, `golden-capture-ledger.json` (`ok: true`), `close-result.json`, `db-readback.txt`.
+Also: redacted `fixture.json`, `golden-capture-ledger.json` (`ok: true`), `close-result.json`, `db-readback.txt` (manual `psql` SELECT-only capture against the disposable DB immediately after oneshot; DB then dropped).
 
 ## Non-evidence
 
