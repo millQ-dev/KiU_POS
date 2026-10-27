@@ -640,10 +640,11 @@ export class RefundService {
       );
       if (priorHandover.rows[0]) {
         const h = priorHandover.rows[0];
+        // cash_shift_id may differ from current OPEN shift after close+reopen on the
+        // same Session Terminal — replay original MONEY_RETURNED (no second effect).
         if (
           h.payment_refund_id !== input.paymentRefundId ||
           h.amount_minor !== input.amountMinor ||
-          h.cash_shift_id !== shift.cash_shift_id ||
           h.confirmed_by_user_id !== input.principal.userId
         ) {
           throw new DomainValidationError(
@@ -680,7 +681,8 @@ export class RefundService {
       const row = await this.lockRefund(client, input.paymentRefundId);
 
       if (row.financial_status === 'MONEY_RETURNED') {
-        if (row.cash_shift_id === shift.cash_shift_id && row.amount_minor === input.amountMinor) {
+        if (row.amount_minor === input.amountMinor) {
+          // Already returned (possibly on a prior CLOSED shift of this terminal).
           await client.query('COMMIT');
           return mapRefund(row, true);
         }
