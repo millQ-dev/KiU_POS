@@ -11,8 +11,8 @@
 
 | Item | State |
 | --- | --- |
-| Migration head | **034** `034_cash12_close_cash_shift.sql` (no refund migration in this Accept) |
-| ADR-0048 Payments Refund | **ACCEPTED WITH DELTAS** 2026-10-27 — architecture only; Level B runtime separate; VietQR adapter blocked on provider evidence; G2 / FiscalCorrectionPolicy still OPEN |
+| Migration head | **035** `035_payments_refund_reservation_c0.sql` (C0-REFUND-B1 reservation foundation; disposable PG / CI — not production migrate GO) |
+| ADR-0048 Payments Refund | **ACCEPTED WITH DELTAS** 2026-10-27; B1 reservation/schema in progress/merged separately; VietQR adapter blocked; G2 / FiscalCorrectionPolicy still OPEN; no real payouts |
 | TAX1.1 Tax runtime | **MERGED** Origin PR#74 — canonical closed |
 | ADR-0033 / ADR-0034 / ADR-0037 | **ACCEPTED** |
 | CASHIER-1 Production Front Door | **MERGED** Origin PR#76 |
