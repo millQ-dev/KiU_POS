@@ -249,7 +249,9 @@ declare global {
 }
 
 export function installTerminalChronologyTestHooks(
-  target: Pick<Window, '__millqTerminalChronology'> = globalThis as Window,
+  target: { __millqTerminalChronology?: TerminalChronologyTestHooks } = globalThis as unknown as {
+    __millqTerminalChronology?: TerminalChronologyTestHooks;
+  },
 ): void {
   target.__millqTerminalChronology = {
     allocateTerminalBusinessChronology,
