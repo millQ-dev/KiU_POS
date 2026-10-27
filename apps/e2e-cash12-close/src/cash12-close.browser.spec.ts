@@ -105,13 +105,31 @@ async function sellEggAndOpenSettlement(page: Page) {
   const newOrder = page.getByRole('button', { name: /New order/i });
   if (await newOrder.isVisible().catch(() => false)) {
     await newOrder.click();
+    await expect(page.getByText(/Empty — tap a product/i)).toBeVisible({ timeout: 15_000 });
   }
   // Egg is on both Quick Access and page grid — same catalogItemId testid.
   const slot = page.getByTestId(`pos-slot-${fx.eggCatalogItemId}`).first();
   await expect(slot).toBeVisible({ timeout: 30_000 });
   await expect(slot).toBeEnabled();
-  await slot.click();
-  await expect(page.getByRole('option', { name: /Eggs/i })).toBeVisible({ timeout: 15_000 });
+  const eggLine = page.getByRole('listbox', { name: /Order lines/i }).getByRole('option', {
+    name: /Eggs/i,
+  });
+  // COUNT tap uses /api/v1/pos/select-count (not select-quantity). Scope Eggs to basket listbox
+  // so product-tile text cannot false-pass while the basket stays empty.
+  if ((await eggLine.count()) === 0) {
+    await Promise.all([
+      page.waitForResponse(
+        (r) =>
+          r.url().includes('/api/v1/pos/select-count') &&
+          r.request().method() === 'POST' &&
+          r.ok(),
+        { timeout: 20_000 },
+      ),
+      slot.click(),
+    ]);
+  }
+  await expect(eggLine).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/Empty — tap a product/i)).toHaveCount(0);
   const accept = page.getByTestId('accept-commercial');
   await expect(accept).toBeEnabled({ timeout: 15_000 });
   await Promise.all([

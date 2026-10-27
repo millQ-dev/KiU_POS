@@ -6,6 +6,7 @@
   "scripts": {
     "test": "node -e \"console.log('[@millq/e2e-cash12-close] skipped in default pnpm test — run test:e2e on millq_ci_pos_*')\"",
     "test:e2e": "node src/run-with-stack.mjs",
+    "demo:serve": "node src/demo-serve.mjs",
     "test:playwright-only": "playwright test",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit"

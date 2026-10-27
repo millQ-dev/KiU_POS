@@ -50,3 +50,6 @@ temp/
 coverage/
 reports/
 .cache/
+
+# DEMO-29 local secrets / disposable fixtures
+docs/processes/demo29/evidence/**/fixture.secrets.env

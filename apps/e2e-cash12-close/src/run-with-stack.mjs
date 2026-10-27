@@ -109,6 +109,7 @@ try {
         COOKIE_SECURE: 'false',
         LOG_LEVEL: 'error',
         MILLQ_ALLOW_FISCAL_TEST_ADAPTER: '1',
+        MILLQ_LISTEN_HOST: '127.0.0.1',
       },
       join(ROOT, 'apps/api'),
     ),
