@@ -9,6 +9,22 @@ export {
   type VerificationStatus,
 } from './payment-lifecycle.js';
 export { ReceiveCashService, type ReceiveCashResult } from './receive-cash-service.js';
+export { RefundService, type RefundServiceOptions } from './refund-service.js';
+export {
+  ACTIVE_RESERVATION_STATUSES,
+  DISPOSABLE_TEST_MONEY_EFFECT_PROOF,
+  PERMISSION_PAYMENTS_REFUND_APPROVE,
+  PERMISSION_PAYMENTS_REFUND_CASH,
+  PERMISSION_PAYMENTS_REFUND_RECONCILE,
+  PERMISSION_PAYMENTS_REFUND_VIETQR,
+  type FinancialRefundStatus,
+  type PaymentRefundProjection,
+  type RefundCapacitySnapshot,
+} from './refund-types.js';
+export {
+  buildRefundSemanticFingerprint,
+  computeRemainingCapacity,
+} from './refund-fingerprint.js';
 export { PERMISSION_PAYMENTS_RECEIVE_CASH } from '../identity/errors.js';
 export {
   mapPaymentCollectionEvent,

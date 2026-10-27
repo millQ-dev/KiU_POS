@@ -31,6 +31,11 @@ export const PERMISSION_POS_OPERATE = 'pos.operate' as const;
  * Provisional key binding of Accepted dedicated-permission rule; manager role alone ≠ cash accept.
  */
 export const PERMISSION_PAYMENTS_RECEIVE_CASH = 'payments.receive_cash' as const;
+/** ADR-0048 R8 — Owner-issued scoped refund grants (job title alone ≠ permission). */
+export const PERMISSION_PAYMENTS_REFUND_CASH = 'payments.refund_cash' as const;
+export const PERMISSION_PAYMENTS_REFUND_VIETQR = 'payments.refund_vietqr' as const;
+export const PERMISSION_PAYMENTS_REFUND_APPROVE = 'payments.refund.approve' as const;
+export const PERMISSION_PAYMENTS_REFUND_RECONCILE = 'payments.refund.reconcile' as const;
 /** Procurement Goods Receipt operational HTTP contour — C0.1 (tenant-wide grant). */
 export const PERMISSION_PROCUREMENT_GOODS_RECEIPT_MANAGE =
   'procurement.goods_receipt.manage' as const;
