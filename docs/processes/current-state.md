@@ -1,7 +1,7 @@
 # MillQ Current State
 
-**Checkpoint:** NEXT-01 G0 audit (POS-v1 + R1 Floor/Table read-only) after DEMO-29  
-**Tip:** Origin/GitHub MATCH @ `a1bb99eae809b987cc2268b1e1f4b6f7f36072bf` (#122 DEMO-29)  
+**Checkpoint:** NEXT-03 — #124 merged; Modifier/Discount Level C STOP; R1.1 gate closed  
+**Tip:** Origin/GitHub MATCH @ `de1e79915c867af7f9bf94068f7010477c45b1f1` (#124)  
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)  
 **GitHub backup (sole):** `https://github.com/millQ-dev/KiU_POS.git`  
   (`millQ-dev/MillQ` = legacy rename redirect to the same repository ID)  
@@ -21,7 +21,7 @@
 | C0-FISC2 Fiscal → CompleteOrder | **MERGED** #112 — SettlementCheckout issue/reconcile + CheckoutOrchestrator advance; terminal monotonic `businessOrder`; disposable E2E |
 | C0-CHRONO1 Terminal businessOrder | **MERGED** #116 @ `488bd04…` — device monotonic `businessOrder`; session-locked Complete chronology |
 | C0-CHRONO1.1 Web Locks only | **MERGED** #117 @ `2ae1472…` — Web Locks only (no localStorage busy-lock); fail closed without `navigator.locks`; durable sessionStorage for Complete key/chrono; Playwright uses production hooks |
-| GitHub backup parity | **MATCH** Origin/GitHub `c3ef134…` (pre-docs Accept tip; refresh after this docs merge) |
+| GitHub backup parity | **MATCH** Origin/GitHub `de1e799…` (#124) |
 | Origin review policy | **PO ACCEPT 2026-10-26** — formal non-author APPROVE ruleset **removed**; A=arm MWR→CI, B=Bugbot+AI review→arm MWR→CI, C=PO ACCEPT then review/CI; ChatGPT packet = PO consultation only; see `origin-independent-review.md` |
 | ADR-0014 Fiscalization delta | **ACCEPTED** 2026-10-10 |
 | ADR-0014 / ADR-0013 Chronology Delta | **ACCEPTED** 2026-10-11 |
@@ -29,8 +29,9 @@
 | ADR-0039 Brand/Office bootstrap | **ACCEPTED** 2026-10-11 |
 | Floor/Table (R1.1) | **FROZEN / NOT STARTED** — G0 audit `docs/processes/next01/R1-ORIGIN-GAP-MATRIX.md` → **R1_AUDIT_READY**; no floor module / no floor migrations |
 | DEMO-29 | **CLOSED** — `DEMO29_GO`; evidence `docs/processes/demo29/evidence/manual-1793112022/` |
-| NEXT-01 Track P | POS-v1 gap matrix — counter cash VERIFIED; NEXT-02 honesty UI for QR/card unavailable; Modifier/Discount/post-pay void still gaps |
-| NEXT-02 | In progress — Level A checkout honesty + success polish; R1.1 prep only (`R1.1-IMPLEMENTATION-PROPOSAL.md`); **POSV1_NO_GO**; **R1_AUDIT_READY** (gate closed) |
+| NEXT-01 Track P | Counter cash VERIFIED; QR honesty DECLARED_DEFERRED; Modifier/Discount Level C |
+| NEXT-02 | **MERGED** #124 — QR/card unavailable honesty + sale success polish |
+| NEXT-03 | Modifier + Discount **Level C STOP** (`NEXT03_*_LEVEL_C.md`); R1.1 prep only; **POSV1_NO_GO**; **R1_AUDIT_READY** |
 | C0 Cafe Operability | Counter/prepay cafe path proven via DEMO-29; wider POS-v1 roadmap gaps tracked under NEXT-01 |
 
 ## TAX1.1 (canonical closed)
