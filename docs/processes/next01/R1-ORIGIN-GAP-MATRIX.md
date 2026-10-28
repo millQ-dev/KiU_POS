@@ -1,6 +1,6 @@
 # R1-ORIGIN-GAP-MATRIX — Floor/Table audit (read-only) · Origin `a1bb99e`
 
-**Track R posture:** read-only until Track P exit (or P independently complete). **No R1.1 code in this G0.**
+**Track R posture:** read-only until Track P exit (or P independently complete). **No R1.1 code in G0/NEXT-02.** Prep: `R1.1-IMPLEMENTATION-PROPOSAL.md` (gate closed).
 
 ## Authority
 

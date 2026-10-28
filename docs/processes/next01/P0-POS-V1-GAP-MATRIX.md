@@ -16,8 +16,8 @@ Figma node IDs: **SOURCE_UNAVAILABLE** this run (live Figma not opened).
 | 8 | Discount | SOURCE_UNAVAILABLE | **No cashier discount UI** | Commercial snapshot supports `orderMerchantFundedDiscountMinor` / line discounts in Orders domain (`commercial-terms.ts`, d14b tests); **no** POS HTTP discount command exposed for cashier | domain acceptance only | **PARTIAL** | Operator discount UX/API missing. Wiring UI to accepted commercial accept path may be Level B **if** command already exists end-to-end; inventing promo engine = Level C. Audit: no `/discount` in `routes/pos.ts` |
 | 9 | Void | SOURCE_UNAVAILABLE | Cancel order + remove line + abort checkout | `cancelOrder`, line remove, settlement abort | shell tests; routes/pos | **PARTIAL** | Pre-payment cancel/remove **EXISTS**. Post-payment void / tender void = ADR-0048 **R5 deferred** — **DECLARED_DEFERRED**, not fake void |
 | 10 | Payment (cash) | SOURCE_UNAVAILABLE | `SettlementCheckout` ReceiveCash | `POST /api/v1/payments/receive-cash` + PCE | receive-cash unit + E2E + DEMO-29 | **EXISTS** | C0 cash path proven — do not replace |
-| 11 | QR / VietQR pay | SOURCE_UNAVAILABLE | UI filters tenders `instrumentFamily=CASH` only — **no QR collect UI** | Tender/PCE model can represent non-CASH; **no** live VietQR provider / collect adapter; refund VietQR **blocked** | refund permission key only | **BLOCKED_BY_LEGAL** / provider | Show honest unavailable/sandbox later — **never** fabricate paid. Distinct legal/provider G2. **DECLARED_DEFERRED** for POS-v1 exit |
-| 12 | Success / Error | SOURCE_UNAVAILABLE | Inline panels: `receive-cash-success`, `complete-order-success`, error alerts; feedback strip | Server error codes mapped in shell | unit + E2E success path | **PARTIAL** | Dedicated full-screen Success/Error journey (roadmap frame) not separate; fail-closed errors **exist**. Polish = Level A if product wants dedicated screen without new semantics |
+| 11 | QR / VietQR pay | SOURCE_UNAVAILABLE | NEXT-02: `payment-methods-availability` — CASH available; QR/Card **unavailable** copy; still no QR collect UI | Tender/PCE model can represent non-CASH; **no** live VietQR provider / collect adapter; refund VietQR **blocked** | receive-cash unit (honesty test) | **DECLARED_DEFERRED** + honest UI | Collect still **BLOCKED_BY_LEGAL**/provider — never fabricate paid |
+| 12 | Success / Error | SOURCE_UNAVAILABLE | NEXT-02: journey success title `sale-success-title` + inline errors | Server error codes mapped in shell | unit + E2E success path | **PARTIAL→improved** | Full-screen dedicated frame still optional; fail-closed + server-confirmed success **exist** |
 | 13 | Shift Close | SOURCE_UNAVAILABLE | `ClosingCashScreen.tsx` | CloseCashShift BALANCED/SURPLUS/SHORTAGE | cash12 acceptance + E2E + DEMO-29 | **EXISTS** | — |
 
 ## Navigability (operator-critical)
@@ -34,8 +34,8 @@ Counter clickable path **VERIFIED** (DEMO-29 closed evidence + cash12 E2E): Comp
 | 8 Discount UI | **DECLARED_DEFERRED** or small Level B if PO confirms commercial-accept discount command scope |
 | 6 Modifier | **BLOCKED** (needs accepted Modifier contract — Level C) |
 | 9 Void (post-pay) | **DECLARED_DEFERRED** (ADR-0048 R5) |
-| 11 QR | **BLOCKED** / **DECLARED_DEFERRED** (provider + legal) |
-| 12 Success screen polish | optional Level A |
+| 11 QR | **DECLARED_DEFERRED** (honest unavailable UI NEXT-02); collect still provider/legal **BLOCKED** |
+| 12 Success screen polish | **VERIFIED** enough for counter path (NEXT-02 Level A); dedicated Figma frame still optional |
 
 ## Minimal proposed PRs (after G0; no Level C invent)
 

@@ -685,6 +685,29 @@ export function SettlementCheckoutPanel({
           </ul>
 
           {canCollect ? (
+            <div
+              className="pos-settlement__methods"
+              data-testid="payment-methods-availability"
+              role="status"
+            >
+              <p className="pos-settlement__hint">
+                Payment methods in this build: <strong>CASH only</strong>. QR / VietQR and card
+                collect are <strong>unavailable</strong> (provider / legal gate) — not offered and
+                never shown as paid.
+              </p>
+              <ul className="pos-settlement__method-list">
+                <li data-testid="payment-method-cash-available">CASH — available</li>
+                <li data-testid="payment-method-qr-unavailable" aria-disabled="true">
+                  QR / VietQR — unavailable
+                </li>
+                <li data-testid="payment-method-card-unavailable" aria-disabled="true">
+                  Card — unavailable
+                </li>
+              </ul>
+            </div>
+          ) : null}
+
+          {canCollect ? (
             <div className="pos-settlement__receive" data-testid="receive-cash-panel">
               <h4 className="pos-settlement__receive-title">Receive cash</h4>
               <p className="pos-settlement__hint">
@@ -985,8 +1008,16 @@ export function SettlementCheckoutPanel({
           ) : null}
 
           {completeResult ? (
-            <div className="pos-settlement__success" data-testid="complete-order-success">
-              <h4>Order completed (server)</h4>
+            <div
+              className="pos-settlement__success pos-settlement__success--journey"
+              data-testid="complete-order-success"
+              role="status"
+            >
+              <h4 data-testid="sale-success-title">Sale complete — server confirmed</h4>
+              <p className="pos-settlement__hint" data-testid="sale-success-summary">
+                Order {completeResult.status}. This is not a QR/card receipt — only CASH collection
+                + fiscal gate + CompleteOrder on this path.
+              </p>
               <dl className="pos-settlement__facts">
                 <div>
                   <dt>Order</dt>
