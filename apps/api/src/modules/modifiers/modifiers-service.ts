@@ -1,0 +1,273 @@
+import { createHash, randomUUID } from 'node:crypto';
+import type { Pool, PoolClient } from 'pg';
+import {
+  applyEffectiveRecipeDeltas,
+  sumAdditivePriceAdjustmentsMinor,
+  type ModifierRecipeDelta,
+} from '@millq/domain';
+import { ModifierDomainError } from './errors.js';
+
+type GroupBinding = {
+  modifier_group_id: string;
+  required: boolean;
+  min_select: number;
+  max_select: number;
+  ask_every_time: boolean;
+  selection_mode: string;
+};
+
+export class ModifiersService {
+  constructor(private readonly pool: Pool) {}
+
+  /**
+   * Configure OPEN OrderLine modifier selections (ADR-0049).
+   * Fail-closed on required / ask-every-time / min-max. Freezes additive price + kitchen codes.
+   */
+  async configureOrderLine(input: {
+    orderId: string;
+    orderLineId: string;
+    selections: ReadonlyArray<{ modifierGroupId: string; modifierOptionId: string }>;
+    guestNote?: string | null;
+  }): Promise<{
+    orderLineConfigurationId: string;
+    additivePriceAdjustmentMinor: string;
+    configurationFingerprint: string;
+    kitchenInstructions: string[];
+  }> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const order = await client.query<{
+        order_id: string;
+        tenant_id: string;
+        status: string;
+      }>(
+        `SELECT order_id, tenant_id, status FROM sales_order WHERE order_id = $1 FOR UPDATE`,
+        [input.orderId],
+      );
+      if (!order.rows[0]) throw new ModifierDomainError('ORDER_NOT_FOUND', 'Order not found');
+      if (order.rows[0].status !== 'OPEN') {
+        throw new ModifierDomainError('ORDER_NOT_OPEN', 'Modifiers only on OPEN orders');
+      }
+
+      const line = await client.query<{
+        order_line_id: string;
+        catalog_item_id: string;
+      }>(
+        `SELECT order_line_id, catalog_item_id FROM sales_order_line
+         WHERE order_line_id = $1 AND order_id = $2 FOR UPDATE`,
+        [input.orderLineId, input.orderId],
+      );
+      if (!line.rows[0]) throw new ModifierDomainError('LINE_NOT_FOUND', 'Order line not found');
+
+      const existing = await client.query<{ frozen_at: string | null }>(
+        `SELECT frozen_at FROM order_line_configuration WHERE order_line_id = $1 FOR UPDATE`,
+        [input.orderLineId],
+      );
+      if (existing.rows[0]?.frozen_at) {
+        throw new ModifierDomainError('CONFIGURATION_FROZEN', 'Line configuration already frozen');
+      }
+
+      const bindings = await client.query<GroupBinding>(
+        `SELECT b.modifier_group_id, b.required, g.min_select, g.max_select, g.ask_every_time, g.selection_mode
+         FROM catalog_item_modifier_group b
+         JOIN modifier_group g ON g.modifier_group_id = b.modifier_group_id
+         WHERE b.catalog_item_id = $1 AND b.tenant_id = $2
+         ORDER BY b.sort_order, g.code`,
+        [line.rows[0].catalog_item_id, order.rows[0].tenant_id],
+      );
+
+      const byGroup = new Map<string, string[]>();
+      for (const s of input.selections) {
+        const list = byGroup.get(s.modifierGroupId) ?? [];
+        list.push(s.modifierOptionId);
+        byGroup.set(s.modifierGroupId, list);
+      }
+
+      const priceParts: string[] = [];
+      const kitchen: string[] = [];
+      const deltas: ModifierRecipeDelta[] = [];
+      const validatedSelections: Array<{ groupId: string; optionId: string }> = [];
+
+      for (const b of bindings.rows) {
+        let chosen = byGroup.get(b.modifier_group_id) ?? [];
+        if (chosen.length === 0 && !b.ask_every_time && !b.required) {
+          const defaults = await client.query<{ modifier_option_id: string }>(
+            `SELECT modifier_option_id FROM modifier_option
+             WHERE modifier_group_id = $1 AND is_default = TRUE
+             ORDER BY sort_order`,
+            [b.modifier_group_id],
+          );
+          chosen = defaults.rows.map((r) => r.modifier_option_id);
+        }
+        if (b.required || b.ask_every_time) {
+          if (chosen.length < Math.max(b.min_select, b.required ? 1 : b.min_select)) {
+            throw new ModifierDomainError(
+              'MODIFIER_REQUIRED',
+              `Modifier group ${b.modifier_group_id} requires selection`,
+            );
+          }
+        }
+        if (chosen.length < b.min_select || chosen.length > b.max_select) {
+          throw new ModifierDomainError(
+            'MODIFIER_SELECTION_COUNT',
+            `Group ${b.modifier_group_id} expects ${b.min_select}..${b.max_select} selections`,
+          );
+        }
+        if (b.selection_mode === 'SINGLE' && chosen.length > 1) {
+          throw new ModifierDomainError('MODIFIER_SINGLE_ONLY', 'Single-select group');
+        }
+        for (const optionId of chosen) {
+          const opt = await client.query<{
+            modifier_option_id: string;
+            price_adjustment_minor: string;
+            kitchen_instruction_code: string | null;
+          }>(
+            `SELECT modifier_option_id, price_adjustment_minor, kitchen_instruction_code
+             FROM modifier_option
+             WHERE modifier_option_id = $1 AND modifier_group_id = $2 AND tenant_id = $3`,
+            [optionId, b.modifier_group_id, order.rows[0].tenant_id],
+          );
+          if (!opt.rows[0]) {
+            throw new ModifierDomainError('MODIFIER_OPTION_INVALID', 'Option not in group');
+          }
+          priceParts.push(opt.rows[0].price_adjustment_minor);
+          if (opt.rows[0].kitchen_instruction_code) {
+            kitchen.push(opt.rows[0].kitchen_instruction_code);
+          }
+          const drows = await client.query<{
+            delta_kind: string;
+            target_catalog_item_id: string | null;
+            replacement_catalog_item_id: string | null;
+            add_catalog_item_id: string | null;
+            add_quantity: string | null;
+            add_unit: string | null;
+            add_dimension: string | null;
+          }>(
+            `SELECT delta_kind, target_catalog_item_id, replacement_catalog_item_id,
+                    add_catalog_item_id, add_quantity, add_unit, add_dimension
+             FROM modifier_option_recipe_delta
+             WHERE modifier_option_id = $1 ORDER BY sort_order`,
+            [optionId],
+          );
+          for (const d of drows.rows) {
+            if (d.delta_kind === 'REMOVE_COMPONENT' && d.target_catalog_item_id) {
+              deltas.push({ kind: 'REMOVE_COMPONENT', targetCatalogItemId: d.target_catalog_item_id });
+            } else if (
+              d.delta_kind === 'REPLACE_COMPONENT' &&
+              d.target_catalog_item_id &&
+              d.replacement_catalog_item_id
+            ) {
+              deltas.push({
+                kind: 'REPLACE_COMPONENT',
+                targetCatalogItemId: d.target_catalog_item_id,
+                replacementCatalogItemId: d.replacement_catalog_item_id,
+              });
+            } else if (
+              d.delta_kind === 'ADD_COMPONENT' &&
+              d.add_catalog_item_id &&
+              d.add_quantity &&
+              d.add_unit &&
+              d.add_dimension
+            ) {
+              deltas.push({
+                kind: 'ADD_COMPONENT',
+                addCatalogItemId: d.add_catalog_item_id,
+                quantity: d.add_quantity,
+                unit: d.add_unit,
+                dimension: d.add_dimension as 'MASS' | 'VOLUME' | 'COUNT',
+              });
+            }
+          }
+          validatedSelections.push({ groupId: b.modifier_group_id, optionId });
+        }
+      }
+
+      // Guest note is non-authoritative — stored only as kitchen display hint if present; never as recipe SoT.
+      if (input.guestNote?.trim()) {
+        kitchen.push(`GUEST_NOTE_NON_AUTHORITATIVE`);
+      }
+
+      const additive = sumAdditivePriceAdjustmentsMinor(priceParts);
+      // Touch deltas for fingerprint stability (effective apply happens at consumption time).
+      void applyEffectiveRecipeDeltas([], deltas);
+      const fingerprint = createHash('sha256')
+        .update(
+          JSON.stringify({
+            line: input.orderLineId,
+            selections: validatedSelections,
+            additive,
+            deltas,
+          }),
+        )
+        .digest('hex');
+
+      await client.query(`DELETE FROM order_line_configuration WHERE order_line_id = $1`, [
+        input.orderLineId,
+      ]);
+      const configId = randomUUID();
+      await client.query(
+        `INSERT INTO order_line_configuration (
+           order_line_configuration_id, tenant_id, order_id, order_line_id,
+           configuration_fingerprint, additive_price_adjustment_minor, kitchen_instructions_json
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+        [
+          configId,
+          order.rows[0].tenant_id,
+          input.orderId,
+          input.orderLineId,
+          fingerprint,
+          additive,
+          JSON.stringify(kitchen),
+        ],
+      );
+      for (const s of validatedSelections) {
+        await client.query(
+          `INSERT INTO order_line_modifier_selection (
+             order_line_modifier_selection_id, order_line_configuration_id,
+             modifier_group_id, modifier_option_id
+           ) VALUES ($1,$2,$3,$4)`,
+          [randomUUID(), configId, s.groupId, s.optionId],
+        );
+      }
+
+      await client.query('COMMIT');
+      return {
+        orderLineConfigurationId: configId,
+        additivePriceAdjustmentMinor: additive,
+        configurationFingerprint: fingerprint,
+        kitchenInstructions: kitchen,
+      };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  async assertLineConfigurationComplete(client: PoolClient, orderId: string): Promise<void> {
+    const lines = await client.query<{
+      order_line_id: string;
+      catalog_item_id: string;
+    }>(`SELECT order_line_id, catalog_item_id FROM sales_order_line WHERE order_id = $1`, [orderId]);
+    for (const line of lines.rows) {
+      const required = await client.query<{ modifier_group_id: string }>(
+        `SELECT modifier_group_id FROM catalog_item_modifier_group
+         WHERE catalog_item_id = $1 AND required = TRUE`,
+        [line.catalog_item_id],
+      );
+      if (required.rowCount === 0) continue;
+      const cfg = await client.query<{ order_line_configuration_id: string }>(
+        `SELECT order_line_configuration_id FROM order_line_configuration WHERE order_line_id = $1`,
+        [line.order_line_id],
+      );
+      if (!cfg.rows[0]) {
+        throw new ModifierDomainError(
+          'MODIFIER_CONFIGURATION_MISSING',
+          `Order line ${line.order_line_id} missing required modifier configuration`,
+        );
+      }
+    }
+  }
+}

@@ -137,11 +137,9 @@ Do **not** use “current recipe” when replaying historical completed Orders.
 
 ### 7. Modifiers / Effective Recipe
 
-**OUT OF SCOPE for D1.3A/B v1.**
+**D1.3A/B v1:** base recipe/preparation graph only.
 
-First sale-write-off supports the **base** recipe/preparation graph only.
-
-Do not invent modifier semantics or a universal Effective Recipe system in this vertical. A later PO-launched block will add that.
+**Delta (ADR-0049 Accepted 2026-10-28):** configured OrderLines with Modifier snapshots resolve sale consumption via structured Effective Recipe component deltas. Lines without modifier configuration remain base-only. No universal rules engine; historical CompleteOrder does not re-resolve live menu.
 
 ### 8. Consumption strategy source
 

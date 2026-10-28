@@ -1,7 +1,9 @@
 # NEXT-03 G2 — Operator Discount inspection + Level C STOP
 
-**Origin baseline:** `de1e79915c867af7f9bf94068f7010477c45b1f1`  
-**Verdict:** **No Level B implementation** — approved end-to-end **cashier** command path does **not** exist.
+**PO ACCEPT:** 2026-10-28 — D1–D6 accepted; implementation authority → **ADR-0051**. This file remains the pre-Accept audit that proved no cashier E2E path existed.
+
+**Origin baseline (audit):** `de1e79915c867af7f9bf94068f7010477c45b1f1`  
+**Pre-Accept verdict:** No Level B without Accept — **superseded by ADR-0051 Accept**.
 
 ## Independent inspection
 

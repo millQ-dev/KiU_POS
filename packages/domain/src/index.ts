@@ -107,6 +107,12 @@ export {
   type RecipeGraphLookup,
 } from './sale-consumption.js';
 export {
+  applyEffectiveRecipeDeltas,
+  sumAdditivePriceAdjustmentsMinor,
+  type RecipeComponentRef,
+  type ModifierRecipeDelta,
+} from './effective-recipe-delta.js';
+export {
   allocateOrderMerchantDiscount,
   commercialSnapshotSemanticHash,
   commercialTermsSemanticFingerprint,
