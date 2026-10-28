@@ -31,8 +31,8 @@ Counter clickable path **VERIFIED** (DEMO-29 closed evidence + cash12 E2E): Comp
 | Item | Exit tag |
 | --- | --- |
 | 1–5, 7, 10, 13 | **VERIFIED** |
-| 8 Discount UI | **DECLARED_DEFERRED** or small Level B if PO confirms commercial-accept discount command scope |
-| 6 Modifier | **BLOCKED** (needs accepted Modifier contract — Level C) |
+| 8 Discount UI | **BLOCKED / Level C** — no cashier HTTP; see `NEXT03_DISCOUNT_LEVEL_C.md` |
+| 6 Modifier | **BLOCKED / Level C** — see `NEXT03_MODIFIER_V1_LEVEL_C.md` |
 | 9 Void (post-pay) | **DECLARED_DEFERRED** (ADR-0048 R5) |
 | 11 QR | **DECLARED_DEFERRED** (honest unavailable UI NEXT-02); collect still provider/legal **BLOCKED** |
 | 12 Success screen polish | **VERIFIED** enough for counter path (NEXT-02 Level A); dedicated Figma frame still optional |
