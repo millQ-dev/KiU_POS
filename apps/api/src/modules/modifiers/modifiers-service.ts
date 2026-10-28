@@ -183,9 +183,10 @@ export class ModifiersService {
         }
       }
 
-      // Guest note is non-authoritative — stored only as kitchen display hint if present; never as recipe SoT.
-      if (input.guestNote?.trim()) {
-        kitchen.push(`GUEST_NOTE_NON_AUTHORITATIVE`);
+      // Guest note is non-authoritative — kitchen display hint only; never recipe/allergen/inventory SoT.
+      const guestNote = input.guestNote?.trim();
+      if (guestNote) {
+        kitchen.push(`GUEST_NOTE_NON_AUTHORITATIVE:${guestNote}`);
       }
 
       const additive = sumAdditivePriceAdjustmentsMinor(priceParts);

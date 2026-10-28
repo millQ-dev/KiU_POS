@@ -25,7 +25,7 @@ describeModifiers('ADR-0049 modifiers (disposable PG)', () => {
     pool = new pg.Pool({ connectionString: DATABASE_URL });
     modifiers = new ModifiersService(pool);
     const gi = new GoodsIssueService(pool);
-    orders = new OrdersService(pool, gi);
+    orders = new OrdersService(pool, { saleWriteOffPort: gi });
   });
 
   afterAll(async () => {
