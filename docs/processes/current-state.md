@@ -1,11 +1,11 @@
 # MillQ Current State
 
-**Checkpoint:** C0-REFUND-B2 CASH handover (Level B) — branch/PR in flight after B1 #120  
-**Prior tip:** Origin/GitHub MATCH @ `1054c524b73a8322f5389cbb8d75149706fac754` (B1 #120)  
+**Checkpoint:** NEXT-01 G0 audit (POS-v1 + R1 Floor/Table read-only) after DEMO-29  
+**Tip:** Origin/GitHub MATCH @ `a1bb99eae809b987cc2268b1e1f4b6f7f36072bf` (#122 DEMO-29)  
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)  
 **GitHub backup (sole):** `https://github.com/millQ-dev/KiU_POS.git`  
   (`millQ-dev/MillQ` = legacy rename redirect to the same repository ID)  
-**Updated:** 2026-10-27
+**Updated:** 2026-10-28
 
 ## Runtime / CI / backup
 
@@ -27,8 +27,10 @@
 | ADR-0014 / ADR-0013 Chronology Delta | **ACCEPTED** 2026-10-11 |
 | ADR-0038 C0 CASH+CARD PCE | **ACCEPTED** 2026-10-11 |
 | ADR-0039 Brand/Office bootstrap | **ACCEPTED** 2026-10-11 |
-| Floor/Table (R1.1) | **FROZEN / NOT STARTED** |
-| C0 Cafe Operability | **IN PROGRESS** — slice = **COUNTER-SERVICE / PREPAY CAFE** |
+| Floor/Table (R1.1) | **FROZEN / NOT STARTED** — G0 audit `docs/processes/next01/R1-ORIGIN-GAP-MATRIX.md` → **R1_AUDIT_READY**; no floor module / no floor migrations |
+| DEMO-29 | **CLOSED** — `DEMO29_GO`; evidence `docs/processes/demo29/evidence/manual-1793112022/` |
+| NEXT-01 Track P | POS-v1 gap matrix `docs/processes/next01/P0-POS-V1-GAP-MATRIX.md` — counter cash path VERIFIED; Modifier/QR/post-pay void gaps |
+| C0 Cafe Operability | Counter/prepay cafe path proven via DEMO-29; wider POS-v1 roadmap gaps tracked under NEXT-01 |
 
 ## TAX1.1 (canonical closed)
 
@@ -73,10 +75,10 @@
 
 ## Next
 
-1. Merge C0-REFUND-B2 (Level B) after Bugbot + AI FinSec + Depot CI; no production migrate GO
-2. Continue C0 cafe operability inside Accepted ADRs; further Level C only with separate PO ACCEPT
+1. NEXT-01 Track P: ship G0 matrices (Level A); optional honest QR-unavailable UI (Level A); Discount UI only if accepted commercial command surface (Level B) — **STOP** on Modifier / VietQR collect / post-pay void without Accept
+2. R1.1 Floor/Table backend only after Track P exit + Level B proposal under ADR-0017; no R3-5 reservations; no prod migrate GO
 3. Obey MWR arming order (A after PR open; B after Bugbot+AI review on HEAD; C after PO ACCEPT)
-4. No VietQR refund adapter / G2 claim / DeviceIdentity / R1.1 without evidence; no prod deploy / persistent migrate without separate PO GO
+4. No VietQR payout / G2 claim / DeviceIdentity / fabricated paid QR; no prod deploy / persistent migrate without separate PO GO
 
 Preserve:
 
