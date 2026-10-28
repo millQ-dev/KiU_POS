@@ -29,7 +29,8 @@
 | ADR-0039 Brand/Office bootstrap | **ACCEPTED** 2026-10-11 |
 | Floor/Table (R1.1) | **FROZEN / NOT STARTED** — G0 audit `docs/processes/next01/R1-ORIGIN-GAP-MATRIX.md` → **R1_AUDIT_READY**; no floor module / no floor migrations |
 | DEMO-29 | **CLOSED** — `DEMO29_GO`; evidence `docs/processes/demo29/evidence/manual-1793112022/` |
-| NEXT-01 Track P | POS-v1 gap matrix `docs/processes/next01/P0-POS-V1-GAP-MATRIX.md` — counter cash path VERIFIED; Modifier/QR/post-pay void gaps |
+| NEXT-01 Track P | POS-v1 gap matrix — counter cash VERIFIED; NEXT-02 honesty UI for QR/card unavailable; Modifier/Discount/post-pay void still gaps |
+| NEXT-02 | In progress — Level A checkout honesty + success polish; R1.1 prep only (`R1.1-IMPLEMENTATION-PROPOSAL.md`); **POSV1_NO_GO**; **R1_AUDIT_READY** (gate closed) |
 | C0 Cafe Operability | Counter/prepay cafe path proven via DEMO-29; wider POS-v1 roadmap gaps tracked under NEXT-01 |
 
 ## TAX1.1 (canonical closed)

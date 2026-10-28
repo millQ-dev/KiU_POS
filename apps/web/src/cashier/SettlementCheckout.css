@@ -52,6 +52,7 @@
   opacity: 0.6;
 }
 
+.pos-settlement__methods,
 .pos-settlement__receive,
 .pos-settlement__success {
   margin: 0.75rem 0;
@@ -60,6 +61,21 @@
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
+}
+
+.pos-settlement__method-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: var(--color-muted, #555);
+}
+
+.pos-settlement__method-list [aria-disabled='true'] {
+  opacity: 0.75;
+}
+
+.pos-settlement__success--journey {
+  border-top: 2px solid var(--color-border, #ccc);
 }
 
 .pos-settlement__receive-title {

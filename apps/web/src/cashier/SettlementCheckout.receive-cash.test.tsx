@@ -49,6 +49,46 @@ describe('SettlementCheckoutPanel ReceiveCash', () => {
   });
   afterEach(() => cleanup());
 
+  it('declares QR/card unavailable and never fabricates non-cash paid state', async () => {
+    sessionFetch.mockImplementation(async (url: string) => {
+      if (String(url).includes('/payments/tenders')) {
+        return jsonResponse(200, {
+          tenders: [
+            {
+              tenderDefinitionId: 'tender-cash',
+              code: 'CASH',
+              displayName: 'Cash',
+              instrumentFamily: 'CASH',
+              enabled: true,
+            },
+          ],
+        });
+      }
+      return jsonResponse(404, { error: 'NOT_FOUND' });
+    });
+    render(
+      <SettlementCheckoutPanel
+        settlement={collecting}
+        commercialAccepted
+        editableOrder={false}
+        busy={false}
+        terminalId="term-1"
+        legalEntityId="le-1"
+        outletId="out-1"
+        onOpenCheckout={vi.fn()}
+        onAbortCheckout={vi.fn()}
+        onSettlementRefresh={vi.fn(async () => undefined)}
+      />,
+    );
+    await waitFor(() => expect(screen.getByTestId('payment-methods-availability')).toBeTruthy());
+    expect(screen.getByTestId('payment-method-cash-available').textContent).toMatch(/CASH/);
+    expect(screen.getByTestId('payment-method-qr-unavailable').textContent).toMatch(/unavailable/i);
+    expect(screen.getByTestId('payment-method-card-unavailable').textContent).toMatch(/unavailable/i);
+    expect(screen.queryByTestId('receive-cash-success')).toBeNull();
+    expect(screen.queryByTestId('complete-order-success')).toBeNull();
+    expect(screen.queryByRole('button', { name: /vietqr|qr pay|pay with qr/i })).toBeNull();
+  });
+
   it('lists CASH tender, previews change, posts receive-cash, refreshes settlement', async () => {
     const onSettlementRefresh = vi.fn(async () => undefined);
     sessionFetch.mockImplementation(async (url: string, init?: RequestInit) => {
