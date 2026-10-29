@@ -128,6 +128,7 @@ export class AllergensService {
       if (cur && cur.capture_choice === choice && sameCodes(cur.allergen_codes, codes)) {
         return toContext(input.orderId, cur);
       }
+      await this.assertNoLiveSettlement(client, input.orderId);
       const revision = (cur?.revision ?? 0) + 1;
       if (cur) {
         await client.query(
@@ -153,6 +154,8 @@ export class AllergensService {
          ) VALUES ($1,$2,$3,$4,$5,$6::text[],$7)`,
         [randomUUID(), order.tenant_id, input.orderId, revision, choice, codes, input.actorId ?? null],
       );
+      // Context revision invalidates commercial acceptance (same pattern as line mutations / modifiers).
+      await this.clearOpenCommercialTerms(client, input.orderId);
       const fresh = await client.query<ContextRow>(
         `SELECT capture_choice, allergen_codes, revision, captured_at, frozen_at
          FROM order_allergen_context WHERE order_id = $1`,
@@ -461,15 +464,10 @@ export class AllergensService {
 
   /**
    * Commercial-accept gate (wired in OrdersService next to the ADR-0049 modifier gate).
-   * Enforces readiness once an allergen context exists. A missing context is NOT enforced here:
-   * mandatory-capture enforcement is a product decision (ADR-0050 says "ask once"; the cashier UI
-   * blocks until answered) and is tracked as a follow-up — see NEXT04_STATUS.md.
+   * ADR-0050: allergen capture is mandatory at order start — missing context fails closed.
    */
   async assertReadyWhenCaptured(client: PoolClient, orderId: string): Promise<void> {
-    const captured = await client.query(`SELECT 1 FROM order_allergen_context WHERE order_id = $1`, [
-      orderId,
-    ]);
-    if (captured.rowCount) await this.assertReadyForCommercialAccept(client, orderId);
+    await this.assertReadyForCommercialAccept(client, orderId);
   }
 
   /** Fail-closed readiness: context captured, every line freshly resolved, none BLOCKED, acks recorded. */
@@ -741,6 +739,27 @@ export class AllergensService {
       throw new AllergenDomainError('ORDER_NOT_OPEN', 'Allergen context changes only on OPEN orders');
     }
     return order;
+  }
+
+  /** ADR-0032: live Settlement freezes order commercial edits. */
+  private async assertNoLiveSettlement(client: PoolClient, orderId: string): Promise<void> {
+    const res = await client.query(
+      `SELECT 1 FROM settlement_group
+       WHERE order_id = $1 AND state IN ('COLLECTING', 'SATISFIED')
+       LIMIT 1`,
+      [orderId],
+    );
+    if ((res.rowCount ?? 0) > 0) {
+      throw new AllergenDomainError(
+        'SETTLEMENT_EDIT_LOCKED',
+        'Order allergen context cannot change while a live Settlement exists',
+      );
+    }
+  }
+
+  private async clearOpenCommercialTerms(client: PoolClient, orderId: string): Promise<void> {
+    await client.query(`DELETE FROM sales_order_commercial_line_terms WHERE order_id = $1`, [orderId]);
+    await client.query(`DELETE FROM sales_order_commercial_terms WHERE order_id = $1`, [orderId]);
   }
 
   private async inTx<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {

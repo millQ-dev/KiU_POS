@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
   allergenApi,
   type AllergenAckKind,
@@ -51,6 +51,7 @@ type Props = {
 
 export function AllergenPanel({ orderId, lines, editable, refreshKey, suggestedCodes = [] }: Props) {
   const titleId = useId();
+  const activeOrderIdRef = useRef(orderId);
   const [state, setState] = useState<AllergenState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -60,23 +61,24 @@ export function AllergenPanel({ orderId, lines, editable, refreshKey, suggestedC
   const [formError, setFormError] = useState<string | null>(null);
   const [changing, setChanging] = useState(false);
 
-  const load = useCallback(
-    async (forOrderId: string = orderId) => {
-      setLoadError(null);
-      try {
-        const next = await allergenApi.getState(forOrderId);
-        if (forOrderId !== orderId) return;
-        setState(next);
-        setLoaded(true);
-      } catch (err) {
-        if (forOrderId !== orderId) return;
-        setState(null);
-        setLoaded(true);
-        setLoadError(err instanceof Error ? err.message : 'Failed to load allergen context');
-      }
-    },
-    [orderId],
-  );
+  useEffect(() => {
+    activeOrderIdRef.current = orderId;
+  }, [orderId]);
+
+  const load = useCallback(async (forOrderId: string) => {
+    setLoadError(null);
+    try {
+      const next = await allergenApi.getState(forOrderId);
+      if (activeOrderIdRef.current !== forOrderId) return;
+      setState(next);
+      setLoaded(true);
+    } catch (err) {
+      if (activeOrderIdRef.current !== forOrderId) return;
+      setState(null);
+      setLoaded(true);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load allergen context');
+    }
+  }, []);
 
   useEffect(() => {
     setState(null);
@@ -92,13 +94,16 @@ export function AllergenPanel({ orderId, lines, editable, refreshKey, suggestedC
   useEffect(() => {
     if (!hasContext || !editable) return;
     let cancelled = false;
+    const requestedOrderId = orderId;
     void allergenApi
-      .resolve(orderId)
+      .resolve(requestedOrderId)
       .then((resolved) => {
-        if (!cancelled) setState((prev) => (prev ? { ...prev, lines: resolved } : prev));
+        if (cancelled || activeOrderIdRef.current !== requestedOrderId) return;
+        setState((prev) => (prev ? { ...prev, lines: resolved } : prev));
       })
       .catch((err: unknown) => {
-        if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Allergen revalidation failed');
+        if (cancelled || activeOrderIdRef.current !== requestedOrderId) return;
+        setLoadError(err instanceof Error ? err.message : 'Allergen revalidation failed');
       });
     return () => {
       cancelled = true;
@@ -111,7 +116,7 @@ export function AllergenPanel({ orderId, lines, editable, refreshKey, suggestedC
     if (choice === 'SELECT_ALLERGENS') {
       const parsed = parseAllergenCodes(codesInput);
       if (!parsed) {
-        setFormError('Enter one or more allergen codes (A–Z, 0–9, _), e.g. MILK, EGG');
+        setFormError('Enter one or more allergen codes (A–Z, 0–9, _; e.g. MILK, EGG)');
         return;
       }
       codes = parsed;
@@ -119,9 +124,12 @@ export function AllergenPanel({ orderId, lines, editable, refreshKey, suggestedC
     setBusy(true);
     setFormError(null);
     try {
-      setState(await allergenApi.capture(orderId, { captureChoice: choice, allergenCodes: codes }));
+      const next = await allergenApi.capture(orderId, { captureChoice: choice, allergenCodes: codes });
+      if (activeOrderIdRef.current !== orderId) return;
+      setState(next);
       setChanging(false);
     } catch (err) {
+      if (activeOrderIdRef.current !== orderId) return;
       setFormError(err instanceof Error ? err.message : 'Capture failed');
     } finally {
       setBusy(false);
@@ -132,8 +140,9 @@ export function AllergenPanel({ orderId, lines, editable, refreshKey, suggestedC
     setBusy(true);
     try {
       await allergenApi.acknowledge(orderId, lineId, kind);
-      await load();
+      await load(orderId);
     } catch (err) {
+      if (activeOrderIdRef.current !== orderId) return;
       setLoadError(err instanceof Error ? err.message : 'Acknowledgement failed');
     } finally {
       setBusy(false);
@@ -146,7 +155,7 @@ export function AllergenPanel({ orderId, lines, editable, refreshKey, suggestedC
     return (
       <div className="pos-allergen pos-allergen--error" role="alert" data-testid="allergen-load-error">
         <strong>Allergy status unavailable.</strong> {loadError} Do not send to kitchen until captured.
-        <button type="button" className="pos-allergen__btn" onClick={() => void load()}>
+        <button type="button" className="pos-allergen__btn" onClick={() => void load(orderId)}>
           Retry
         </button>
       </div>

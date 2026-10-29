@@ -27,6 +27,7 @@ const CONFLICT_CODES = new Set([
   'ALLERGEN_REVALIDATION_REQUIRED',
   'ALLERGEN_LINE_BLOCKED',
   'ALLERGEN_ACK_NOT_REQUIRED',
+  'SETTLEMENT_EDIT_LOCKED',
 ]);
 
 function mapError(err: unknown): { status: number; body: Record<string, unknown> } {

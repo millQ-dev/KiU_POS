@@ -518,9 +518,10 @@ export class OrdersService {
       const { ModifiersService } = await import('../modifiers/index.js');
       await new ModifiersService(this.pool).assertLineConfigurationComplete(client, input.orderId);
 
-      // ADR-0050: when an order-local allergen context exists, lines must be resolved, unblocked and acknowledged.
+      // ADR-0050: allergen capture mandatory; lines must be resolved, unblocked and acknowledged.
       const { AllergensService } = await import('../allergens/index.js');
-      await new AllergensService(this.pool).assertReadyWhenCaptured(client, input.orderId);
+      const allergens = new AllergensService(this.pool);
+      await allergens.assertReadyWhenCaptured(client, input.orderId);
 
       const lockedLines = await this.loadLines(client, input.orderId);
       const policy = await input.policies.resolveForOrder(
@@ -678,6 +679,7 @@ export class OrdersService {
       const p = prior.rows[0];
       if (p) {
         if (p.idempotency_key === cmd.idempotencyKey && p.semantic_fingerprint === state.semanticFingerprint) {
+          await allergens.freezeForOrder(client, input.orderId);
           await client.query('COMMIT');
           return {
             calculated,
@@ -706,6 +708,8 @@ export class OrdersService {
         deviceId: cmd.deviceId ?? null,
         state,
       });
+      // ADR-0050: freeze order-local allergen snapshot with commercial accept.
+      await allergens.freezeForOrder(client, input.orderId);
       await client.query('COMMIT');
       return {
         calculated,
