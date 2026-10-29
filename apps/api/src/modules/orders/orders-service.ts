@@ -563,6 +563,9 @@ export class OrdersService {
         deviceId: cmd.deviceId ?? null,
         state,
       });
+      // ADR-0052 T8: freeze modifier configuration on any commercial accept.
+      const { ModifiersService } = await import('../modifiers/index.js');
+      await new ModifiersService(this.pool).freezeConfigurationsForOrder(client, cmd.orderId);
       await client.query('COMMIT');
       return {
         status: 'accepted' as const,
@@ -868,6 +871,7 @@ export class OrdersService {
       if (p) {
         if (p.idempotency_key === cmd.idempotencyKey && p.semantic_fingerprint === state.semanticFingerprint) {
           await allergens.freezeForOrder(client, input.orderId);
+          await new ModifiersService(this.pool).freezeConfigurationsForOrder(client, input.orderId);
           await client.query('COMMIT');
           return {
             calculated,
@@ -898,6 +902,8 @@ export class OrdersService {
       });
       // ADR-0050: freeze order-local allergen snapshot with commercial accept.
       await allergens.freezeForOrder(client, input.orderId);
+      // ADR-0052 T8: freeze modifier configuration fingerprints with commercial accept.
+      await new ModifiersService(this.pool).freezeConfigurationsForOrder(client, input.orderId);
       await client.query('COMMIT');
       return {
         calculated,
@@ -1847,6 +1853,9 @@ export class OrdersService {
     // ADR-0050: commercial invalidation lifts allergen freeze so lines can re-resolve before re-accept.
     const { AllergensService } = await import('../allergens/index.js');
     await new AllergensService(this.pool).unfreezeForCommercialInvalidation(client, orderId);
+    // ADR-0052 T8: lift configuration freeze so lines can be reconfigured after invalidation.
+    const { ModifiersService } = await import('../modifiers/index.js');
+    await new ModifiersService(this.pool).unfreezeConfigurationsForOrder(client, orderId);
   }
 
   private assertOpenMutable(order: OrderRow): void {
