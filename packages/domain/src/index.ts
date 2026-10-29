@@ -123,6 +123,15 @@ export {
   type EligibleDiscountLine,
 } from './order-commercial.js';
 export {
+  MAX_ORDER_MERCHANT_DISCOUNT_BASIS_POINTS,
+  MerchantDiscountPolicyError,
+  normalizeDiscountReason,
+  parsePercentToBasisPoints,
+  resolveOrderMerchantDiscount,
+  type OrderMerchantDiscountRequest,
+  type ResolvedOrderMerchantDiscount,
+} from './order-merchant-discount.js';
+export {
   evaluateCheckCoverage,
   assertExactCheckPayableConservation,
   assertExactLineAllocationConservation,

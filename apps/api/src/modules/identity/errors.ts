@@ -40,6 +40,15 @@ export const PERMISSION_PAYMENTS_REFUND_RECONCILE = 'payments.refund.reconcile' 
 export const PERMISSION_PROCUREMENT_GOODS_RECEIPT_MANAGE =
   'procurement.goods_receipt.manage' as const;
 
+/**
+ * ADR-0051 D1 — Manager/Owner approves an order-level merchant discount requested by a cashier.
+ * Held by the approver only; the requesting cashier needs pos.operate.
+ */
+export const PERMISSION_ORDERS_MERCHANT_DISCOUNT_APPROVE =
+  'orders.merchant_discount.approve' as const;
+/** ApprovalRequest operation_type for ApplyOrderMerchantDiscount (ADR-0051). */
+export const ORDER_MERCHANT_DISCOUNT_OPERATION_TYPE = 'orders.merchant_discount.apply' as const;
+
 export const PIN_MAX_ATTEMPTS = 5;
 export const PIN_LOCK_MINUTES = 15;
 export const SESSION_TTL_HOURS = 12;
