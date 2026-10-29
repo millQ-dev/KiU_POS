@@ -2,11 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import {
   allocateOrderMerchantDiscount,
-  calculateRoundedLineGross,
+  roundConfiguredMerchandiseLine,
   commercialSnapshotSemanticHash,
   commercialTermsSemanticFingerprint,
   computeLineNetMerchandiseSalesMinor,
-  createMoney,
   InvalidMoneyError,
   type CommercialCertainty,
   type CommercialRoundingMode,
@@ -85,8 +84,9 @@ function assertValidatedRoundingProvenance(input: {
   quantity: string;
   resolvedUnitPriceMinor: string | null;
   grossMerchandiseMinor: string;
-  /** ADR-0049 additive VND applied after ADR-0030 base round (once per line, v1). */
+  /** ADR-0052 per-unit modifier delta, applied before the single ADR-0030 round. */
   additivePriceAdjustmentMinor?: string;
+  configuredUnitPriceMinor?: string;
   exactUnroundedMinorBasis?: string;
   roundingDelta?: string;
   roundingPolicyId?: string;
@@ -149,15 +149,15 @@ function assertValidatedRoundingProvenance(input: {
     );
   }
 
+  const additiveRaw = input.additivePriceAdjustmentMinor ?? '0';
   let expected;
   try {
-    expected = calculateRoundedLineGross({
-      unitMoney: createMoney(
-        input.resolvedUnitPriceMinor,
-        input.currencyCode,
-        input.minorUnitExponent,
-      ),
+    expected = roundConfiguredMerchandiseLine({
+      baseUnitMinor: input.resolvedUnitPriceMinor,
+      perUnitModifierMinor: additiveRaw,
       quantity: input.quantity,
+      currencyCode: input.currencyCode,
+      minorUnitExponent: input.minorUnitExponent,
       roundingPolicy: {
         roundingPolicyId: input.roundingPolicyId,
         policyVersion: input.roundingPolicyVersion,
@@ -170,16 +170,16 @@ function assertValidatedRoundingProvenance(input: {
     mapMoney(e);
   }
 
-  const additiveRaw = input.additivePriceAdjustmentMinor ?? '0';
-  if (!/^-?\d+$/.test(additiveRaw)) {
+  if (
+    input.configuredUnitPriceMinor != null &&
+    input.configuredUnitPriceMinor !== expected.configuredUnitMinor
+  ) {
     throw new DomainValidationError(
       'COMMERCIAL_ROUNDING_POLICY_INVALID',
-      'additivePriceAdjustmentMinor must be an integer minor-unit string',
+      'configured unit price does not match base unit plus per-unit modifier delta',
     );
   }
-  const expectedGrossWithAdditive = (
-    BigInt(expected.roundedGrossMoney.amountMinor) + BigInt(additiveRaw)
-  ).toString();
+  const expectedGrossWithAdditive = expected.roundedGrossMoney.amountMinor;
   if (expectedGrossWithAdditive !== input.grossMerchandiseMinor) {
     throw new DomainValidationError(
       'COMMERCIAL_ROUNDING_POLICY_INVALID',
@@ -299,6 +299,19 @@ export function buildCommercialStateFromCommand(
         typeof provenance.additivePriceAdjustmentMinor === 'string'
           ? provenance.additivePriceAdjustmentMinor
           : '0';
+      const configuredFromProvenance =
+        typeof provenance.configuredUnitPriceMinor === 'string'
+          ? provenance.configuredUnitPriceMinor
+          : undefined;
+      if (
+        typeof provenance.currencyCode === 'string' &&
+        provenance.currencyCode !== currencyCode
+      ) {
+        throw new DomainValidationError(
+          'COMMERCIAL_CURRENCY_MISMATCH',
+          `Line ${ol.line_number} provenance currency does not match the order`,
+        );
+      }
       const rounding = assertValidatedRoundingProvenance({
         currencyCode,
         minorUnitExponent: cmd.minorUnitExponent,
@@ -306,6 +319,9 @@ export function buildCommercialStateFromCommand(
         resolvedUnitPriceMinor: lt.resolvedUnitPriceMinor ?? null,
         grossMerchandiseMinor: lt.grossMerchandiseMinor,
         additivePriceAdjustmentMinor: additiveFromProvenance,
+        ...(configuredFromProvenance != null
+          ? { configuredUnitPriceMinor: configuredFromProvenance }
+          : {}),
         ...(lt.exactUnroundedMinorBasis != null
           ? { exactUnroundedMinorBasis: lt.exactUnroundedMinorBasis }
           : {}),

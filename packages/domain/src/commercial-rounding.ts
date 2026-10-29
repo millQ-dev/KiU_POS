@@ -4,7 +4,7 @@
  */
 import { Decimal, parseCanonicalDecimal, toCanonicalDecimal } from './decimal.js';
 import { InvalidMoneyError } from './errors.js';
-import type { Money } from './money.js';
+import { createMoney, type Money } from './money.js';
 
 export type CommercialRoundingMode = 'HALF_UP' | 'HALF_EVEN' | 'DOWN' | 'UP';
 
@@ -88,5 +88,53 @@ export function calculateRoundedLineGross(input: {
     },
     roundingDelta: delta,
     policyProvenance: { ...roundingPolicy },
+  };
+}
+
+export type ConfiguredMerchandiseLineGross = RoundedLineGrossResult & {
+  readonly baseUnitMinor: string;
+  readonly perUnitModifierMinor: string;
+  readonly configuredUnitMinor: string;
+};
+
+/**
+ * ADR-0052 M2. Signed per-unit modifier deltas enter the unit price.
+ * One ADR-0030 BASE_LIST_LINE_GROSS call then rounds
+ * (base unit + deltas) × canonical quantity.
+ */
+export function roundConfiguredMerchandiseLine(input: {
+  baseUnitMinor: string;
+  perUnitModifierMinor: string;
+  quantity: string;
+  currencyCode: string;
+  minorUnitExponent: number;
+  roundingPolicy: CommercialRoundingPolicySnapshot;
+}): ConfiguredMerchandiseLineGross {
+  let base;
+  let delta;
+  try {
+    base = parseCanonicalDecimal(input.baseUnitMinor);
+    delta = parseCanonicalDecimal(input.perUnitModifierMinor);
+  } catch {
+    throw new InvalidMoneyError('Modifier unit prices must be canonical integer minors');
+  }
+  if (!base.isInteger() || !delta.isInteger()) {
+    throw new InvalidMoneyError('Modifier unit prices must be integer minors');
+  }
+  const configured = base.add(delta);
+  if (configured.isNegative()) {
+    throw new InvalidMoneyError('Configured unit price must be >= 0');
+  }
+  const configuredUnitMinor = toCanonicalDecimal(configured);
+  const rounded = calculateRoundedLineGross({
+    unitMoney: createMoney(configuredUnitMinor, input.currencyCode, input.minorUnitExponent),
+    quantity: input.quantity,
+    roundingPolicy: input.roundingPolicy,
+  });
+  return {
+    ...rounded,
+    baseUnitMinor: toCanonicalDecimal(base),
+    perUnitModifierMinor: toCanonicalDecimal(delta),
+    configuredUnitMinor,
   };
 }

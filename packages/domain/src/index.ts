@@ -18,8 +18,10 @@ export {
 } from './cost-value.js';
 export {
   calculateRoundedLineGross,
+  roundConfiguredMerchandiseLine,
   type CommercialRoundingMode,
   type CommercialRoundingPolicySnapshot,
+  type ConfiguredMerchandiseLineGross,
   type RoundedLineGrossResult,
 } from './commercial-rounding.js';
 export {
