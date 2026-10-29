@@ -17,7 +17,7 @@
 - Предыдущий PR #133: merged, merge commit 7709cb58c4190c1780971be6411314defa4bf994
 - Branch: chore/fiscal-g2-po-corrections
 - Base: main @ 340e833ff72071e7d45455f5bb76adc851f33500
-- PR: заполняется после открытия
+- PR: https://cursor.com/codebase/millqdev/MillQ/pull/137
 - Issue: нет
 
 3) Контекст продукта (кратко)
