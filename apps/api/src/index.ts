@@ -15,6 +15,7 @@ import { registerGuestMenuRoutes, registerDevGuestMenuAdminRoutes } from './rout
 import { registerDevCashierBootstrapRoutes, registerPosRoutes } from './routes/pos.js';
 import { registerCompanyIdentityRoutes, registerIdentityRoutes } from './routes/identity.js';
 import { registerCashRoutes } from './routes/cash.js';
+import { registerAllergenRoutes } from './routes/allergens.js';
 
 async function main() {
   const env = loadEnv();
@@ -77,6 +78,11 @@ async function main() {
     isProduction: env.NODE_ENV === 'production',
   });
   await registerPosRoutes(app, pool, {
+    pepper,
+    allowedOrigins,
+    isProduction: env.NODE_ENV === 'production',
+  });
+  await registerAllergenRoutes(app, pool, {
     pepper,
     allowedOrigins,
     isProduction: env.NODE_ENV === 'production',

@@ -51,6 +51,24 @@ vi.mock('./api/client.js', () => ({
   },
 }));
 
+vi.mock('./api/allergenApi.js', () => ({
+  allergenApi: {
+    getState: vi.fn().mockResolvedValue({
+      context: {
+        orderId: 'o',
+        captureChoice: 'NO_ALLERGIES_CONFIRMED',
+        allergenCodes: [],
+        revision: 1,
+        frozen: false,
+      },
+      lines: [],
+    }),
+    capture: vi.fn(),
+    resolve: vi.fn().mockResolvedValue([]),
+    acknowledge: vi.fn(),
+  },
+}));
+
 const mockedApi = vi.mocked(posApi);
 
 const ctx: CashierContext = {

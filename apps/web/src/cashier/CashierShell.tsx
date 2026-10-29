@@ -11,6 +11,7 @@ import type {
   ResolvedPosSurface,
   SettlementProjection,
 } from '../api/types.js';
+import { AllergenPanel } from './AllergenPanel.js';
 import { OrderBasketPanel } from './OrderBasket.js';
 import { PosPageNavigation } from './PosPageNavigation.js';
 import { ProductGrid } from './ProductGrid.js';
@@ -561,6 +562,15 @@ export function CashierShell({
         <div className="pos-shell__feedback" role="status">
           Order is {order.status} — editing disabled. Start a new order to continue.
         </div>
+      )}
+
+      {order && (
+        <AllergenPanel
+          orderId={order.orderId}
+          lines={order.lines}
+          editable={!!editable}
+          refreshKey={order.lines.map((l) => `${l.orderLineId}:${l.quantity}`).join('|')}
+        />
       )}
 
       {surfaceLoading && !surface ? (
