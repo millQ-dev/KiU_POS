@@ -86,14 +86,14 @@ describe('resolveOrderMerchantDiscount (ADR-0051 D3/D4)', () => {
     }
   });
 
-  it('percent rounds down to whole minor units', () => {
+  it('percent converts through MERCHANT_DISCOUNT_PERCENT_TO_MINOR HALF_UP', () => {
     const r = resolveOrderMerchantDiscount({
       request: { mode: 'PERCENT', percent: '15' },
       eligibleBasisMinor: '12345',
       reason: 'x',
     });
-    // 12345 * 15% = 1851.75 → 1851
-    expect(r.discountMinor).toBe('1851');
+    // 12345 * 15% = 1851.75 → HALF_UP → 1852
+    expect(r.discountMinor).toBe('1852');
     expect(r.percentBasisPoints).toBe(1500);
   });
 
@@ -118,16 +118,25 @@ describe('resolveOrderMerchantDiscount (ADR-0051 D3/D4)', () => {
     }
   });
 
-  it('rejects percent that rounds to zero minor units', () => {
+  it('rejects percent that HALF_UP rounds to zero minor units', () => {
+    // 49 * 1% = 0.49 → HALF_UP → 0
     expect(
       codeOf(() =>
         resolveOrderMerchantDiscount({
           request: { mode: 'PERCENT', percent: '1' },
-          eligibleBasisMinor: '50',
+          eligibleBasisMinor: '49',
           reason: 'x',
         }),
       ),
     ).toBe('DISCOUNT_AMOUNT_INVALID');
+    // 50 * 1% = 0.5 → HALF_UP → 1
+    expect(
+      resolveOrderMerchantDiscount({
+        request: { mode: 'PERCENT', percent: '1' },
+        eligibleBasisMinor: '50',
+        reason: 'x',
+      }).discountMinor,
+    ).toBe('1');
   });
 
   it('rejects empty or whitespace reason', () => {
