@@ -8,6 +8,7 @@ import {
   createMoney,
   Decimal,
   parseCanonicalDecimal,
+  roundConfiguredMerchandiseLine,
   toCanonicalDecimal,
 } from '@millq/domain';
 
@@ -93,9 +94,12 @@ export async function acceptFinalMerchandiseTerms(
         defaultGross;
       const unit =
         opts?.unitPriceByOrderLineId?.[l.orderLineId] ?? unitPriceForTargetGross(gross, l.quantity);
-      const rounded = calculateRoundedLineGross({
-        unitMoney: createMoney(unit, currencyCode, minorUnitExponent),
+      const rounded = roundConfiguredMerchandiseLine({
+        baseUnitMinor: unit,
+        perUnitModifierMinor: '0',
         quantity: l.quantity,
+        currencyCode,
+        minorUnitExponent,
         roundingPolicy: policy,
       });
       if (rounded.roundedGrossMoney.amountMinor !== gross) {
@@ -122,6 +126,8 @@ export async function acceptFinalMerchandiseTerms(
         provenance: {
           source: 'TEST_HELPER_C1_1',
           commercialGrossPolicy: 'BASE_LIST_LINE_GROSS_ROUNDED',
+          additivePriceAdjustmentMinor: '0',
+          configuredUnitPriceMinor: rounded.configuredUnitMinor,
         },
       };
     },
@@ -194,17 +200,23 @@ export async function setOrderCommercialTermsWithRounding(
       typeof provenanceIn.additivePriceAdjustmentMinor === 'string'
         ? provenanceIn.additivePriceAdjustmentMinor
         : '0';
-    const additive = BigInt(additiveRaw);
-    const baseGrossTarget = (BigInt(lt.grossMerchandiseMinor) - additive).toString();
+    if (lt.resolvedUnitPriceMinor == null && additiveRaw !== '0') {
+      throw new Error(
+        'setOrderCommercialTermsWithRounding: resolvedUnitPriceMinor is required when a modifier delta is set',
+      );
+    }
     const unit =
       (lt.resolvedUnitPriceMinor as string | undefined) ??
-      unitPriceForTargetGross(baseGrossTarget, live.quantity);
-    const rounded = calculateRoundedLineGross({
-      unitMoney: createMoney(unit, currencyCode, minorUnitExponent),
+      unitPriceForTargetGross(lt.grossMerchandiseMinor, live.quantity);
+    const rounded = roundConfiguredMerchandiseLine({
+      baseUnitMinor: unit,
+      perUnitModifierMinor: additiveRaw,
       quantity: live.quantity,
+      currencyCode,
+      minorUnitExponent,
       roundingPolicy: policy,
     });
-    const expectedGross = (BigInt(rounded.roundedGrossMoney.amountMinor) + additive).toString();
+    const expectedGross = rounded.roundedGrossMoney.amountMinor;
     if (expectedGross !== lt.grossMerchandiseMinor) {
       throw new Error(
         `setOrderCommercialTermsWithRounding: kernel+additive ${expectedGross} != ${lt.grossMerchandiseMinor}`,
@@ -225,6 +237,7 @@ export async function setOrderCommercialTermsWithRounding(
         source: 'TEST_HELPER_C1_1',
         commercialGrossPolicy: 'BASE_LIST_LINE_GROSS_ROUNDED',
         additivePriceAdjustmentMinor: additiveRaw,
+        configuredUnitPriceMinor: rounded.configuredUnitMinor,
       },
     };
   });

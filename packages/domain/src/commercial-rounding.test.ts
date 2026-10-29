@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { calculateRoundedLineGross } from './commercial-rounding.js';
+import {
+  calculateRoundedLineGross,
+  roundConfiguredMerchandiseLine,
+} from './commercial-rounding.js';
+import { sumAdditivePriceAdjustmentsMinor } from './effective-recipe-delta.js';
 import { createMoney } from './money.js';
 
 const vnPolicy = {
@@ -95,5 +99,90 @@ describe('calculateRoundedLineGross (ADR-0030)', () => {
     expect(a.roundedGrossMoney.minorUnitExponent).toBe(2);
     // 18517.5 → 18518
     expect(a.roundedGrossMoney.amountMinor).toBe('18518');
+  });
+});
+
+describe('roundConfiguredMerchandiseLine (ADR-0052 M2)', () => {
+  const policy = vnPolicy;
+
+  function round(input: {
+    base: string;
+    delta: string;
+    quantity: string;
+    mode?: 'HALF_UP' | 'HALF_EVEN' | 'DOWN' | 'UP';
+  }) {
+    return roundConfiguredMerchandiseLine({
+      baseUnitMinor: input.base,
+      perUnitModifierMinor: input.delta,
+      quantity: input.quantity,
+      currencyCode: 'VND',
+      minorUnitExponent: 0,
+      roundingPolicy: { ...policy, roundingMode: input.mode ?? 'HALF_UP' },
+    });
+  }
+
+  it('quantity 1 applies a positive modifier inside the unit', () => {
+    const r = round({ base: '20000', delta: '5000', quantity: '1' });
+    expect(r.configuredUnitMinor).toBe('25000');
+    expect(r.exactUnroundedMinorBasis).toBe('25000');
+    expect(r.roundedGrossMoney.amountMinor).toBe('25000');
+    expect(r.roundingDelta).toBe('0');
+    expect(r.policyProvenance.calculationContext).toBe('BASE_LIST_LINE_GROSS');
+  });
+
+  it('quantity 2 applies the per-unit modifier twice before rounding', () => {
+    const r = round({ base: '20000', delta: '5000', quantity: '2' });
+    expect(r.configuredUnitMinor).toBe('25000');
+    expect(r.exactUnroundedMinorBasis).toBe('50000');
+    expect(r.roundedGrossMoney.amountMinor).toBe('50000');
+    expect(r.roundingDelta).toBe('0');
+  });
+
+  it('sums multiple selected modifiers before the single round', () => {
+    const delta = sumAdditivePriceAdjustmentsMinor(['3000', '2000']);
+    const r = round({ base: '20000', delta, quantity: '2' });
+    expect(r.configuredUnitMinor).toBe('25000');
+    expect(r.roundedGrossMoney.amountMinor).toBe('50000');
+  });
+
+  it('zero adjustment matches base-only ADR-0030 rounding', () => {
+    const configured = round({ base: '65000', delta: '0', quantity: '2' });
+    const baseOnly = calculateRoundedLineGross({
+      unitMoney: createMoney('65000', 'VND', 0),
+      quantity: '2',
+      roundingPolicy: policy,
+    });
+    expect(configured.exactUnroundedMinorBasis).toBe(baseOnly.exactUnroundedMinorBasis);
+    expect(configured.roundedGrossMoney.amountMinor).toBe(baseOnly.roundedGrossMoney.amountMinor);
+    expect(configured.roundingDelta).toBe(baseOnly.roundingDelta);
+  });
+
+  it('allows a negative adjustment while the effective unit stays non-negative', () => {
+    const r = round({ base: '20000', delta: '-5000', quantity: '2' });
+    expect(r.configuredUnitMinor).toBe('15000');
+    expect(r.exactUnroundedMinorBasis).toBe('30000');
+    expect(r.roundedGrossMoney.amountMinor).toBe('30000');
+  });
+
+  it('rejects a negative effective unit price', () => {
+    expect(() => round({ base: '1000', delta: '-2000', quantity: '1' })).toThrow(
+      /Configured unit price/,
+    );
+  });
+
+  it('HALF_UP on a fractional MASS/VOLUME quantity keeps sub-minor provenance', () => {
+    const r = round({ base: '10000', delta: '1', quantity: '0.5' });
+    expect(r.exactUnroundedMinorBasis).toBe('5000.5');
+    expect(r.roundedGrossMoney.amountMinor).toBe('5001');
+    expect(r.roundingDelta).toBe('0.5');
+    expect(r.policyProvenance.roundingMode).toBe('HALF_UP');
+  });
+
+  it('keeps two configurations of the same base price distinct', () => {
+    const oat = round({ base: '20000', delta: '5000', quantity: '1' });
+    const whole = round({ base: '20000', delta: '0', quantity: '1' });
+    expect(oat.configuredUnitMinor).not.toBe(whole.configuredUnitMinor);
+    expect(oat.roundedGrossMoney.amountMinor).toBe('25000');
+    expect(whole.roundedGrossMoney.amountMinor).toBe('20000');
   });
 });

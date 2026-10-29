@@ -7,12 +7,14 @@ import {
 } from '@millq/contracts';
 import {
   DomainError,
+  type CommercialRoundingPolicySnapshot,
   assertExactlyOneConsumptionPath,
   assertPositive,
   consumptionPlanProvenanceHash,
   createQuantity,
   parseCanonicalDecimal,
   resolveSaleLineConsumption,
+  roundConfiguredMerchandiseLine,
   type GraphCatalogItem,
   type GraphPreparationVersion,
   type GraphRecipeVersion,
@@ -81,6 +83,143 @@ function mapDomainError(err: unknown): never {
     throw new DomainValidationError(err.code, err.message);
   }
   throw err;
+}
+
+type StoredModifierConfig = {
+  additive_price_adjustment_minor: string;
+  configuration_fingerprint: string;
+};
+
+function modifierTermsFromProvenance(provenance: unknown): {
+  additive: string;
+  fingerprint?: string;
+} {
+  const prov =
+    provenance && typeof provenance === 'object' ? (provenance as Record<string, unknown>) : {};
+  const fingerprint =
+    typeof prov.configurationFingerprint === 'string' ? prov.configurationFingerprint : undefined;
+  return {
+    additive:
+      typeof prov.additivePriceAdjustmentMinor === 'string' ? prov.additivePriceAdjustmentMinor : '0',
+    ...(fingerprint != null ? { fingerprint } : {}),
+  };
+}
+
+function assertStoredModifierMatches(
+  orderLineId: string,
+  submitted: { additive: string; fingerprint?: string },
+  stored: StoredModifierConfig | undefined,
+): void {
+  if (submitted.additive !== (stored?.additive_price_adjustment_minor ?? '0')) {
+    throw new DomainValidationError(
+      'CONFIGURATION_MISMATCH',
+      `Modifier delta for line ${orderLineId} does not match the stored configuration`,
+    );
+  }
+  if (stored != null && submitted.fingerprint !== stored.configuration_fingerprint) {
+    throw new DomainValidationError(
+      'CONFIGURATION_STALE',
+      `Modifier configuration fingerprint for line ${orderLineId} is stale`,
+    );
+  }
+  if (stored == null && submitted.fingerprint != null) {
+    throw new DomainValidationError(
+      'CONFIGURATION_STALE',
+      `Modifier configuration fingerprint for line ${orderLineId} is stale`,
+    );
+  }
+}
+
+/** Stored modifier configuration is the source of the per-unit delta. A submitted delta or fingerprint that differs is stale. */
+export async function assertModifierConfigurationMatchesTerms(
+  client: pg.PoolClient,
+  cmd: {
+    orderId: string;
+    lineTerms: ReadonlyArray<{ orderLineId: string; provenance?: unknown }>;
+  },
+): Promise<void> {
+  const rows = await client.query<StoredModifierConfig & { order_line_id: string }>(
+    `SELECT order_line_id, additive_price_adjustment_minor, configuration_fingerprint
+     FROM order_line_configuration WHERE order_id = $1`,
+    [cmd.orderId],
+  );
+  const byLine = new Map(rows.rows.map((r) => [r.order_line_id, r]));
+  for (const lt of cmd.lineTerms) {
+    assertStoredModifierMatches(
+      lt.orderLineId,
+      modifierTermsFromProvenance(lt.provenance),
+      byLine.get(lt.orderLineId),
+    );
+  }
+}
+
+function applyConfiguredUnitGross<
+  T extends {
+    orderLineId: string;
+    resolvedUnitPriceMinor: string | null;
+    currencyCode: string;
+    quantity: string;
+  },
+>(input: {
+  lines: readonly T[];
+  additiveByLine: ReadonlyMap<string, StoredModifierConfig>;
+  currencyCode: string;
+  minorUnitExponent: number;
+  roundingPolicy: CommercialRoundingPolicySnapshot;
+}): {
+  lines: Array<
+    T & {
+      grossMerchandiseMinor: string;
+      exactUnroundedMinorBasis: string;
+      roundingDelta: string;
+      configuredUnitPriceMinor: string;
+      perUnitModifierMinor: string;
+      configurationFingerprint: string | null;
+    }
+  >;
+  merchandiseGrossMinor: string;
+} {
+  let merchandiseGross = 0n;
+  const lines = input.lines.map((l) => {
+    const stored = input.additiveByLine.get(l.orderLineId);
+    const perUnit = stored?.additive_price_adjustment_minor ?? '0';
+    if (l.resolvedUnitPriceMinor == null) {
+      throw new DomainValidationError(
+        'COMMERCIAL_PRICE_UNRESOLVED',
+        `Line ${l.orderLineId} has no authoritative base unit price`,
+      );
+    }
+    if (l.currencyCode !== input.currencyCode) {
+      throw new DomainValidationError(
+        'COMMERCIAL_CURRENCY_MISMATCH',
+        `Line ${l.orderLineId} currency does not match the order`,
+      );
+    }
+    let rounded;
+    try {
+      rounded = roundConfiguredMerchandiseLine({
+        baseUnitMinor: l.resolvedUnitPriceMinor,
+        perUnitModifierMinor: perUnit,
+        quantity: l.quantity,
+        currencyCode: input.currencyCode,
+        minorUnitExponent: input.minorUnitExponent,
+        roundingPolicy: input.roundingPolicy,
+      });
+    } catch (e) {
+      mapDomainError(e);
+    }
+    merchandiseGross += BigInt(rounded.roundedGrossMoney.amountMinor);
+    return {
+      ...l,
+      grossMerchandiseMinor: rounded.roundedGrossMoney.amountMinor,
+      exactUnroundedMinorBasis: rounded.exactUnroundedMinorBasis,
+      roundingDelta: rounded.roundingDelta,
+      configuredUnitPriceMinor: rounded.configuredUnitMinor,
+      perUnitModifierMinor: perUnit,
+      configurationFingerprint: stored?.configuration_fingerprint ?? null,
+    };
+  });
+  return { lines, merchandiseGrossMinor: merchandiseGross.toString() };
 }
 
 function completeFingerprint(input: {
@@ -383,6 +522,7 @@ export class OrdersService {
       await this.assertNoLiveSettlement(client, cmd.orderId);
 
       const lines = await this.loadLines(client, cmd.orderId);
+      await assertModifierConfigurationMatchesTerms(client, cmd);
       const state = buildCommercialStateFromCommand(cmd, lines);
 
       const prior = await client.query<{
@@ -433,6 +573,9 @@ export class OrdersService {
         lines: state.lines.map((l) => ({
           orderLineId: l.orderLineId,
           lineNumber: l.lineNumber,
+          grossMerchandiseMinor: l.grossMerchandiseMinor,
+          exactUnroundedMinorBasis: l.exactUnroundedMinorBasis,
+          roundingDelta: l.roundingDelta,
           allocatedOrderMerchantDiscountMinor: l.allocatedOrderMerchantDiscountMinor,
           netMerchandiseSalesMinor: l.netMerchandiseSalesMinor,
         })),
@@ -602,31 +745,31 @@ export class OrdersService {
         businessDateTime: salesContext.businessDateTime,
       });
 
-      // Additive modifier VND (order_line_configuration) — once per line for v1.
-      const additiveRows = await client.query<{
-        order_line_id: string;
-        additive_price_adjustment_minor: string;
-      }>(
-        `SELECT order_line_id, additive_price_adjustment_minor
+      // ADR-0052 M2: per-unit modifier delta, then one ADR-0030 round of (base + delta) × qty.
+      const additiveRows = await client.query<StoredModifierConfig & { order_line_id: string }>(
+        `SELECT order_line_id, additive_price_adjustment_minor, configuration_fingerprint
          FROM order_line_configuration WHERE order_id = $1`,
         [input.orderId],
       );
-      const additiveByLine = new Map(
-        additiveRows.rows.map((r) => [r.order_line_id, r.additive_price_adjustment_minor]),
-      );
-      let merchandiseGross = 0n;
-      const adjustedLines = baseCalculated.lines.map((l) => {
-        const add = BigInt(additiveByLine.get(l.orderLineId) ?? '0');
-        const gross = (BigInt(l.grossMerchandiseMinor) + add).toString();
-        merchandiseGross += BigInt(gross);
-        return { ...l, grossMerchandiseMinor: gross };
+      const adjusted = applyConfiguredUnitGross({
+        lines: baseCalculated.lines,
+        additiveByLine: new Map(additiveRows.rows.map((r) => [r.order_line_id, r])),
+        currencyCode: baseCalculated.currencyCode,
+        minorUnitExponent: baseCalculated.minorUnitExponent,
+        roundingPolicy: {
+          roundingPolicyId: baseCalculated.roundingPolicy.roundingPolicyId,
+          policyVersion: baseCalculated.roundingPolicy.policyVersion,
+          calculationContext: 'BASE_LIST_LINE_GROSS',
+          roundingMode: baseCalculated.roundingPolicy.roundingMode,
+          quantumMinor: baseCalculated.roundingPolicy.quantumMinor,
+        },
       });
 
       const calculated = {
         orderId: input.orderId,
         ...baseCalculated,
-        lines: adjustedLines,
-        merchandiseGrossMinor: merchandiseGross.toString(),
+        lines: adjusted.lines,
+        merchandiseGrossMinor: adjusted.merchandiseGrossMinor,
       };
 
       if (!input.persist) {
@@ -664,7 +807,11 @@ export class OrdersService {
           calculationContext: l.calculationContext,
           menuPublicationId: l.menuPublicationId,
           priceRuleId: l.priceRuleId,
-          additivePriceAdjustmentMinor: additiveByLine.get(l.orderLineId) ?? '0',
+          additivePriceAdjustmentMinor: l.perUnitModifierMinor,
+          configuredUnitPriceMinor: l.configuredUnitPriceMinor,
+          ...(l.configurationFingerprint
+            ? { configurationFingerprint: l.configurationFingerprint }
+            : {}),
         },
         exactUnroundedMinorBasis: l.exactUnroundedMinorBasis,
         roundingDelta: l.roundingDelta,

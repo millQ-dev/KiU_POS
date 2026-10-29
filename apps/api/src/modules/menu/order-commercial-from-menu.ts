@@ -5,8 +5,7 @@
  * Does not call OrdersService and does not write commercial tables.
  */
 import {
-  calculateRoundedLineGross,
-  createMoney,
+  roundConfiguredMerchandiseLine,
   type CommercialRoundingPolicySnapshot,
 } from '@millq/domain';
 import { DomainValidationError } from './errors.js';
@@ -64,9 +63,12 @@ export function buildMenuResolvedCommercialTermsInput(input: BuildMenuResolvedCo
   }
 
   const lineTerms = input.resolvedLines.map((l) => {
-    const rounded = calculateRoundedLineGross({
-      unitMoney: createMoney(l.resolvedUnitPriceMinor!, l.currencyCode, l.minorUnitExponent),
+    const rounded = roundConfiguredMerchandiseLine({
+      baseUnitMinor: l.resolvedUnitPriceMinor!,
+      perUnitModifierMinor: '0',
       quantity: l.quantity,
+      currencyCode: l.currencyCode,
+      minorUnitExponent: l.minorUnitExponent,
       roundingPolicy: input.roundingPolicy,
     });
     return {
@@ -98,6 +100,8 @@ export function buildMenuResolvedCommercialTermsInput(input: BuildMenuResolvedCo
         salesContext: l.salesContextProvenance,
         exactUnroundedMinorBasis: rounded.exactUnroundedMinorBasis,
         roundingDelta: rounded.roundingDelta,
+        additivePriceAdjustmentMinor: '0',
+        configuredUnitPriceMinor: rounded.configuredUnitMinor,
       },
     };
   });
