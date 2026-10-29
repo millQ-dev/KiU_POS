@@ -52,6 +52,7 @@ type Props = {
 export function AllergenPanel({ orderId, lines, editable, refreshKey, suggestedCodes = [] }: Props) {
   const titleId = useId();
   const activeOrderIdRef = useRef(orderId);
+  const refreshKeyRef = useRef(refreshKey);
   const [state, setState] = useState<AllergenState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -87,7 +88,10 @@ export function AllergenPanel({ orderId, lines, editable, refreshKey, suggestedC
     setCodesInput('');
     setChanging(false);
     setFormError(null);
+    refreshKeyRef.current = refreshKey;
     void load(orderId);
+    // refreshKey only seeds the ref on order switch; do not re-run on every bump.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: orderId-driven reset
   }, [load, orderId]);
 
   const hasContext = !!state?.context;
@@ -95,16 +99,26 @@ export function AllergenPanel({ orderId, lines, editable, refreshKey, suggestedC
     if (!hasContext || !editable) return;
     let cancelled = false;
     const requestedOrderId = orderId;
-    void allergenApi
-      .resolve(requestedOrderId)
-      .then((resolved) => {
+    const refreshChanged = refreshKeyRef.current !== refreshKey;
+    refreshKeyRef.current = refreshKey;
+    // On refreshKey change only: reload full state so context.frozen reflects server
+    // unfreeze after commercial invalidation. Always re-resolve lines when context exists.
+    void (async () => {
+      try {
+        if (refreshChanged) {
+          const next = await allergenApi.getState(requestedOrderId);
+          if (cancelled || activeOrderIdRef.current !== requestedOrderId) return;
+          setState(next);
+          if (!next.context) return;
+        }
+        const resolved = await allergenApi.resolve(requestedOrderId);
         if (cancelled || activeOrderIdRef.current !== requestedOrderId) return;
         setState((prev) => (prev ? { ...prev, lines: resolved } : prev));
-      })
-      .catch((err: unknown) => {
+      } catch (err: unknown) {
         if (cancelled || activeOrderIdRef.current !== requestedOrderId) return;
         setLoadError(err instanceof Error ? err.message : 'Allergen revalidation failed');
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };

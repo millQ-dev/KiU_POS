@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import { AllergenPanel, parseAllergenCodes } from './AllergenPanel.js';
 import { allergenApi, type AllergenState } from '../api/allergenApi.js';
 import type { OrderLine } from '../api/types.js';
@@ -157,5 +158,42 @@ describe('AllergenPanel', () => {
     renderPanel(false);
     await waitFor(() => expect(api.getState).toHaveBeenCalled());
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('reloads context on refreshKey so Change returns after server unfreeze', async () => {
+    const frozen: AllergenState = {
+      context: {
+        orderId: 'o1',
+        captureChoice: 'NO_ALLERGIES_CONFIRMED',
+        allergenCodes: [],
+        revision: 1,
+        frozen: true,
+      },
+      lines: [],
+    };
+    const thawed: AllergenState = {
+      ...frozen,
+      context: { ...frozen.context!, frozen: false },
+    };
+    api.getState.mockResolvedValue(frozen);
+    api.resolve.mockResolvedValue([]);
+
+    function Harness() {
+      const [key, setKey] = useState('k1');
+      return (
+        <>
+          <button type="button" onClick={() => setKey('k2')}>
+            bump
+          </button>
+          <AllergenPanel orderId="o1" lines={[line]} editable refreshKey={key} />
+        </>
+      );
+    }
+    render(<Harness />);
+    expect(await screen.findByTestId('allergen-banner')).toBeTruthy();
+    expect(screen.queryByText('Change')).toBeNull();
+    api.getState.mockResolvedValue(thawed);
+    fireEvent.click(screen.getByText('bump'));
+    expect(await screen.findByText('Change')).toBeTruthy();
   });
 });
