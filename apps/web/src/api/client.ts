@@ -1,6 +1,7 @@
 import type {
   ApiErrorBody,
   CashierContext,
+  CatalogModifierGroup,
   CommercialStatus,
   MenuPriceResolution,
   OrderBasket,
@@ -110,6 +111,32 @@ export const posApi = {
 
   removeOrderLine(orderId: string, lineId: string): Promise<OrderBasket> {
     return request('DELETE', `/api/v1/orders/${orderId}/lines/${lineId}`);
+  },
+
+  getCatalogItemModifierGroups(catalogItemId: string): Promise<{
+    catalogItemId: string;
+    groups: CatalogModifierGroup[];
+  }> {
+    return request('GET', `/api/v1/catalog-items/${catalogItemId}/modifier-groups`);
+  },
+
+  configureOrderLineModifiers(
+    orderId: string,
+    lineId: string,
+    body: {
+      selections: Array<{ modifierGroupId: string; modifierOptionId: string }>;
+      guestNote?: string | null;
+    },
+  ): Promise<{
+    configuration: {
+      orderLineConfigurationId: string;
+      additivePriceAdjustmentMinor: string;
+      configurationFingerprint: string;
+      kitchenInstructions: string[];
+    };
+    order: OrderBasket;
+  }> {
+    return request('POST', `/api/v1/orders/${orderId}/lines/${lineId}/configure-modifiers`, body);
   },
 
   cancelOrder(orderId: string, body: { reason: string; actorId?: string }): Promise<OrderBasket> {
