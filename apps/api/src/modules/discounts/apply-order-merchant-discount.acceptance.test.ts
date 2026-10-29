@@ -446,7 +446,7 @@ describeDiscount('ADR-0051 ApplyOrderMerchantDiscount v1 (disposable PG)', () =>
     expect(await approvalStatus(approvalRequestId)).toBe('CONSUMED');
   });
 
-  it('approval evidence is mandatory and must be a valid, bound, single-use APPROVED request', async () => {
+  it('cashier without approve grant cannot apply directly; ApprovalRequest remains mandatory', async () => {
     const orderId = await openAcceptedOrder();
     const request = fixed('3000');
 
@@ -482,6 +482,27 @@ describeDiscount('ADR-0051 ApplyOrderMerchantDiscount v1 (disposable PG)', () =>
     const self = await decide(id, cashierHeaders);
     expect(self.statusCode).toBe(403);
     expect(await approvalStatus(id)).toBe('PENDING');
+  });
+
+  it('Manager/Owner with approve grant applies directly without ApprovalRequest (ADR-0051)', async () => {
+    const orderId = await openAcceptedOrder();
+    const request = fixed('5500', 'Owner goodwill');
+    const res = await apply(orderId, applyBody(request, undefined, 'disc-direct-0001'), managerHeaders);
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({
+      status: 'applied',
+      discountMinor: '5500',
+      approvalRequestId: null,
+      reason: 'Owner goodwill',
+    });
+    expect(await discountOnOrder(orderId)).toBe('5500');
+    const prov = await pool.query<{
+      provenance_json: { merchantDiscount: { authorizationPath: string; approvalRequestId: null } };
+    }>(`SELECT provenance_json FROM sales_order_commercial_terms WHERE order_id = $1`, [orderId]);
+    expect(prov.rows[0]!.provenance_json.merchantDiscount).toMatchObject({
+      authorizationPath: 'DIRECT_GRANT',
+      approvalRequestId: null,
+    });
   });
 
   it('idempotent retry returns duplicate without a second consume; key reuse with other semantics conflicts', async () => {

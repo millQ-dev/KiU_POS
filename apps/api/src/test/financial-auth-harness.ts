@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import {
   IdentityService,
+  PERMISSION_ORDERS_LINE_CONFIGURE,
   PERMISSION_POS_OPERATE,
   SESSION_COOKIE_NAME,
 } from '../modules/identity/index.js';
@@ -21,15 +22,15 @@ export async function provisionPosOperator(
   // Default tenant-wide grant so Payments HTTP (outlet often unknown a priori) authorizes
   // under Accepted assertPermission semantics. Outlet-scoped grants still work for POS
   // when outletId is supplied on the request.
+  // ADR-0052 M7: cashier selection also needs orders.line_configure with pos.operate.
+  const outletId = opts?.outletScoped === true ? fx.outletId : null;
   return identity.provisionUserWithPin({
     tenantId: fx.tenantId,
     displayName: opts?.displayName ?? 'SEC0 Cashier',
     pin: opts?.pin ?? TEST_PIN,
     grants: [
-      {
-        permissionKey: PERMISSION_POS_OPERATE,
-        outletId: opts?.outletScoped === true ? fx.outletId : null,
-      },
+      { permissionKey: PERMISSION_POS_OPERATE, outletId },
+      { permissionKey: PERMISSION_ORDERS_LINE_CONFIGURE, outletId },
     ],
   });
 }

@@ -1,10 +1,11 @@
 /**
  * ADR-0051 ApplyOrderMerchantDiscount v1.
  *
- * Narrow command: cashier requests, Manager/Owner approval (ApprovalRequest, ADR-0036) is consumed,
- * and the order-level merchant-funded discount is applied by re-accepting the Order's existing
- * FINAL commercial terms (ADR-0028) in one transaction, before any Settlement exists.
- * Callers never supply commercial terms — only mode + amount/percent + reason + approval evidence.
+ * Narrow command: a Manager/Owner with orders.merchant_discount.approve may apply directly;
+ * a cashier with only pos.operate must supply a consumed ApprovalRequest (ADR-0036).
+ * The discount re-accepts existing FINAL commercial terms (ADR-0028) in one transaction
+ * before any Settlement. Callers never supply commercial terms — only mode + amount/percent
+ * + reason + optional approval evidence.
  */
 import type { PoolClient } from 'pg';
 import { z } from 'zod';
@@ -59,7 +60,8 @@ export type ApplyOrderMerchantDiscountResult = {
   percentBasisPoints: number | null;
   eligibleBasisMinor: string;
   reason: string;
-  approvalRequestId: string;
+  /** Null when a grant holder applied directly (ADR-0051 direct grant). */
+  approvalRequestId: string | null;
   approverUserId: string;
   certainty: 'FINAL';
   netMerchandiseSalesMinor: string;
@@ -79,8 +81,9 @@ type StoredDiscountProvenance = {
   percentBasisPoints: number | null;
   eligibleBasisMinor: string;
   reason: string;
-  approvalRequestId: string;
+  approvalRequestId: string | null;
   approverUserId: string;
+  authorizationPath: 'DIRECT_GRANT' | 'APPROVAL_REQUEST';
 };
 
 /**
@@ -117,7 +120,20 @@ export function buildOrderMerchantDiscountFingerprint(input: {
 function readStoredDiscount(provenance: unknown): StoredDiscountProvenance | null {
   if (!provenance || typeof provenance !== 'object') return null;
   const md = (provenance as Record<string, unknown>).merchantDiscount;
-  return md && typeof md === 'object' ? (md as StoredDiscountProvenance) : null;
+  if (!md || typeof md !== 'object') return null;
+  const raw = md as Record<string, unknown>;
+  const approvalRequestId =
+    typeof raw.approvalRequestId === 'string' ? raw.approvalRequestId : null;
+  return {
+    ...(raw as Omit<StoredDiscountProvenance, 'approvalRequestId' | 'authorizationPath'>),
+    approvalRequestId,
+    authorizationPath:
+      raw.authorizationPath === 'DIRECT_GRANT' || raw.authorizationPath === 'APPROVAL_REQUEST'
+        ? raw.authorizationPath
+        : approvalRequestId
+          ? 'APPROVAL_REQUEST'
+          : 'DIRECT_GRANT',
+  };
 }
 
 function eligibleBasisMinor(state: BuiltCommercialState): string {
@@ -187,13 +203,6 @@ export class ApplyOrderMerchantDiscountService {
     const cmd = applyOrderMerchantDiscountSchema.parse(raw);
     const request = toRequest(cmd);
     const reason = normalizeDiscountReason(cmd.reason);
-    if (!cmd.approvalRequestId) {
-      throw new DiscountDomainError(
-        'APPROVAL_REQUIRED',
-        'Manager/Owner approval is required to apply a merchant discount',
-      );
-    }
-    const approvalRequestId = cmd.approvalRequestId;
 
     return this.orders.withOpenOrderCommercialLock(cmd.orderId, async (client, order) => {
       if (order.tenantId !== principal.tenantId) {
@@ -255,13 +264,38 @@ export class ApplyOrderMerchantDiscountService {
       }
 
       await this.assertRequesterMayOperate(client, principal, order.outletId, cmd.terminalId);
-      const approverUserId = await this.consumeApproval(client, {
-        principal,
-        approvalRequestId,
-        fingerprint,
-        outletId: order.outletId,
-        terminalId: cmd.terminalId,
-      });
+
+      let approvalRequestId: string | null = cmd.approvalRequestId ?? null;
+      let approverUserId: string;
+      let authorizationPath: 'DIRECT_GRANT' | 'APPROVAL_REQUEST';
+      if (approvalRequestId == null) {
+        // ADR-0051: Manager/Owner with approve grant applies on that grant (no universal 2-person rule).
+        const mayDirect = await this.identity.hasPermission(
+          client,
+          principal.tenantId,
+          principal.userId,
+          PERMISSION_ORDERS_MERCHANT_DISCOUNT_APPROVE,
+          order.outletId,
+          cmd.terminalId,
+        );
+        if (!mayDirect) {
+          throw new DiscountDomainError(
+            'APPROVAL_REQUIRED',
+            'Manager/Owner approval is required to apply a merchant discount',
+          );
+        }
+        approverUserId = principal.userId;
+        authorizationPath = 'DIRECT_GRANT';
+      } else {
+        approverUserId = await this.consumeApproval(client, {
+          principal,
+          approvalRequestId,
+          fingerprint,
+          outletId: order.outletId,
+          terminalId: cmd.terminalId,
+        });
+        authorizationPath = 'APPROVAL_REQUEST';
+      }
 
       const stored: StoredDiscountProvenance = {
         requestDigest,
@@ -272,6 +306,7 @@ export class ApplyOrderMerchantDiscountService {
         reason: resolved.reason,
         approvalRequestId,
         approverUserId,
+        authorizationPath,
       };
       const next = this.buildDiscountedState(cmd, state, resolved, stored, principal.userId);
       await persistOpenCommercialTerms(client, {

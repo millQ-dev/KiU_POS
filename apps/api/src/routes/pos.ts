@@ -146,10 +146,16 @@ async function enrichOrderLines(pool: pg.Pool, order: Awaited<ReturnType<OrdersS
     [lineIds],
   );
   const cfgByLine = new Map(cfgs.rows.map((r) => [r.order_line_id, r]));
+  const { parseKitchenInstructionsSnapshot } = await import(
+    '../modules/modifiers/kitchen-instructions.js'
+  );
   return {
     ...order,
     lines: order.lines.map((l) => {
       const cfg = cfgByLine.get(l.orderLineId);
+      const kitchen = cfg
+        ? parseKitchenInstructionsSnapshot(cfg.kitchen_instructions_json)
+        : null;
       return {
         ...l,
         catalogItemName: byId.get(l.catalogItemId) ?? 'Unknown item',
@@ -157,7 +163,7 @@ async function enrichOrderLines(pool: pg.Pool, order: Awaited<ReturnType<OrdersS
           ? {
               orderLineConfigurationId: cfg.order_line_configuration_id,
               additivePriceAdjustmentMinor: cfg.additive_price_adjustment_minor,
-              kitchenInstructions: cfg.kitchen_instructions_json,
+              kitchenInstructions: kitchen,
               configurationFingerprint: cfg.configuration_fingerprint,
             }
           : null,
@@ -430,7 +436,20 @@ export async function registerPosRoutes(
     '/api/v1/orders/:orderId/lines/:lineId/configure-modifiers',
     async (req, reply) => {
       try {
-        await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
+        const { principal, outletId } = await requireOrderPrincipal(
+          req,
+          finAuth,
+          pool,
+          req.params.orderId,
+        );
+        // ADR-0052 M7: orders.line_configure with pos.operate (already asserted above).
+        const { PERMISSION_ORDERS_LINE_CONFIGURE } = await import('../modules/identity/index.js');
+        await identity.assertPermission(
+          principal,
+          PERMISSION_ORDERS_LINE_CONFIGURE,
+          outletId,
+          null,
+        );
         const body = (req.body ?? {}) as {
           selections?: Array<{ modifierGroupId?: string; modifierOptionId?: string }>;
           guestNote?: string | null;
