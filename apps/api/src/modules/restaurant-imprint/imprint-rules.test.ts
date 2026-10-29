@@ -41,6 +41,33 @@ describe('imprint persistence rules', () => {
     expect(left).toBe(right);
   });
 
+  it('keeps one hash when cursor names would tie if a separator were ignored', () => {
+    const forward = imprintRebuildInputHash({
+      resolverVersion: 'imprint-snapshot-1',
+      cursors: [
+        { sourceModule: 'ab', cursorName: 'c', watermark: '1' },
+        { sourceModule: 'a', cursorName: 'bc', watermark: '2' },
+      ],
+      fields: [],
+    });
+    const backward = imprintRebuildInputHash({
+      resolverVersion: 'imprint-snapshot-1',
+      cursors: [
+        { sourceModule: 'a', cursorName: 'bc', watermark: '2' },
+        { sourceModule: 'ab', cursorName: 'c', watermark: '1' },
+      ],
+      fields: [],
+    });
+    expect(forward).toBe(backward);
+    expect(forward).not.toBe(
+      imprintRebuildInputHash({
+        resolverVersion: 'imprint-snapshot-1',
+        cursors: [{ sourceModule: 'ab', cursorName: 'c', watermark: '1' }],
+        fields: [],
+      }),
+    );
+  });
+
   it('rejects a value that could carry raw text or control characters', () => {
     expect(() => assertMinimizedText('ok-id', 'canonical value', 256)).not.toThrow();
     expect(() => assertMinimizedText('line\nbreak', 'canonical value', 256)).toThrow(ImprintPersistenceError);

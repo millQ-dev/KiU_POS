@@ -294,10 +294,73 @@ CREATE TABLE IF NOT EXISTS imprint_snapshot_head (
   PRIMARY KEY (tenant_id, outlet_id)
 );
 
+CREATE OR REPLACE FUNCTION imprint_head_matches_revision()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  rev_tenant UUID;
+  rev_outlet UUID;
+BEGIN
+  SELECT tenant_id, outlet_id INTO rev_tenant, rev_outlet
+  FROM imprint_projection_revision
+  WHERE revision_id = NEW.revision_id;
+  IF rev_tenant IS DISTINCT FROM NEW.tenant_id OR rev_outlet IS DISTINCT FROM NEW.outlet_id THEN
+    RAISE EXCEPTION 'IMPRINT_HEAD_REVISION_SCOPE'
+      USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION imprint_snapshot_field_scope()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  rev_tenant UUID;
+  rev_outlet UUID;
+  claim_tenant UUID;
+  claim_outlet UUID;
+  claim_path TEXT;
+BEGIN
+  SELECT tenant_id, outlet_id INTO rev_tenant, rev_outlet
+  FROM imprint_projection_revision
+  WHERE revision_id = NEW.revision_id;
+  IF rev_tenant IS NULL THEN
+    RAISE EXCEPTION 'IMPRINT_FIELD_SCOPE'
+      USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
+  IF NEW.claim_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+  SELECT tenant_id, outlet_id, fact_path INTO claim_tenant, claim_outlet, claim_path
+  FROM imprint_claim
+  WHERE claim_id = NEW.claim_id;
+  IF claim_tenant IS DISTINCT FROM rev_tenant
+    OR claim_outlet IS DISTINCT FROM rev_outlet
+    OR claim_path IS DISTINCT FROM NEW.fact_path THEN
+    RAISE EXCEPTION 'IMPRINT_FIELD_SCOPE'
+      USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_imprint_snapshot_field_scope ON imprint_snapshot_field;
+CREATE TRIGGER trg_imprint_snapshot_field_scope
+  BEFORE INSERT ON imprint_snapshot_field
+  FOR EACH ROW EXECUTE FUNCTION imprint_snapshot_field_scope();
+
 DROP TRIGGER IF EXISTS trg_imprint_snapshot_head_tenant ON imprint_snapshot_head;
 CREATE TRIGGER trg_imprint_snapshot_head_tenant
   BEFORE INSERT OR UPDATE ON imprint_snapshot_head
   FOR EACH ROW EXECUTE FUNCTION imprint_require_outlet_tenant();
+
+DROP TRIGGER IF EXISTS trg_imprint_snapshot_head_revision ON imprint_snapshot_head;
+CREATE TRIGGER trg_imprint_snapshot_head_revision
+  BEFORE INSERT OR UPDATE ON imprint_snapshot_head
+  FOR EACH ROW EXECUTE FUNCTION imprint_head_matches_revision();
 
 CREATE TABLE IF NOT EXISTS imprint_projection_error (
   error_id UUID PRIMARY KEY,

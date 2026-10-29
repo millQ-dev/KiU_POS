@@ -73,15 +73,25 @@ export function imprintPayloadFingerprint(
     .digest('hex');
 }
 
+function compareCodeUnits(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+function compareCursorIdentity(left: RebuildCursor, right: RebuildCursor): number {
+  const byModule = compareCodeUnits(left.sourceModule, right.sourceModule);
+  if (byModule !== 0) return byModule;
+  return compareCodeUnits(left.cursorName, right.cursorName);
+}
+
 export function imprintRebuildInputHash(input: {
   resolverVersion: string;
   cursors: readonly RebuildCursor[];
   fields: readonly RebuildField[];
 }): string {
-  const cursors = [...input.cursors].sort((a, b) =>
-    `${a.sourceModule}\0${a.cursorName}`.localeCompare(`${b.sourceModule}\0${b.cursorName}`),
-  );
-  const fields = [...input.fields].sort((a, b) => a.factPath.localeCompare(b.factPath));
+  const cursors = [...input.cursors].sort(compareCursorIdentity);
+  const fields = [...input.fields].sort((a, b) => compareCodeUnits(a.factPath, b.factPath));
   const body = [
     `resolver=${input.resolverVersion}`,
     ...cursors.map((cursor) => `cursor=${cursor.sourceModule}|${cursor.cursorName}|${cursor.watermark}`),

@@ -249,6 +249,59 @@ describeImprint('restaurant imprint persistence (disposable PG)', () => {
     ]);
   });
 
+  it('advances the cursor only together with the claims it commits', async () => {
+    const cursorName = `ok${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    const entityId = `cursor-${randomUUID()}`;
+    const committed = await store.commitCheckpoint({
+      tenantId,
+      outletId,
+      sourceModule: 'organization',
+      cursorName,
+      watermark: 'wm-ok',
+      assertions: [assertion({ tenantId, outletId, sourceEntityId: entityId })],
+    });
+    expect(committed.outcomes[0]?.outcome).toBe('INSERTED');
+    expect(await store.readCursor(tenantId, outletId, 'organization', cursorName)).toBe('wm-ok');
+  });
+
+  it('does not return a claim when the tenant does not own it', async () => {
+    const inserted = await store.appendAssertion(
+      assertion({ tenantId, outletId, sourceEntityId: `hidden-${randomUUID()}` }),
+    );
+    expect(await store.readClaim(otherTenantId, otherOutletId, inserted.claimId)).toBeNull();
+  });
+
+  it('refuses a snapshot head that points at another outlet revision', async () => {
+    const inserted = await store.appendAssertion(
+      assertion({
+        tenantId,
+        outletId,
+        sourceEntityId: `head-${randomUUID()}`,
+        factPath: 'organization.outlet.legal_entity_ref',
+        canonicalValue: 'le-a',
+      }),
+    );
+    const published = await store.publishRevision({
+      tenantId,
+      outletId,
+      resolverVersion: 'imprint-snapshot-1',
+      fields: [
+        {
+          factPath: 'organization.outlet.legal_entity_ref',
+          fieldState: 'KNOWN',
+          claimId: inserted.claimId,
+        },
+      ],
+    });
+    await expect(
+      pool.query(
+        `INSERT INTO imprint_snapshot_head (tenant_id, outlet_id, revision_id, freshness)
+         VALUES ($1, $2, $3, 'FRESH')`,
+        [otherTenantId, otherOutletId, published.revisionId],
+      ),
+    ).rejects.toThrow(/IMPRINT_HEAD_REVISION_SCOPE/);
+  });
+
   it('lets one of two concurrent payloads win and quarantines the other', async () => {
     const entityId = `race-${randomUUID()}`;
     const [left, right] = await Promise.all([
