@@ -244,6 +244,39 @@ describe('sale consumption resolver', () => {
     ).toThrow(/not on the base recipe/);
   });
 
+  it('fails closed when two deltas target the same component, in either order', () => {
+    const oat: GraphCatalogItem = { catalogItemId: 'oat', baseUnit: 'L', dimension: 'VOLUME' };
+    const recipe: GraphRecipeVersion = {
+      recipeVersionId: 'rv1',
+      recipeSpecificationId: 'rs1',
+      status: 'PUBLISHED',
+      batchSizeQuantity: '1',
+      batchSizeUnit: 'ea',
+      batchSizeDimension: 'COUNT',
+      components: [
+        {
+          lineNumber: 1,
+          componentKind: 'CATALOG_ITEM',
+          catalogItemId: 'milk',
+          nestedPreparationVersionId: null,
+          quantity: '200',
+          unit: 'ml',
+          dimension: 'VOLUME',
+        },
+      ],
+    };
+    const sold = { catalogItemId: 'dish', quantity: '1', unit: 'ea', dimension: 'COUNT' as const };
+    const graph = lookup({ catalogs: [milk, oat, dish], recipeByItem: { dish: recipe } });
+    const remove = { kind: 'REMOVE_COMPONENT' as const, targetCatalogItemId: 'milk' };
+    const replace = {
+      kind: 'REPLACE_COMPONENT' as const,
+      targetCatalogItemId: 'milk',
+      replacementCatalogItemId: 'oat',
+    };
+    expect(() => resolveSaleLineConsumption(sold, graph, [remove, replace])).toThrow(/more than once/);
+    expect(() => resolveSaleLineConsumption(sold, graph, [replace, remove])).toThrow(/more than once/);
+  });
+
   it('rejects Effective Recipe deltas on a line with no recipe', () => {
     expect(() =>
       resolveSaleLineConsumption(

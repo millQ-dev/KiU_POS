@@ -400,6 +400,7 @@ function recipeWithFrozenDeltas(
     (c) => c.componentKind === 'CATALOG_ITEM' && c.catalogItemId,
   );
   const topLevel = new Set(catalog.map((c) => c.catalogItemId));
+  const usedTargets = new Set<string>();
   for (const delta of deltas) {
     if (delta.kind === 'ADD_COMPONENT') continue;
     const target = delta.targetCatalogItemId;
@@ -415,6 +416,13 @@ function recipeWithFrozenDeltas(
         `${delta.kind === 'REMOVE_COMPONENT' ? 'REMOVE' : 'REPLACE'} target ${target} is not on the base recipe`,
       );
     }
+    if (usedTargets.has(target)) {
+      throw new DomainError(
+        'MODIFIER_DELTA_CONFLICT',
+        `Effective Recipe delta targets ${target} more than once`,
+      );
+    }
+    usedTargets.add(target);
   }
   const adjusted = applyEffectiveRecipeDeltas(
     catalog.map((c) => ({
