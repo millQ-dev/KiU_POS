@@ -85,6 +85,8 @@ function assertValidatedRoundingProvenance(input: {
   quantity: string;
   resolvedUnitPriceMinor: string | null;
   grossMerchandiseMinor: string;
+  /** ADR-0049 additive VND applied after ADR-0030 base round (once per line, v1). */
+  additivePriceAdjustmentMinor?: string;
   exactUnroundedMinorBasis?: string;
   roundingDelta?: string;
   roundingPolicyId?: string;
@@ -168,7 +170,17 @@ function assertValidatedRoundingProvenance(input: {
     mapMoney(e);
   }
 
-  if (expected.roundedGrossMoney.amountMinor !== input.grossMerchandiseMinor) {
+  const additiveRaw = input.additivePriceAdjustmentMinor ?? '0';
+  if (!/^-?\d+$/.test(additiveRaw)) {
+    throw new DomainValidationError(
+      'COMMERCIAL_ROUNDING_POLICY_INVALID',
+      'additivePriceAdjustmentMinor must be an integer minor-unit string',
+    );
+  }
+  const expectedGrossWithAdditive = (
+    BigInt(expected.roundedGrossMoney.amountMinor) + BigInt(additiveRaw)
+  ).toString();
+  if (expectedGrossWithAdditive !== input.grossMerchandiseMinor) {
     throw new DomainValidationError(
       'COMMERCIAL_ROUNDING_POLICY_INVALID',
       'grossMerchandiseMinor does not match RoundingPolicy kernel result',
@@ -279,12 +291,21 @@ export function buildCommercialStateFromCommand(
           `lineMerchantFundedDiscountMinor exceeds grossMerchandiseMinor for line ${ol.line_number}`,
         );
       }
+      const provenance =
+        lt.provenance && typeof lt.provenance === 'object'
+          ? (lt.provenance as Record<string, unknown>)
+          : {};
+      const additiveFromProvenance =
+        typeof provenance.additivePriceAdjustmentMinor === 'string'
+          ? provenance.additivePriceAdjustmentMinor
+          : '0';
       const rounding = assertValidatedRoundingProvenance({
         currencyCode,
         minorUnitExponent: cmd.minorUnitExponent,
         quantity: ol.quantity,
         resolvedUnitPriceMinor: lt.resolvedUnitPriceMinor ?? null,
         grossMerchandiseMinor: lt.grossMerchandiseMinor,
+        additivePriceAdjustmentMinor: additiveFromProvenance,
         ...(lt.exactUnroundedMinorBasis != null
           ? { exactUnroundedMinorBasis: lt.exactUnroundedMinorBasis }
           : {}),

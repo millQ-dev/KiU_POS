@@ -277,6 +277,12 @@ export class OrdersService {
          WHERE order_line_id = $5`,
         [catalogItemId, qty.value, qty.unit, qty.dimension, cmd.orderLineId],
       );
+      // Catalog change invalidates modifier configuration (ADR-0049 snapshot is item-bound).
+      if (catalogItemId !== line.catalog_item_id) {
+        await client.query(`DELETE FROM order_line_configuration WHERE order_line_id = $1`, [
+          cmd.orderLineId,
+        ]);
+      }
       await this.clearOpenCommercialTerms(client, cmd.orderId);
       await client.query('COMMIT');
       return this.getOrder(cmd.orderId);

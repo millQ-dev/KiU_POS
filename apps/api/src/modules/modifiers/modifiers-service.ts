@@ -139,6 +139,19 @@ export class ModifiersService {
       if (order.rows[0].status !== 'OPEN') {
         throw new ModifierDomainError('ORDER_NOT_OPEN', 'Modifiers only on OPEN orders');
       }
+      // ADR-0032: live Settlement freezes commercial edits (same as other line mutations).
+      const liveSettlement = await client.query(
+        `SELECT 1 FROM settlement_group
+         WHERE order_id = $1 AND state IN ('COLLECTING', 'SATISFIED')
+         LIMIT 1`,
+        [input.orderId],
+      );
+      if ((liveSettlement.rowCount ?? 0) > 0) {
+        throw new ModifierDomainError(
+          'SETTLEMENT_EDIT_LOCKED',
+          'Order commercial content cannot mutate while a live Settlement exists',
+        );
+      }
 
       const line = await client.query<{
         order_line_id: string;
@@ -331,6 +344,14 @@ export class ModifiersService {
           [randomUUID(), configId, s.groupId, s.optionId],
         );
       }
+
+      // Line economics changed — invalidate accepted commercial terms (must re-accept).
+      await client.query(`DELETE FROM sales_order_commercial_line_terms WHERE order_id = $1`, [
+        input.orderId,
+      ]);
+      await client.query(`DELETE FROM sales_order_commercial_terms WHERE order_id = $1`, [
+        input.orderId,
+      ]);
 
       await client.query('COMMIT');
       return {

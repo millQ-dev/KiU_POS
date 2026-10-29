@@ -186,5 +186,36 @@ describeHttp('NEXT-04 modifier HTTP (disposable PG)', () => {
       'GUEST_NOTE_NON_AUTHORITATIVE:extra hot',
     );
     expect(cfgBody.order.lines[0]?.modifierConfiguration?.additivePriceAdjustmentMinor).toBe('5000');
+
+    // ADR-0030 + ADR-0049: base rounded gross + additive must validate (once per line).
+    const { setOrderCommercialTermsWithRounding } = await import(
+      '../test/commercial-terms.js'
+    );
+    const accepted = await setOrderCommercialTermsWithRounding(orders, {
+      orderId,
+      idempotencyKey: `mod-accept-${randomUUID()}`,
+      currencyCode: 'VND',
+      minorUnitExponent: 0,
+      certainty: 'FINAL',
+      orderMerchantFundedDiscountMinor: '0',
+      commercialResolution: 'BASE_LIST_LINE_GROSS + modifier additive',
+      lineTerms: [
+        {
+          orderLineId: lineId,
+          resolvedUnitPriceMinor: '20000',
+          grossMerchandiseMinor: '25000', // 20000 base + 5000 oat
+          lineMerchantFundedDiscountMinor: '0',
+          eligibleForOrderDiscount: true,
+          thirdPartyMerchandiseFundingMinor: '0',
+          certainty: 'FINAL',
+          provenance: { additivePriceAdjustmentMinor: '5000' },
+        },
+      ],
+    });
+    expect(accepted.merchantFundedDiscountMinor).toBe('0');
+    const snapLine = (
+      accepted.lines as Array<{ orderLineId: string; grossMerchandiseMinor: string }>
+    ).find((l) => l.orderLineId === lineId);
+    expect(snapLine?.grossMerchandiseMinor).toBe('25000');
   });
 });

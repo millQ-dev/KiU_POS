@@ -186,17 +186,28 @@ export async function setOrderCommercialTermsWithRounding(
         calculationContext: policy.calculationContext,
       };
     }
+    const provenanceIn =
+      typeof lt.provenance === 'object' && lt.provenance
+        ? (lt.provenance as Record<string, unknown>)
+        : {};
+    const additiveRaw =
+      typeof provenanceIn.additivePriceAdjustmentMinor === 'string'
+        ? provenanceIn.additivePriceAdjustmentMinor
+        : '0';
+    const additive = BigInt(additiveRaw);
+    const baseGrossTarget = (BigInt(lt.grossMerchandiseMinor) - additive).toString();
     const unit =
       (lt.resolvedUnitPriceMinor as string | undefined) ??
-      unitPriceForTargetGross(lt.grossMerchandiseMinor, live.quantity);
+      unitPriceForTargetGross(baseGrossTarget, live.quantity);
     const rounded = calculateRoundedLineGross({
       unitMoney: createMoney(unit, currencyCode, minorUnitExponent),
       quantity: live.quantity,
       roundingPolicy: policy,
     });
-    if (rounded.roundedGrossMoney.amountMinor !== lt.grossMerchandiseMinor) {
+    const expectedGross = (BigInt(rounded.roundedGrossMoney.amountMinor) + additive).toString();
+    if (expectedGross !== lt.grossMerchandiseMinor) {
       throw new Error(
-        `setOrderCommercialTermsWithRounding: kernel ${rounded.roundedGrossMoney.amountMinor} != ${lt.grossMerchandiseMinor}`,
+        `setOrderCommercialTermsWithRounding: kernel+additive ${expectedGross} != ${lt.grossMerchandiseMinor}`,
       );
     }
     return {
@@ -210,9 +221,10 @@ export async function setOrderCommercialTermsWithRounding(
       quantumMinor: policy.quantumMinor,
       calculationContext: policy.calculationContext,
       provenance: {
-        ...(typeof lt.provenance === 'object' && lt.provenance ? lt.provenance : {}),
+        ...provenanceIn,
         source: 'TEST_HELPER_C1_1',
         commercialGrossPolicy: 'BASE_LIST_LINE_GROSS_ROUNDED',
+        additivePriceAdjustmentMinor: additiveRaw,
       },
     };
   });

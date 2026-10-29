@@ -59,7 +59,7 @@ function mapError(err: unknown): { status: number; body: Record<string, unknown>
     if (err.code === 'ORDER_NOT_FOUND' || err.code === 'LINE_NOT_FOUND') {
       return { status: 404, body: { error: err.code, message: err.message } };
     }
-    if (err.code === 'CONFIGURATION_FROZEN') {
+    if (err.code === 'CONFIGURATION_FROZEN' || err.code === 'SETTLEMENT_EDIT_LOCKED') {
       return { status: 409, body: { error: err.code, message: err.message } };
     }
     return { status: 400, body: { error: err.code, message: err.message } };
