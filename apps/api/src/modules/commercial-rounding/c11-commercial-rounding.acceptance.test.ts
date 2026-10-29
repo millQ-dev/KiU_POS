@@ -13,6 +13,7 @@ import { MenuService } from '../menu/index.js';
 import { DomainValidationError } from '../orders/errors.js';
 import { OrdersService } from '../orders/orders-service.js';
 import { GoodsReceiptService } from '../procurement/goods-receipt-service.js';
+import { ensureAllergenReadyForCommercialAccept } from '../../test/allergen-commercial-ready.js';
 import { BaseCommercialAcceptanceService } from './base-commercial-acceptance.js';
 import { CommercialRoundingPolicyService } from './rounding-policy-service.js';
 
@@ -40,6 +41,10 @@ async function truncateBusiness() {
       goods_issue_line, goods_issue,
       consumption_plan_physical_leaf, consumption_plan_resolved_version,
       consumption_plan_line, consumption_plan_snapshot,
+      order_line_allergen_acknowledgement, order_line_allergen_resolution,
+      order_allergen_context_event, order_allergen_context,
+      catalog_item_allergen_declaration, catalog_item_allergen_profile,
+      allergen_kitchen_handling_policy,
       sales_order_line, sales_order, catalog_item_recipe_profile,
       inventory_balance, inventory_movement,
       goods_receipt_line, goods_receipt,
@@ -133,6 +138,11 @@ beforeAll(async () => {
   menu = new MenuService(pool);
   orders = new OrdersService(pool, { saleWriteOffPort: new GoodsIssueService(pool) });
   acceptance = new BaseCommercialAcceptanceService(pool, orders);
+  const rawAccept = acceptance.calculateAndAcceptBaseCommercialTerms.bind(acceptance);
+  acceptance.calculateAndAcceptBaseCommercialTerms = async (input) => {
+    await ensureAllergenReadyForCommercialAccept(pool, input.orderId);
+    return rawAccept(input);
+  };
   receipts = new GoodsReceiptService(pool);
 });
 

@@ -12,6 +12,7 @@ import type {
   ResolvedPosSurface,
   SettlementProjection,
 } from '../api/types.js';
+import { AllergenPanel } from './AllergenPanel.js';
 import { ModifierConfigurationModal } from './ModifierConfigurationModal.js';
 import { OrderBasketPanel } from './OrderBasket.js';
 import { PosPageNavigation } from './PosPageNavigation.js';
@@ -113,6 +114,7 @@ export function CashierShell({
   } | null>(null);
   const [settlement, setSettlement] = useState<SettlementProjection | null>(null);
   const [settlementBusy, setSettlementBusy] = useState(false);
+  const [modifierSaves, setModifierSaves] = useState(0);
   const inFlightRef = useRef(false);
 
   const liveSettlement =
@@ -597,6 +599,15 @@ export function CashierShell({
         </div>
       )}
 
+      {order && (
+        <AllergenPanel
+          orderId={order.orderId}
+          lines={order.lines}
+          editable={!!editable}
+          refreshKey={`${modifierSaves}:${order.lines.map((l) => `${l.orderLineId}:${l.quantity}`).join('|')}`}
+        />
+      )}
+
       {surfaceLoading && !surface ? (
         <div className="pos-shell__loading" role="status">
           Loading POS surface…
@@ -689,6 +700,7 @@ export function CashierShell({
                 applyOrder(result.order, modifierPrompt.line.orderLineId);
                 await reloadCommercial(result.order.orderId);
                 setModifierPrompt(null);
+                setModifierSaves((n) => n + 1);
                 setFeedback(
                   `Modifiers saved (+${result.configuration.additivePriceAdjustmentMinor} VND)`,
                 );

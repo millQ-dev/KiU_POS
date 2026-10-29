@@ -19,16 +19,32 @@ NEXT03 prep docs stamped PO ACCEPTED (historical).
 | --- | --- | --- |
 | A | ADR docs + migration `037` + domain deltas + `ModifiersService.configureOrderLine` | **Merged** Origin #127 @ `65c6754` |
 | B | Counter POS modifier UI + HTTP + wire `assertLineConfigurationComplete` on accept | **Merged** Origin #129 @ `42957b6` |
-| C | Allergy order-start + resolution + kitchen (legal override gated) | Follow-on |
-| D | ApplyOrderMerchantDiscount v1 (API + domain policy + migration `038` + acceptance); cashier UX deferred | Level B — Origin PR open (`feature/next04-discount-d1-d6`) |
+| C | Allergy order-start + resolution + kitchen (legal override gated) | Origin #131 — `feature/next04-allergy-m6`, migration `039` (see PR C notes) |
+| D | ApplyOrderMerchantDiscount v1 (API + domain + migration `038`; UI deferred) | **Merged** Origin #130 @ `dc7a6d1` |
 
 **PR A note:** Effective Recipe deltas snapshotted on `order_line_configuration.effective_recipe_deltas_json` (ADR-0049 #9).
 
 **PR B note:** HTTP `GET …/modifier-groups` + `POST …/configure-modifiers`; commercial accept calls `assertLineConfigurationComplete`; additive VND folded into line gross; cashier `ModifierConfigurationModal` after slot select.
 
+## PR C notes (ADR-0050 order-local allergens)
+
+**Implemented:** migration `039` (`038` is reserved for PR D discount); `apps/api/src/modules/allergens/` (pure deterministic resolver, composition loader, `AllergensService`); HTTP in `routes/allergens.ts` (`PUT/GET /orders/:id/allergen-context`, `POST /orders/:id/allergen-resolution`, `POST /orders/:id/allergen-offers`, `POST /orders/:id/lines/:lineId/allergen-acknowledgements`, `GET /orders/:id/kitchen-allergen-ticket`); cashier `AllergenPanel` (order-start prompt + per-line status + guest-informed ack).
+
+| Rule | Behaviour |
+| --- | --- |
+| Capture | `NO_ALLERGIES_CONFIRMED` / `SELECT_ALLERGENS` (codes `^[A-Z][A-Z0-9_]{1,31}$`, tenant taxonomy not hard-coded) / `UNABLE_TO_CLARIFY`; order-scoped, revisioned, append-only event log, no CustomerProfile link |
+| Resolution | Reads Recipe → Preparation → leaf `catalog_item_allergen_*` declarations, applies the line's frozen Effective Recipe deltas (ADR-0049 #9). Missing/INCOMPLETE leaf or unpublished/cyclic recipe ⇒ `UNKNOWN` ⇒ `REQUIRES_CONFIRMATION`; there is no SAFE value |
+| Outcomes | `AVAILABLE` (declared-complete, no hit; not a guarantee), `AVAILABLE_WITH_MODIFICATION` (delta removes allergen **and** explicit kitchen policy permits), `BLOCKED` (CONTAINS survives, or policy forbids), `REQUIRES_CONFIRMATION` (UNKNOWN / MAY_CONTAIN / cross-contact / policy missing / `UNABLE_TO_CLARIFY`) |
+| Kitchen | Structured `kitchenWarnings`, preparation changes, handling codes, required acknowledgements (`CASHIER_GUEST_INFORMED`, `KITCHEN_ACKNOWLEDGED`) bound to the resolution fingerprint. Ticket emits every order line; unresolved lines fail closed as `REQUIRES_CONFIRMATION` / `ALLERGEN_RESOLUTION_MISSING`. |
+| Revalidation | Any context revision or line configuration change makes the snapshot stale; old acknowledgements stop counting |
+
+**Accept-path wiring:** `OrdersService.calculateBaseCommercialTermsLocked` calls `AllergensService.assertReadyWhenCaptured` (mandatory capture + resolved / unblocked / acknowledged lines) after the ADR-0049 modifier gate, then `freezeForOrder` on successful persist. Context revision changes clear open commercial terms and refuse live Settlement. Post-accept allergen edits fail with `ALLERGEN_CONTEXT_FROZEN`.
+
+**Not built (LEGAL GATE, ADR-0050):** any BLOCKED / UNKNOWN safety override catalog, retention/purge policy for order-local allergy data, jurisdiction labeling / medical claims, allergen taxonomy per jurisdiction. Acknowledgements are human-review records, not overrides; BLOCKED lines have no acknowledge path.
+
 ## PR D — ApplyOrderMerchantDiscount v1 (ADR-0051)
 
-**Scope shipped:** API + domain + tests (no UI).
+**Scope shipped:** API + domain + tests (no UI). Merged Origin #130.
 
 | Area | Behaviour |
 | --- | --- |
@@ -48,4 +64,4 @@ GitHub Actions #40645853976 E2E fail documented in `NEXT04_CI_FLAKE_NOTE.md` —
 
 ## Verdict
 
-**POSV1_NO_GO** until A–D land with evidence. **R1.1** still gated.
+**POSV1_NO_GO** until C lands with evidence (A/B/D merged). **R1.1** still gated. No production deploy / persistent-DB migrate without separate PO GO.

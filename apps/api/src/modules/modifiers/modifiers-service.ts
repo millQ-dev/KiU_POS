@@ -352,6 +352,9 @@ export class ModifiersService {
       await client.query(`DELETE FROM sales_order_commercial_terms WHERE order_id = $1`, [
         input.orderId,
       ]);
+      // ADR-0050: lift allergen freeze so reconfigure can re-resolve before next accept.
+      const { AllergensService } = await import('../allergens/index.js');
+      await new AllergensService(this.pool).unfreezeForCommercialInvalidation(client, input.orderId);
 
       await client.query('COMMIT');
       return {

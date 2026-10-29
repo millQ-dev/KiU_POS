@@ -556,6 +556,11 @@ export class OrdersService {
       const { ModifiersService } = await import('../modifiers/index.js');
       await new ModifiersService(this.pool).assertLineConfigurationComplete(client, input.orderId);
 
+      // ADR-0050: allergen capture mandatory; lines must be resolved, unblocked and acknowledged.
+      const { AllergensService } = await import('../allergens/index.js');
+      const allergens = new AllergensService(this.pool);
+      await allergens.assertReadyWhenCaptured(client, input.orderId);
+
       const lockedLines = await this.loadLines(client, input.orderId);
       const policy = await input.policies.resolveForOrder(
         client,
@@ -712,6 +717,7 @@ export class OrdersService {
       const p = prior.rows[0];
       if (p) {
         if (p.idempotency_key === cmd.idempotencyKey && p.semantic_fingerprint === state.semanticFingerprint) {
+          await allergens.freezeForOrder(client, input.orderId);
           await client.query('COMMIT');
           return {
             calculated,
@@ -740,6 +746,8 @@ export class OrdersService {
         deviceId: cmd.deviceId ?? null,
         state,
       });
+      // ADR-0050: freeze order-local allergen snapshot with commercial accept.
+      await allergens.freezeForOrder(client, input.orderId);
       await client.query('COMMIT');
       return {
         calculated,
@@ -1677,6 +1685,9 @@ export class OrdersService {
   private async clearOpenCommercialTerms(client: Client, orderId: string): Promise<void> {
     await client.query(`DELETE FROM sales_order_commercial_line_terms WHERE order_id = $1`, [orderId]);
     await client.query(`DELETE FROM sales_order_commercial_terms WHERE order_id = $1`, [orderId]);
+    // ADR-0050: commercial invalidation lifts allergen freeze so lines can re-resolve before re-accept.
+    const { AllergensService } = await import('../allergens/index.js');
+    await new AllergensService(this.pool).unfreezeForCommercialInvalidation(client, orderId);
   }
 
   private assertOpenMutable(order: OrderRow): void {
