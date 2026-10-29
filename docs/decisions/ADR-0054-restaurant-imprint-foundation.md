@@ -3,20 +3,20 @@
 - **Status:** **Accepted WITH CLARIFICATIONS** — **PO ACCEPT WITH CLARIFICATIONS 2026-10-29** (task `IMPRINT-ADR0054-PO-DECISION`, Origin PR #136). The Product Owner accepted the seven architectural principles in **PO ACCEPT WITH CLARIFICATIONS** below. Reviewed locks **R1–R5** remain in force where they match those principles. This decision does **not** accept a frozen migration number, production deploy, persistent-DB migration, live provider integration, JEV, ModelGateway, or an independent ledger. Earlier wording that treated the whole file as an unqualified ACCEPT, or that reserved migration `040`, is withdrawn.
 - **Date:** 2026-10-29
 - **Autonomy:** **Level C** (new read-side domain architecture). Implementation after PO ACCEPT is **Level B** (schema, contracts, cross-module read integration). **No production deploy, no persistent-database migrate/backfill, no live pilot** without a separate explicit PO GO.
-- **Related:** ADR-0001, ADR-0002, ADR-0006, ADR-0008, ADR-0010, ADR-0012, ADR-0015 (Privacy/Residency/Egress/Security — applicable requirements retained), ADR-0020, ADR-0039, ADR-0040. Supersedes nothing; owns no existing operational domain. Does not alter Proposed ADR-0053 (fiscal sandbox adapter boundary).
-- **Provenance baseline:** Gate 0 read-only audit (2026-10-29) against Origin `main` `42957b698c985d13d646599a429945730eb9ade5`. First draft was registered as ADR-0053 on branch tip `601abd82` against `340e833`. Renumbered to **ADR-0054** after fiscal PR #137 occupied 0053. Re-verified against Origin `main` `7bc9e0016c8127d46a44c3378f5e7cf82c485f04` on 2026-10-29 (see **Freshness**).
+- **Related:** ADR-0001, ADR-0002, ADR-0006, ADR-0008, ADR-0010, ADR-0012, ADR-0015 (Privacy/Residency/Egress/Security — applicable requirements retained), ADR-0020, ADR-0039, ADR-0040. Supersedes nothing; owns no existing operational domain. Does not alter Accepted ADR-0053 (fiscal sandbox adapter boundary).
+- **Provenance baseline:** Gate 0 read-only audit (2026-10-29) against Origin `main` `42957b698c985d13d646599a429945730eb9ade5`. First draft was registered as ADR-0053 on branch tip `601abd82` against `340e833`. Renumbered to **ADR-0054** after fiscal PR #137 occupied 0053. Re-verified against Origin `main` `83a6cf48343eb9cf44625948122201f73af89486` on 2026-10-29 (see **Freshness**). The earlier check at `7bc9e00` is retained as history.
 
 ## Freshness and preflight (verified facts, not assumptions)
 
-Verified directly against Origin `main` `7bc9e0016c8127d46a44c3378f5e7cf82c485f04`:
+Verified directly against Origin `main` `83a6cf48343eb9cf44625948122201f73af89486`:
 
-- Gate 0 SHA `42957b6` is an ancestor of current `main`. Concurrent work since that SHA includes allergens M6 (ADR-0050, PR #131), merchant discount v1 (ADR-0051, PR #130), fiscal G2 docs (#133), fiscal sandbox ADR (#137), and modifier per-unit price (#138). None of that work creates an Imprint module.
+- Gate 0 SHA `42957b6` is an ancestor of current `main`. Concurrent work since that SHA includes allergens M6 (ADR-0050, PR #131), merchant discount v1 (ADR-0051, PR #130), fiscal G2 docs (#133), fiscal sandbox ADR (#137), modifier per-unit price (#138), and the fiscal ADR-0053 accept record (#140). None of that work creates an Imprint module.
 - **No `restaurant-imprint` runtime exists** on `main`. This ADR does not collide with existing code.
 - **Migration head on `main` at this verification is `039_order_allergen_context_m6.sql`.** Open Origin PR **#139** already contains `040_modifier_replace_yield.sql` and owns that number until it merges or drops the file. This ADR does **not** take `040` and does **not** preallocate a migration number. The I-02 number is read from Origin `main` when that slice starts.
-- **ADR-0053 is not free.** It is Proposed `docs/decisions/ADR-0053-fiscal-sandbox-adapter-boundary.md` on `main` (KIU-FISCAL, PR #137). This Imprint document is **ADR-0054**. ADR-0052 remains the Modifier v1 contract and is unrelated.
+- **ADR-0053 is not free.** On this `main` it is Accepted WITH CHANGES: `docs/decisions/ADR-0053-fiscal-sandbox-adapter-boundary.md` (KIU-FISCAL, PR #137, accept record #140). This Imprint document is **ADR-0054** and does not change ADR-0053. ADR-0052 remains the Modifier v1 contract and is unrelated.
 - Live HTTP prefix is **`/api/v1`**; there is **no `/api/office`** router and **no `OfficeSession`** type. Any Imprint read endpoint must follow `/api/v1`.
 - Identity enforcement is server-side via `identity_access_grant` + `assertPermission` (`apps/api/src/modules/identity/`), **no RLS**. This ADR does not add `OfficeSession`, Vault, or Egress.
-- GitHub backup `main` observed at `f9931eb43025897871635d0f33ca644526a069f1` lags Origin `main` `7bc9e00` by modifier price #138. GitHub is backup only; Origin HEAD is authoritative. This agent does not write to GitHub.
+- GitHub is backup only. This record does not claim a GitHub SHA. Origin `main` is authoritative. This agent does not write to GitHub.
 
 ## Context
 
