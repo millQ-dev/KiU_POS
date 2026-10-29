@@ -440,7 +440,7 @@ describeDiscount('ADR-0051 ApplyOrderMerchantDiscount v1 (disposable PG)', () =>
     const request = fixed('2500', '  Guest goodwill  ');
     const approvalRequestId = await approvedRequest(orderId, request);
     const res = await apply(orderId, applyBody(request, approvalRequestId));
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode).toBe(201);
     expect(res.json().reason).toBe('Guest goodwill');
     expect(await discountOnOrder(orderId)).toBe('2500');
     expect(await approvalStatus(approvalRequestId)).toBe('CONSUMED');
