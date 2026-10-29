@@ -356,12 +356,18 @@ export function resolveCatalogOffer(
 
   const chosen = new Map<string, ModificationCandidate>();
   for (const f of contested) {
-    const fix = candidates.find((cand) => {
-      const eff = applyDeltasToComposition(inputs.base, cand.deltas);
-      return aggregateExposure(eff, inputs.profiles, f.allergenCode) !== 'CONTAINS';
-    });
-    if (!fix) return noOptions;
-    chosen.set(fix.modifierOptionId, fix);
+    // Prefer a candidate that clears to NOT_KNOWN_TO_CONTAIN. Do not auto-propose
+    // UNKNOWN / MAY_CONTAIN / CROSS_CONTAMINATION_RISK replacements as requiredOptions.
+    const ranked = candidates
+      .map((cand) => {
+        const eff = applyDeltasToComposition(inputs.base, cand.deltas);
+        const exposure = aggregateExposure(eff, inputs.profiles, f.allergenCode);
+        return { cand, exposure };
+      })
+      .filter((row) => row.exposure !== 'CONTAINS');
+    const preferred = ranked.find((row) => row.exposure === 'NOT_KNOWN_TO_CONTAIN');
+    if (!preferred) return noOptions;
+    chosen.set(preferred.cand.modifierOptionId, preferred.cand);
   }
   const picked = [...chosen.values()];
   const singleGroups = new Set<string>();

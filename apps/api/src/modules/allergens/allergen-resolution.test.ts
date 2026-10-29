@@ -198,11 +198,13 @@ describe('resolveCatalogOffer', () => {
     expect(r.requiredOptions).toEqual([]);
   });
 
-  it('does not accept a replacement that introduces an unknown leaf as SAFE', () => {
+  it('does not auto-propose a replacement that only yields UNKNOWN/MAY_CONTAIN', () => {
     const r = resolveCatalogOffer(inputs, [
       { modifierGroupId: 'g1', modifierOptionId: 'o', selectionMode: 'SINGLE', deltas: delta(MILK, GAP) },
     ]);
-    expect(r.result).toBe('REQUIRES_CONFIRMATION');
+    // Stay on the base BLOCKED offer; do not attach unsafe requiredOptions.
+    expect(r.result).toBe('BLOCKED');
+    expect(r.requiredOptions).toEqual([]);
   });
 
   it('refuses two options from one SINGLE group', () => {

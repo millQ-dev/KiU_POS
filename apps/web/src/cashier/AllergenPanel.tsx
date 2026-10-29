@@ -60,16 +60,23 @@ export function AllergenPanel({ orderId, lines, editable, refreshKey, suggestedC
   const [formError, setFormError] = useState<string | null>(null);
   const [changing, setChanging] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoadError(null);
-    try {
-      setState(await allergenApi.getState(orderId));
-      setLoaded(true);
-    } catch (err) {
-      setState(null);
-      setLoadError(err instanceof Error ? err.message : 'Failed to load allergen context');
-    }
-  }, [orderId]);
+  const load = useCallback(
+    async (forOrderId: string = orderId) => {
+      setLoadError(null);
+      try {
+        const next = await allergenApi.getState(forOrderId);
+        if (forOrderId !== orderId) return;
+        setState(next);
+        setLoaded(true);
+      } catch (err) {
+        if (forOrderId !== orderId) return;
+        setState(null);
+        setLoaded(true);
+        setLoadError(err instanceof Error ? err.message : 'Failed to load allergen context');
+      }
+    },
+    [orderId],
+  );
 
   useEffect(() => {
     setState(null);
@@ -77,8 +84,9 @@ export function AllergenPanel({ orderId, lines, editable, refreshKey, suggestedC
     setChoice(null);
     setCodesInput('');
     setChanging(false);
-    void load();
-  }, [load]);
+    setFormError(null);
+    void load(orderId);
+  }, [load, orderId]);
 
   const hasContext = !!state?.context;
   useEffect(() => {
