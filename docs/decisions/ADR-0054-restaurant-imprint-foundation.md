@@ -1,22 +1,22 @@
-# ADR-0053: Restaurant Imprint foundation (read-side profile, immutable claims, rebuildable snapshot)
+# ADR-0054: Restaurant Imprint foundation (read-side profile, immutable claims, rebuildable snapshot)
 
 - **Status:** **Proposed** (Level C). Product Owner directional **GO 2026-10-29** fixes direction **Imprint B** (typed, extensible, read-only restaurant profile with immutable provenance claims, rebuildable materialized snapshot, incremental verified population) and **JEV autonomy A** (future differentiated autonomy; **no JEV/LLM runtime in Stage 1**). The GO authorizes **registration of this ADR and document-only work**. It does **not** by itself constitute PO ACCEPT of the full text below. Per `PROJECT_CHARTER.md` §9/§12 and `AGENTS.md` §2, a recorded **PO ACCEPT of this ADR text** is required before any dependent structural code (migration, schema, contracts, service). See **Decision proposal for PO ACCEPT** at the end.
 - **Date:** 2026-10-29
 - **Autonomy:** **Level C** (new read-side domain architecture). Implementation after PO ACCEPT is **Level B** (schema, contracts, cross-module read integration). **No production deploy, no persistent-database migrate/backfill, no live pilot** without a separate explicit PO GO.
-- **Related:** ADR-0001, ADR-0002, ADR-0006, ADR-0008, ADR-0010, ADR-0020, ADR-0039, ADR-0040. Supersedes nothing; owns no existing operational domain.
-- **Provenance baseline:** Gate 0 read-only audit (2026-10-29) against Origin `main` `42957b698c985d13d646599a429945730eb9ade5`; re-verified against current Origin `main` `340e833` on 2026-10-29 (see **Freshness**).
+- **Related:** ADR-0001, ADR-0002, ADR-0006, ADR-0008, ADR-0010, ADR-0020, ADR-0039, ADR-0040. Supersedes nothing; owns no existing operational domain. Does not alter Proposed ADR-0053 (fiscal sandbox adapter boundary).
+- **Provenance baseline:** Gate 0 read-only audit (2026-10-29) against Origin `main` `42957b698c985d13d646599a429945730eb9ade5`. First draft was registered as ADR-0053 on branch tip `601abd82` against `340e833`. Renumbered to **ADR-0054** after fiscal PR #137 occupied 0053. Re-verified against Origin `main` `7bc9e0016c8127d46a44c3378f5e7cf82c485f04` on 2026-10-29 (see **Freshness**).
 
 ## Freshness and preflight (verified facts, not assumptions)
 
-Verified directly against Origin `main` `340e833`:
+Verified directly against Origin `main` `7bc9e0016c8127d46a44c3378f5e7cf82c485f04`:
 
-- Gate 0 SHA `42957b6` is an ancestor of current `main`. Commits since Gate 0 are **unrelated concurrent work**: allergens M6 (ADR-0050, PR #131), merchant discount v1 (ADR-0051, PR #130), fiscal G2 docs (#133), next03 contracts (#132). None create an Imprint module.
-- **No `restaurant-imprint` / imprint files exist** anywhere on `main`. This ADR does not collide with existing code.
-- **Migration head is `039_order_allergen_context_m6.sql`.** The next free migration is **`040`** — not the handoff's tentative `038`/`039`, both of which are already taken. The actual number is reserved against Origin at I-02 time, never hard-coded here.
-- **ADR-0053 is free.** ADR-0052 is the Modifier v1 contract and is unrelated to Imprint.
+- Gate 0 SHA `42957b6` is an ancestor of current `main`. Concurrent work since that SHA includes allergens M6 (ADR-0050, PR #131), merchant discount v1 (ADR-0051, PR #130), fiscal G2 docs (#133), fiscal sandbox ADR (#137), and modifier per-unit price (#138). None of that work creates an Imprint module.
+- **No `restaurant-imprint` runtime exists** on `main`. This ADR does not collide with existing code.
+- **Migration head is `039_order_allergen_context_m6.sql`.** The next free migration is **`040`**. `038` and `039` are already taken. The number is reserved against Origin at I-02 time, never hard-coded as a schema change in this ADR.
+- **ADR-0053 is not free.** It is Proposed `docs/decisions/ADR-0053-fiscal-sandbox-adapter-boundary.md` on `main` (KIU-FISCAL, PR #137). This Imprint document is **ADR-0054**. ADR-0052 remains the Modifier v1 contract and is unrelated.
 - Live HTTP prefix is **`/api/v1`**; there is **no `/api/office`** router and **no `OfficeSession`** type. Any Imprint read endpoint must follow `/api/v1`.
-- Identity enforcement is server-side via `identity_access_grant` + `assertPermission` (`apps/api/src/modules/identity/`), **no RLS**. Since Gate 0 only `identity/errors.ts`, `identity/index.ts`, `identity/login-challenge-service.ts` changed; the authorization primitives this ADR depends on are unchanged.
-- GitHub backup observed by PO consultation (`dc7a6d1`, discount #130, migration 038) **lags** current Origin `main` (`340e833`, allergens #131, migration 039). GitHub is backup only; Origin HEAD is authoritative. This agent does not write to GitHub.
+- Identity enforcement is server-side via `identity_access_grant` + `assertPermission` (`apps/api/src/modules/identity/`), **no RLS**. This ADR does not add `OfficeSession`, Vault, or Egress.
+- GitHub backup `main` observed at `f9931eb43025897871635d0f33ca644526a069f1` lags Origin `main` `7bc9e00` by modifier price #138. GitHub is backup only; Origin HEAD is authoritative. This agent does not write to GitHub.
 
 ## Context
 
