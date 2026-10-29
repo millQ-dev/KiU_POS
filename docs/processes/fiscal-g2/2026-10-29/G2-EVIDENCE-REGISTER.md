@@ -2,7 +2,7 @@
 
 **As of 2026-10-29. Status of the gate: OPEN. No production GO.**
 
-**PO correction 2026-10-29:** G2-18 is the production deploy and persistent-database migration GO. It is not a prerequisite for beginning isolated sandbox adapter work. Every row below stays OPEN until an artifact exists. A negotiation, a contract draft, or a local fixture does not move a row. Sandbox binding, a live API call, and egress still need proposed ADR-0053 accepted. See `PO-CORRECTIONS-2026-10-29.md`.
+**PO correction 2026-10-29, updated by ADR-0053 ACCEPT WITH CHANGES the same day:** G2-18 is the production deploy and persistent-database migration GO. It is not a prerequisite for local synthetic adapter work. Every row below stays OPEN until an artifact exists. A negotiation, a contract draft, or a local fixture does not move a row. A real sandbox network call still needs a written API contract, permitted credentials, vendor authorization, and a destination-specific approved egress record. See ADR-0053 and `PO-CORRECTIONS-2026-10-29.md`.
 
 An item is not PASS because it appears in this file, in the owner packet, or in a mock. PASS requires a signed document, a source-system proof, or a test artifact, with version, date, owner, and merchant/LegalEntity scope. No production merchant credentials and no legal opinion were obtained for this register.
 
@@ -39,7 +39,7 @@ Milestone sequence (no calendar commitment):
 
 1. **P0** — vendor and counsel discovery. Exit: signed technical pack, written mode gaps, sample payload, test credentials, merchant #1 legal documents when a live pilot is actually being prepared.
 2. **P1** — map Origin fiscal core; extend only missing typed fields after the Level C forks are accepted. Exit: synthetic transport tests, no mock SATISFIED on a production route.
-3. **P2** — vendor sandbox. This stage does not wait for G2-18. Exit: signed technical evidence. No real merchant PII without an approved egress basis. Binding architecture, API requirements, and egress follow ADR-0053.
+3. **P2** — vendor sandbox network. This stage does not wait for G2-18. It does wait for a written API contract, permitted credentials, vendor authorization, and a destination-specific egress record (ADR-0053 clarification 4). Exit: signed technical evidence. No real merchant PII unless that egress record names it.
 4. **P3** — merchant registration and contracts. Exit: G2-01..G2-17 PASS for that scope.
 5. **P4** — live pilot only after the production GO in `PRODUCTION-STOP.md`, including G2-18.
 6. **P5** — another outlet or LegalEntity needs its own registration, credentials, series, and evidence. A second provider is a cut-over after reconciliation, not failover.
