@@ -1,6 +1,6 @@
 # ADR-0054: Restaurant Imprint foundation (read-side profile, immutable claims, rebuildable snapshot)
 
-- **Status:** **Accepted** — **PO ACCEPT 2026-10-29** (reviewed HEAD `dffd5e2`, Origin PR #136). The Product Owner accepted direction **Imprint B** (immutable provenance claims, rebuildable snapshot, progressive population, strict isolation from Operational Core) and **JEV autonomy A** (**no JEV/LLM runtime in Stage 1**) on the final **seven points** below, incorporating the five locked requirements **R1–R5**. Acceptance of this architecture does **not** authorize production deploy, persistent-DB migrate/backfill, JEV/LLM runtime, HTTP slice I-07, or Operational Core modification; each requires separate authorization. Implementation proceeds as separate **Level B** PRs after this ADR merges, each with its own review + Bugbot + Depot CI.
+- **Status:** **Accepted WITH CLARIFICATIONS** — **PO ACCEPT WITH CLARIFICATIONS 2026-10-29** (task `IMPRINT-ADR0054-PO-DECISION`, Origin PR #136). The Product Owner accepted the seven architectural principles in **PO ACCEPT WITH CLARIFICATIONS** below. Reviewed locks **R1–R5** remain in force where they match those principles. This decision does **not** accept a frozen migration number, production deploy, persistent-DB migration, live provider integration, JEV, ModelGateway, or an independent ledger. Earlier wording that treated the whole file as an unqualified ACCEPT, or that reserved migration `040`, is withdrawn.
 - **Date:** 2026-10-29
 - **Autonomy:** **Level C** (new read-side domain architecture). Implementation after PO ACCEPT is **Level B** (schema, contracts, cross-module read integration). **No production deploy, no persistent-database migrate/backfill, no live pilot** without a separate explicit PO GO.
 - **Related:** ADR-0001, ADR-0002, ADR-0006, ADR-0008, ADR-0010, ADR-0012, ADR-0015 (Privacy/Residency/Egress/Security — applicable requirements retained), ADR-0020, ADR-0039, ADR-0040. Supersedes nothing; owns no existing operational domain. Does not alter Proposed ADR-0053 (fiscal sandbox adapter boundary).
@@ -12,7 +12,7 @@ Verified directly against Origin `main` `7bc9e0016c8127d46a44c3378f5e7cf82c485f0
 
 - Gate 0 SHA `42957b6` is an ancestor of current `main`. Concurrent work since that SHA includes allergens M6 (ADR-0050, PR #131), merchant discount v1 (ADR-0051, PR #130), fiscal G2 docs (#133), fiscal sandbox ADR (#137), and modifier per-unit price (#138). None of that work creates an Imprint module.
 - **No `restaurant-imprint` runtime exists** on `main`. This ADR does not collide with existing code.
-- **Migration head is `039_order_allergen_context_m6.sql`.** The next free migration is **`040`**. `038` and `039` are already taken. The number is reserved against Origin at I-02 time, never hard-coded as a schema change in this ADR.
+- **Migration head on `main` at this verification is `039_order_allergen_context_m6.sql`.** Open Origin PR **#139** already contains `040_modifier_replace_yield.sql` and owns that number until it merges or drops the file. This ADR does **not** take `040` and does **not** preallocate a migration number. The I-02 number is read from Origin `main` when that slice starts.
 - **ADR-0053 is not free.** It is Proposed `docs/decisions/ADR-0053-fiscal-sandbox-adapter-boundary.md` on `main` (KIU-FISCAL, PR #137). This Imprint document is **ADR-0054**. ADR-0052 remains the Modifier v1 contract and is unrelated.
 - Live HTTP prefix is **`/api/v1`**; there is **no `/api/office`** router and **no `OfficeSession`** type. Any Imprint read endpoint must follow `/api/v1`.
 - Identity enforcement is server-side via `identity_access_grant` + `assertPermission` (`apps/api/src/modules/identity/`), **no RLS**. This ADR does not add `OfficeSession`, Vault, or Egress.
@@ -44,7 +44,7 @@ Introduce a **separate bounded read-side module `restaurant-imprint`** inside th
 
 ### 3. Scope key
 
-Scope key is **`tenantId` + `outletId`** (outlet-scoped imprint). Tenant and outlet are **server-derived** from the authenticated session, never request-supplied. The server-side `tenantId` + `outletId` authorization check is **mandatory and default-deny at every boundary — ingest, source adapters, snapshot rebuild, and read API** — not only at the HTTP layer (see R2). Network/brand facts are referenced by source and resolved *for* an outlet; **`outlet ≠ legal entity`**, and `brand ≠ legal entity`. A `warehouse` with `NULL outlet_id` **must not** be silently associated to an outlet (Gate 0: `warehouse.outlet_id` is nullable).
+Scope key is **`tenantId` + `outletId`** (outlet-scoped imprint). **`tenantId` authority is server-derived** from the authenticated principal and is never taken from the caller. An `outletId` on a route or request is only a **selector**: the server checks it against that principal's effective grants. A caller-provided outlet id **never grants access by itself**. The check is **mandatory and default-deny at ingest, source adapters, snapshot rebuild, and read API** (R2). Network/brand facts are referenced by source and resolved *for* an outlet; **`outlet ≠ legal entity`**, and `brand ≠ legal entity`. A `warehouse` with `NULL outlet_id` **must not** be silently associated to an outlet (Gate 0: `warehouse.outlet_id` is nullable).
 
 ### 4. Two layers: immutable claims + rebuildable snapshot
 
@@ -104,10 +104,10 @@ JEV differentiated autonomy is a **future policy**, not a Stage 1 runtime. **No 
 
 ## PO APPROVE WITH CHANGES (2026-10-29) — five locked requirements
 
-These five requirements are **binding and override any softer wording elsewhere in this ADR**. They are the Product Owner's required changes and the conditions of the pending final ACCEPT.
+These five requirements stay **binding where they match the accepted principles**. The route-selector clarification in §3 overrides the older phrase “never caller-supplied” for an outlet id that is only a selector. R1–R5 do not authorize migration `040`.
 
 - **R1 — Data ≠ Consent.** The presence of any data in Restaurant Imprint does **not** grant JEV/LLM (or any automation) permission to process, use, or transmit it. Processing/use/transfer authorization is a separate, explicit decision; Imprint storage is never consent. (No JEV/LLM runtime exists in Stage 1 regardless.)
-- **R2 — Tenant isolation (default deny).** A server-side `tenantId` + `outletId` authorization check is **mandatory** for **ingest, source adapters, snapshot rebuild, and the read API**. Scope is server-derived, never caller-supplied; absence of a positive grant is denial. Enforced in repository/service code (**no RLS** assumption) with negative cross-tenant tests (AC-09).
+- **R2 — Tenant isolation (default deny).** A server-side `tenantId` + `outletId` authorization check is **mandatory** for **ingest, source adapters, snapshot rebuild, and the read API**. Tenant authority is server-derived. An outlet id on a route or request is checked against the principal's effective grants and never grants access by itself. Absence of a positive grant is denial. Enforced in repository/service code (**no RLS** assumption) with negative cross-tenant tests (AC-09).
 - **R3 — Claim lifecycle.** Claims are **immutable**. Correction is only by **supersede** or **invalidate**; invalidated/superseded claims are retained in history but **must not participate in the current snapshot**. No destructive edit; no silent latest-write-wins between conflicting human/source claims.
 - **R4 — Deterministic snapshot.** Conflict-resolution rules, freshness, provenance, and the transition to **`UNKNOWN`** are **versioned**; the snapshot records the resolver/policy version and source watermarks. A rebuild from the same claims + adapters + resolver version is **reproducible** and deterministic for registered fields.
 - **R5 — Privacy boundary.** Stage 1 runs **no LLM** and requires **no new Vault/Egress** components, **but retains all applicable requirements of already-accepted privacy ADRs — ADR-0015 (Privacy/Residency/Egress/Security), and ADR-0012 where relevant**: data minimization, no raw PII/secrets/receipts, residency/egress constraints, and audit. Existing domain boundaries are unchanged; **no `OfficeSession`, no RLS, no `/api/office`** is introduced.
@@ -147,7 +147,7 @@ Derived costs are never stored as a generic `product.cost`; they link to the own
 
 - Ownership of broad network/brand facts and the initial source event delivery channel.
 - Exact grant names and whether `identity_access_grant` can carry the Imprint read/provenance grants safely (gates **only** I-07, per §11).
-- The actual next migration number is reserved on Origin at I-02 (expected `040`; never hard-coded).
+- The I-02 migration number is read from Origin `main` when that slice starts. `040` is owned by open PR #139 and is not an Imprint number.
 - Exact `/api/v1` sub-path and pagination/ETag conventions at I-07.
 - `operations.active_terminal_refs` read contract (otherwise stays `UNKNOWN`).
 
@@ -155,18 +155,39 @@ ADR approval does **not** authorize a production database migration.
 
 ## Implementation slices (gated; for reference only — no code in this ADR)
 
-Order: **I-01 (this ADR) → PO ACCEPT → I-02 (migration `040`) + I-03 (Zod contracts) → I-04 (claim/revision/snapshot service) → I-05 (Organization adapter) → I-06 (narrow GoodsReceipt adapter) → I-07 (`/api/v1` read endpoint, gated by §11) / I-08 (replay/backfill, disposable tenant) → I-09 (AC-01…AC-16)**. Each slice is a small Origin `feature/` PR, Level B, with Bugbot + separate-context substantive AI review on current HEAD, cleared blockers, then merge-when-ready and required Depot CI. No GitHub PR; no direct `main` push; no force merge.
+Order: **I-01 (this ADR) → this ACCEPT WITH CLARIFICATIONS → separate Level B PRs**. The first implementation slice chooses its migration number from Origin `main` at that time. It does not use `040` while PR #139 owns that file. Later slices stay I-03 typed contracts, I-04 claim service, I-05 Organization adapter, I-06 narrow GoodsReceipt adapter, I-07 `/api/v1` read only when grants can be enforced, I-08 replay on a disposable tenant, I-09 AC-01…AC-16. Each slice is its own Origin `feature/` PR, Level B, with Bugbot and a separate-context review on that HEAD, then merge-when-ready and Depot CI. No GitHub PR. No direct `main` push. No production migration in those PRs.
 
-## Decision proposal for PO ACCEPT (final, seven points)
+## PO ACCEPT WITH CLARIFICATIONS (2026-10-29)
 
-The 2026-10-29 **APPROVE WITH CHANGES** is recorded above; the five required changes (R1–R5) are locked. Per Origin policy this final text still needs an explicit **PO ACCEPT** before dependent structural code (I-02+). Requesting ACCEPT of exactly the following, which does **not** add any new fiscal, financial, legal, or data-exposure rule:
+Recorded from the Product Owner decision `IMPRINT-ADR0054-PO-DECISION` after reading this file at prior HEAD `97f6b6f`. Fiscal ADR-0053 keeps its number. ADR-0054 was still unique: it is not on Origin `main`.
 
-1. `restaurant-imprint` is a **read-side only** module; it writes only `imprint_*` tables and never mutates operational/organization/identity/feed tables.
-2. Scope key **`tenantId` + `outletId`**, both **server-derived**, with a **mandatory default-deny tenant check at ingest, source adapters, snapshot rebuild, and read API (R2)**; `outlet ≠ legal entity`, `brand ≠ legal entity`; a `warehouse` with `NULL outlet_id` is not projected onto an outlet.
-3. Two layers — immutable append-only **claims** with **supersede/invalidate, where invalidated/superseded claims are excluded from the current snapshot (R3)** — and a rebuildable **snapshot**; snapshot is not operational truth; `UNKNOWN ≠ zero/false`; `DRAFT ≠ POSTED`.
-4. **Deterministic snapshot**: **versioned** conflict-resolution/freshness/provenance/`UNKNOWN` rules recorded in the snapshot, **reproducible rebuild (R4)**; statuses come from the **owning aggregate**; `operational_fact_feed` is a hint/notification, never the sole reconciliation source; Document Engine semantics unchanged.
-5. **Scoped authorization** via existing server-side Identity + `identity_access_grant`, least-privilege, default-denied, **no RLS**, **no new `OfficeSession`/Vault/Egress**; if grants cannot be supported safely, **only I-07 (HTTP)** is deferred, not the domain.
-6. **Data ≠ Consent (R1)** and operational isolation: Imprint storage grants **no** automation/JEV/LLM permission to process/use/transmit; core checkout/posting/inventory/fiscal paths remain independent of Imprint; **no JEV/LLM runtime** in Stage 1.
-7. **Privacy boundary (R5)**: Stage 1 adds **no new Vault/Egress** and **retains the applicable requirements of accepted privacy ADRs (ADR-0015; ADR-0012 where relevant)**; implementation is **Level B** per slice; **no production deploy and no persistent-DB migrate/backfill** without a separate PO GO.
+### Accepted principles
 
-**PO ACCEPT granted 2026-10-29** (reviewed HEAD `dffd5e2`, PR #136) on exactly these seven points. Dependent implementation is authorized **only** as separate **Level B** PRs **after this ADR merges** — **I-02** (database foundation; next free migration, expected `040`) and **I-03** (typed contracts) — each with its own code review, Bugbot, and Depot CI. Not authorized by this ACCEPT: production deploy, persistent-DB migrate/backfill, JEV/LLM runtime, HTTP slice I-07, Operational Core modification, direct GitHub writes, or auto-merge of implementation PRs.
+1. Restaurant Imprint is a bounded read-side module in the existing modular monolith. It is not a second operational source of truth and it does not write Procurement, Inventory, Orders, or other source modules.
+2. Tenant and outlet scope are mandatory. Tenant authority is server-derived. An outlet selected through a route or request is checked against the authenticated principal's effective grants. A caller-provided outlet id never grants access by itself.
+3. Claims are typed, append-only, and versioned. They keep origin, provenance, source revisions, business and effective timestamps when the source truly has them, and supersession history. Declared, configured, observed, and target values stay distinguishable.
+4. Snapshots are deterministic, rebuildable projections. `UNKNOWN`, `CONFLICT`, `STALE`, and `DEGRADED` stay visible. A missing fact is not zero and is not assumed truth. Provider or feed order does not invent business chronology.
+5. Authorization reuses existing Identity, `identity_access_grant`, and server checks. This ADR does not assume PostgreSQL RLS or an `OfficeSession`. If a read endpoint cannot be enforced safely, that endpoint is deferred. Tenant isolation is not weakened to ship it.
+6. A stored fact or claim is not consent, not authorization, and not verified operational truth. Claims and goals do not become permissions, posted documents, accounting evidence, or AI-approved facts.
+7. Privacy is data minimization and scoped provenance. Stage 1 adds no Vault, Egress, or external AI infrastructure. Raw sensitive PII, credentials, and attachments are not copied. Later access to sensitive content needs its own policy and authorization.
+
+### R1–R5 assessment
+
+| Lock | Result |
+| --- | --- |
+| R1 Data ≠ Consent | Compatible with principle 6 and kept. Principle 6 is wider: a claim is also not a permission, a posted document, accounting evidence, or an AI-approved fact. |
+| R2 Tenant isolation | Compatible with principle 2 and kept, including checks on ingest, adapters, rebuild, and read. The ban on an outlet id appearing in a route is withdrawn. The id is a selector. The grant is the authority. |
+| R3 Claim lifecycle | Compatible with principle 3 and kept. Supersede and invalidate both remain. Superseded and invalidated claims stay in history and stay out of the current snapshot. |
+| R4 Deterministic snapshot | Compatible with principle 4 and kept. The resolver version is recorded. `UNKNOWN`, `CONFLICT`, `STALE`, and `DEGRADED` stay explicit. |
+| R5 Privacy boundary | Compatible with principle 7 and kept. ADR-0015, and ADR-0012 where it already applies, stay in force. No new Vault, Egress, `OfficeSession`, RLS, or `/api/office`. |
+
+### Not accepted by this decision
+
+These sentences stay in the file as later-slice intent. They are **not** accepted product rules:
+
+- A permanent Imprint migration number, including `040`.
+- Concrete permission-key strings such as `imprint.read`.
+- The v0.1 path table's “Populated” rows as a commitment to ship those adapters.
+- A new `CostQuote` type. This ADR does not create one. No generic `product.cost` is stored. A link to a cost revision is allowed only when that read contract already exists; otherwise the value stays `UNKNOWN`.
+
+No clause above contradicts the seven principles. None is silently promoted to an accepted rule.
