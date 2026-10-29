@@ -139,6 +139,17 @@ describeImprint('restaurant imprint persistence (disposable PG)', () => {
       }),
     );
     expect(next.outcome).toBe('INSERTED');
+    const retried = await store.appendAssertion(
+      assertion({
+        tenantId,
+        outletId,
+        sourceEntityId: entityId,
+        sourceRevision: 'rev-2b',
+        canonicalValue: 'Cafe Next',
+        supersedesClaimId: original.claimId,
+      }),
+    );
+    expect(retried).toEqual({ outcome: 'DUPLICATE', claimId: next.claimId });
     const invalidated = await store.invalidateAssertion({
       tenantId,
       outletId,
@@ -162,7 +173,7 @@ describeImprint('restaurant imprint persistence (disposable PG)', () => {
   });
 
   it('rolls back the claims and the cursor together when a later assertion fails', async () => {
-    const cursorName = `batch-${randomUUID().slice(0, 8)}`;
+    const cursorName = `batch${randomUUID().replaceAll('-', '').slice(0, 12)}`;
     const entityId = `atomic-${randomUUID()}`;
     await expect(
       store.commitCheckpoint({
@@ -182,7 +193,7 @@ describeImprint('restaurant imprint persistence (disposable PG)', () => {
           }),
         ],
       }),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({ code: 'IMPRINT_LINEAGE_REJECTED' });
     expect(await store.readCursor(tenantId, outletId, 'organization', cursorName)).toBeNull();
     const leftover = await pool.query<{ n: number }>(
       `SELECT COUNT(*)::int AS n FROM imprint_claim WHERE source_entity_id = $1`,

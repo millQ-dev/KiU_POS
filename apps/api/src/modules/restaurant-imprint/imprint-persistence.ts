@@ -410,6 +410,9 @@ export class ImprintPersistence {
         );
         const row = successor.rows[0];
         if (!row) throw err;
+        if (row.payload_fingerprint === fingerprint) {
+          return { outcome: 'DUPLICATE', claimId: row.claim_id };
+        }
         const conflictId = await this.insertConflict(client, input, row, fingerprint);
         return { outcome: 'CONFLICT', claimId: row.claim_id, conflictId };
       }
