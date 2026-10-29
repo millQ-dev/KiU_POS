@@ -17,7 +17,7 @@ Persist only the missing **neutral** fields. Do not copy provider JSON into Orde
 | --- | --- | --- |
 | LegalEntity MST, legal address | Organization `legal_entity` (D17). Fiscalization reads them | Fork 3 is about binding; seller master is configuration, still unused without a merchant |
 | `registered_fiscal_mode`, invoice type (VAT vs sales) | `fiscal_policy_version` (D4, D5) | Mode must be the merchant’s registration, not a restaurant-wide constant |
-| Vault pointer, provider code, environment, enabled | Integrations binding (Proposed in INTEGRATIONS-0 §3.2) | Level C fork 3. `enabled` for production stays false until G2-18 |
+| Vault pointer, provider code, environment, enabled | Integrations binding (Proposed in INTEGRATIONS-0 §3.2; sandbox boundary in proposed ADR-0053) | Level C before a binding table. Production `enabled` stays false until G2-18. G2-18 does not block local fixtures |
 | Provider invoice number, authority code, template/series **as evidence** | Append-only outcome evidence, not a locally incremented legal counter (D19) | Needs a real provider reference from G2-08 |
 | Buyer name / buyer MST when requested | Fiscal document snapshot (D18), frozen, omitted for ordinary B2C | Needs G2-05. No PII in logs (G2-15) |
 | In-flight attempt before HTTP | Insert `fiscal_provider_attempt` `STARTED` in the same transaction as the document, then call the adapter | Accepted D11/D12. Behavior change is a later Level B, with tests, not this docs PR |

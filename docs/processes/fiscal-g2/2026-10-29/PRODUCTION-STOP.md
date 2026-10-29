@@ -1,6 +1,8 @@
 # Production stop — Vietnam fiscal pilot
 
-**As of 2026-10-29: G2 = OPEN. No production tax issuance. No paid merchant onboarding. No persistent-database migration GO. No production provider enablement.**
+**As of 2026-10-29 (PO correction same day): G2 = OPEN. No production tax issuance. No production provider enablement. No persistent-database migration GO.**
+
+Vendor negotiations, contracts, and onboarding preparation may proceed. They do not enable real merchant issuance. Sandbox implementation is a separate authorization from production provider approval (`PO-CORRECTIONS-2026-10-29.md`). G2-18 is not required to begin sandbox work.
 
 ## What is forbidden
 
