@@ -140,7 +140,7 @@ describeHttp('NEXT-04 modifier HTTP (disposable PG)', () => {
     const withLine = await orders.addOrderLine({
       orderId,
       catalogItemId: fx.milkItemId,
-      quantity: '1',
+      quantity: '2',
       unit: 'L',
       dimension: 'VOLUME',
     });
@@ -175,7 +175,11 @@ describeHttp('NEXT-04 modifier HTTP (disposable PG)', () => {
     });
     expect(configured.statusCode).toBe(200);
     const cfgBody = configured.json() as {
-      configuration: { additivePriceAdjustmentMinor: string; kitchenInstructions: string[] };
+      configuration: {
+        additivePriceAdjustmentMinor: string;
+        configurationFingerprint: string;
+        kitchenInstructions: string[];
+      };
       order: {
         lines: Array<{ modifierConfiguration: { additivePriceAdjustmentMinor: string } | null }>;
       };
@@ -187,7 +191,7 @@ describeHttp('NEXT-04 modifier HTTP (disposable PG)', () => {
     );
     expect(cfgBody.order.lines[0]?.modifierConfiguration?.additivePriceAdjustmentMinor).toBe('5000');
 
-    // ADR-0030 + ADR-0049: base rounded gross + additive must validate (once per line).
+    // ADR-0052 M2: (base unit + per-unit modifier) × quantity, one ADR-0030 round.
     const { setOrderCommercialTermsWithRounding } = await import(
       '../test/commercial-terms.js'
     );
@@ -203,12 +207,15 @@ describeHttp('NEXT-04 modifier HTTP (disposable PG)', () => {
         {
           orderLineId: lineId,
           resolvedUnitPriceMinor: '20000',
-          grossMerchandiseMinor: '25000', // 20000 base + 5000 oat
+          grossMerchandiseMinor: '50000', // (20000 + 5000) × 2, one round
           lineMerchantFundedDiscountMinor: '0',
           eligibleForOrderDiscount: true,
           thirdPartyMerchandiseFundingMinor: '0',
           certainty: 'FINAL',
-          provenance: { additivePriceAdjustmentMinor: '5000' },
+          provenance: {
+            additivePriceAdjustmentMinor: '5000',
+            configurationFingerprint: cfgBody.configuration.configurationFingerprint,
+          },
         },
       ],
     });
@@ -216,6 +223,9 @@ describeHttp('NEXT-04 modifier HTTP (disposable PG)', () => {
     const snapLine = (
       accepted.lines as Array<{ orderLineId: string; grossMerchandiseMinor: string }>
     ).find((l) => l.orderLineId === lineId);
-    expect(snapLine?.grossMerchandiseMinor).toBe('25000');
+    expect(snapLine?.grossMerchandiseMinor).toBe('50000');
+    expect(
+      (snapLine as { exactUnroundedMinorBasis?: string } | undefined)?.exactUnroundedMinorBasis,
+    ).toBe('50000');
   });
 });
