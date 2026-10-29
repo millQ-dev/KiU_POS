@@ -110,6 +110,8 @@ export {
 } from './sale-consumption.js';
 export {
   applyEffectiveRecipeDeltas,
+  catalogIdsReferencedByDeltas,
+  parseFrozenRecipeDeltas,
   sumAdditivePriceAdjustmentsMinor,
   type RecipeComponentRef,
   type ModifierRecipeDelta,

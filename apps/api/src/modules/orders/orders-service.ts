@@ -15,6 +15,9 @@ import {
   parseCanonicalDecimal,
   resolveSaleLineConsumption,
   roundConfiguredMerchandiseLine,
+  catalogIdsReferencedByDeltas,
+  parseFrozenRecipeDeltas,
+  type ModifierRecipeDelta,
   type GraphCatalogItem,
   type GraphPreparationVersion,
   type GraphRecipeVersion,
@@ -980,10 +983,12 @@ export class OrdersService {
     );
     const client = await this.pool.connect();
     try {
+      const frozenDeltas = await this.loadFrozenRecipeDeltas(client, orderId);
       const lookup = await this.buildSyncLookup(
         client,
         order.tenant_id,
         lines.map((l) => l.catalog_item_id),
+        catalogIdsReferencedByDeltas([...frozenDeltas.values()].flat()),
       );
       const resolvedLines: Array<LineConsumptionPlan & { orderLineId: string; lineNumber: number }> =
         [];
@@ -997,6 +1002,7 @@ export class OrdersService {
               dimension: line.dimension,
             },
             lookup,
+            frozenDeltas.get(line.order_line_id) ?? [],
           );
           assertExactlyOneConsumptionPath(plan);
           resolvedLines.push({
@@ -1162,16 +1168,21 @@ export class OrdersService {
         );
       }
 
+      const { ModifiersService } = await import('../modifiers/index.js');
+      await new ModifiersService(this.pool).assertLineConfigurationComplete(client, cmd.orderId);
+
       const warehouseId = await this.resolveAuthoritativeIssueWarehouse(
         client,
         order.tenant_id,
         order.outlet_id,
         order.legal_entity_id,
       );
+      const frozenDeltas = await this.loadFrozenRecipeDeltas(client, cmd.orderId);
       const lookup = await this.buildSyncLookup(
         client,
         order.tenant_id,
         lines.map((l) => l.catalog_item_id),
+        catalogIdsReferencedByDeltas([...frozenDeltas.values()].flat()),
       );
       const resolvedLines: Array<LineConsumptionPlan & { orderLineId: string; lineNumber: number }> =
         [];
@@ -1185,6 +1196,7 @@ export class OrdersService {
               dimension: line.dimension,
             },
             lookup,
+            frozenDeltas.get(line.order_line_id) ?? [],
           );
           assertExactlyOneConsumptionPath(plan);
           resolvedLines.push({
@@ -2000,10 +2012,34 @@ export class OrdersService {
     return row.warehouse_id;
   }
 
+  async loadFrozenRecipeDeltas(
+    client: Client,
+    orderId: string,
+  ): Promise<Map<string, ModifierRecipeDelta[]>> {
+    const rows = await client.query<{
+      order_line_id: string;
+      effective_recipe_deltas_json: unknown;
+    }>(
+      `SELECT order_line_id, effective_recipe_deltas_json
+       FROM order_line_configuration WHERE order_id = $1`,
+      [orderId],
+    );
+    const byLine = new Map<string, ModifierRecipeDelta[]>();
+    for (const row of rows.rows) {
+      try {
+        byLine.set(row.order_line_id, parseFrozenRecipeDeltas(row.effective_recipe_deltas_json));
+      } catch (e) {
+        mapDomainError(e);
+      }
+    }
+    return byLine;
+  }
+
   async buildSyncLookup(
     client: Client,
     tenantId: string,
     soldCatalogItemIds: string[],
+    extraCatalogItemIds: readonly string[] = [],
   ): Promise<RecipeGraphLookup> {
     const catalogs = new Map<string, GraphCatalogItem>();
     const recipesByItem = new Map<string, GraphRecipeVersion>();
@@ -2094,6 +2130,10 @@ export class OrdersService {
       if (prep.outputCatalogItemId) await loadCatalog(prep.outputCatalogItemId);
       return prep;
     };
+
+    for (const extraId of extraCatalogItemIds) {
+      await loadCatalog(extraId);
+    }
 
     for (const soldId of soldCatalogItemIds) {
       await loadCatalog(soldId);

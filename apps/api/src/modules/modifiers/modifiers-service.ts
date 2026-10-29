@@ -250,12 +250,16 @@ export class ModifiersService {
             delta_kind: string;
             target_catalog_item_id: string | null;
             replacement_catalog_item_id: string | null;
+            replacement_quantity: string | null;
+            replacement_unit: string | null;
+            replacement_dimension: string | null;
             add_catalog_item_id: string | null;
             add_quantity: string | null;
             add_unit: string | null;
             add_dimension: string | null;
           }>(
             `SELECT delta_kind, target_catalog_item_id, replacement_catalog_item_id,
+                    replacement_quantity, replacement_unit, replacement_dimension,
                     add_catalog_item_id, add_quantity, add_unit, add_dimension
              FROM modifier_option_recipe_delta
              WHERE modifier_option_id = $1 ORDER BY sort_order`,
@@ -269,10 +273,28 @@ export class ModifiersService {
               d.target_catalog_item_id &&
               d.replacement_catalog_item_id
             ) {
+              const yieldCount = [
+                d.replacement_quantity,
+                d.replacement_unit,
+                d.replacement_dimension,
+              ].filter((v) => v != null).length;
+              if (yieldCount !== 0 && yieldCount !== 3) {
+                throw new ModifierDomainError(
+                  'MODIFIER_DELTA_INVALID',
+                  `Option ${optionId} REPLACE yield must include quantity, unit, and dimension`,
+                );
+              }
               deltas.push({
                 kind: 'REPLACE_COMPONENT',
                 targetCatalogItemId: d.target_catalog_item_id,
                 replacementCatalogItemId: d.replacement_catalog_item_id,
+                ...(yieldCount === 3
+                  ? {
+                      replacementQuantity: d.replacement_quantity!,
+                      replacementUnit: d.replacement_unit!,
+                      replacementDimension: d.replacement_dimension as 'MASS' | 'VOLUME' | 'COUNT',
+                    }
+                  : {}),
               });
             } else if (
               d.delta_kind === 'ADD_COMPONENT' &&
@@ -288,6 +310,11 @@ export class ModifiersService {
                 unit: d.add_unit,
                 dimension: d.add_dimension as 'MASS' | 'VOLUME' | 'COUNT',
               });
+            } else {
+              throw new ModifierDomainError(
+                'MODIFIER_DELTA_INVALID',
+                `Option ${optionId} has an incomplete recipe delta`,
+              );
             }
           }
           validatedSelections.push({ groupId: b.modifier_group_id, optionId });

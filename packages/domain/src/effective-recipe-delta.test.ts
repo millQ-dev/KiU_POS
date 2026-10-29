@@ -18,6 +18,28 @@ describe('effective-recipe-delta (ADR-0049)', () => {
     expect(next.map((c) => c.catalogItemId)).toEqual(['milk-oat', 'espresso', 'syrup-vanilla']);
   });
 
+  it('rejects a missing REPLACE target and a partial yield override', () => {
+    expect(() =>
+      applyEffectiveRecipeDeltas(base, [
+        {
+          kind: 'REPLACE_COMPONENT',
+          targetCatalogItemId: 'missing',
+          replacementCatalogItemId: 'oat',
+        },
+      ]),
+    ).toThrow(/not on the base recipe/);
+    expect(() =>
+      applyEffectiveRecipeDeltas(base, [
+        {
+          kind: 'REPLACE_COMPONENT',
+          targetCatalogItemId: 'milk-whole',
+          replacementCatalogItemId: 'oat',
+          replacementQuantity: '100',
+        },
+      ]),
+    ).toThrow(/quantity, unit, and dimension/);
+  });
+
   it('sums additive VND adjustments', () => {
     expect(sumAdditivePriceAdjustmentsMinor(['0', '5000', '-1000'])).toBe('4000');
   });

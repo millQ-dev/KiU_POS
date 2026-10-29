@@ -6,6 +6,10 @@ import {
   assertSameDimensionCompatibleUnits,
 } from './recipe-graph.js';
 import type { UnitDimension } from './quantity.js';
+import {
+  applyEffectiveRecipeDeltas,
+  type ModifierRecipeDelta,
+} from './effective-recipe-delta.js';
 
 function assertPositiveQty(value: string, label: string): void {
   assertPositive(parseCanonicalDecimal(value), label);
@@ -359,6 +363,40 @@ function explodeRecipe(
  * Root selection is structural — no silent priority heuristics.
  * RecipeProfile binding + competing STOCK_TRACKED root → AMBIGUOUS_CONSUMPTION_ROOT.
  */
+function recipeWithFrozenDeltas(
+  recipe: GraphRecipeVersion,
+  deltas: readonly ModifierRecipeDelta[],
+): GraphRecipeVersion {
+  if (deltas.length === 0) return recipe;
+  const catalog = recipe.components.filter(
+    (c) => c.componentKind === 'CATALOG_ITEM' && c.catalogItemId,
+  );
+  const adjusted = applyEffectiveRecipeDeltas(
+    catalog.map((c) => ({
+      catalogItemId: c.catalogItemId!,
+      quantity: c.quantity,
+      unit: c.unit,
+      dimension: c.dimension,
+    })),
+    deltas,
+  );
+  let lineNumber =
+    recipe.components.reduce((max, c) => Math.max(max, c.lineNumber), 0) + 1;
+  const components: GraphComponent[] = [
+    ...recipe.components.filter((c) => c.componentKind !== 'CATALOG_ITEM'),
+    ...adjusted.map((c) => ({
+      lineNumber: lineNumber++,
+      componentKind: 'CATALOG_ITEM' as const,
+      catalogItemId: c.catalogItemId,
+      nestedPreparationVersionId: null,
+      quantity: c.quantity,
+      unit: c.unit,
+      dimension: c.dimension,
+    })),
+  ];
+  return { ...recipe, components };
+}
+
 export function resolveSaleLineConsumption(
   sold: {
     catalogItemId: string;
@@ -367,6 +405,7 @@ export function resolveSaleLineConsumption(
     dimension: UnitDimension;
   },
   lookup: RecipeGraphLookup,
+  deltas: readonly ModifierRecipeDelta[] = [],
 ): LineConsumptionPlan {
   assertPositiveQty(sold.quantity, 'sold quantity');
   const item = lookup.getCatalogItem(sold.catalogItemId);
@@ -383,6 +422,13 @@ export function resolveSaleLineConsumption(
   const recipe = lookup.getPublishedRecipeForCatalogItem(sold.catalogItemId);
   const stockPrep = lookup.getPublishedStockTrackedPrepForOutput(sold.catalogItemId);
 
+  if (deltas.length > 0 && !recipe) {
+    throw new DomainError(
+      'MODIFIER_DELTAS_REQUIRE_RECIPE',
+      `Sold item ${sold.catalogItemId} has Effective Recipe deltas but no published recipe`,
+    );
+  }
+
   if (recipe && stockPrep) {
     throw new DomainError(
       'AMBIGUOUS_CONSUMPTION_ROOT',
@@ -391,8 +437,9 @@ export function resolveSaleLineConsumption(
   }
 
   if (recipe) {
+    const effective = recipeWithFrozenDeltas(recipe, deltas);
     const { leaves, versions } = explodeRecipe(
-      recipe,
+      effective,
       sold.quantity,
       sold.unit,
       sold.dimension,
