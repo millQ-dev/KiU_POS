@@ -3,6 +3,7 @@ import { posApi } from '../api/client.js';
 import { ApiError } from '../api/types.js';
 import type {
   CashierContext,
+  CatalogModifierGroup,
   CommercialStatus,
   MenuPriceResolution,
   OrderBasket,
@@ -11,6 +12,7 @@ import type {
   ResolvedPosSurface,
   SettlementProjection,
 } from '../api/types.js';
+import { ModifierConfigurationModal } from './ModifierConfigurationModal.js';
 import { OrderBasketPanel } from './OrderBasket.js';
 import { PosPageNavigation } from './PosPageNavigation.js';
 import { ProductGrid } from './ProductGrid.js';
@@ -69,9 +71,16 @@ function feedbackForApiError(err: ApiError): string {
     case 'TENDER_UNAVAILABLE':
     case 'PAYMENT_UNAVAILABLE':
       return 'Payment blocked: no tender configured — cannot collect payment';
+    case 'MODIFIER_CONFIGURATION_MISSING':
+    case 'MODIFIER_REQUIRED':
+      return `Modifiers required: ${err.message}`;
     default:
       return `${err.code}: ${err.message}`;
   }
+}
+
+function lineNeedsModifierPrompt(groups: CatalogModifierGroup[]): boolean {
+  return groups.length > 0;
 }
 
 export function CashierShell({
@@ -98,6 +107,10 @@ export function CashierShell({
   const [refreshingPrices, setRefreshingPrices] = useState(false);
   const [acceptingCommercial, setAcceptingCommercial] = useState(false);
   const [quantitySlot, setQuantitySlot] = useState<ResolvedPosSlot | null>(null);
+  const [modifierPrompt, setModifierPrompt] = useState<{
+    line: OrderLine;
+    groups: CatalogModifierGroup[];
+  } | null>(null);
   const [settlement, setSettlement] = useState<SettlementProjection | null>(null);
   const [settlementBusy, setSettlementBusy] = useState(false);
   const inFlightRef = useRef(false);
@@ -237,6 +250,25 @@ export function CashierShell({
     }
   };
 
+  const maybePromptModifiers = async (basket: OrderBasket, catalogItemId: string) => {
+    try {
+      const { groups } = await posApi.getCatalogItemModifierGroups(catalogItemId);
+      if (!lineNeedsModifierPrompt(groups)) return;
+      const priorIds = new Set((order?.lines ?? []).map((l) => l.orderLineId));
+      const newLine =
+        basket.lines.find((l) => !priorIds.has(l.orderLineId) && l.catalogItemId === catalogItemId) ??
+        [...basket.lines].reverse().find((l) => l.catalogItemId === catalogItemId);
+      if (!newLine) return;
+      if (newLine.modifierConfiguration) return;
+      setModifierPrompt({ line: newLine, groups });
+      setSelectedLineId(newLine.orderLineId);
+    } catch (err) {
+      const code = err instanceof ApiError ? err.code : 'NETWORK';
+      const message = err instanceof Error ? err.message : 'Modifier groups failed';
+      setFeedback(`${code}: ${message}`);
+    }
+  };
+
   const onSelectSlot = async (slot: ResolvedPosSlot) => {
     if (!order || order.status !== 'OPEN') {
       setFeedback('Open an order first');
@@ -261,6 +293,7 @@ export function CashierShell({
         });
         applyOrder(result.order, selectedLineId);
         await reloadCommercial(result.order.orderId);
+        await maybePromptModifiers(result.order, slot.catalogItemId);
       } catch (err) {
         const code = err instanceof ApiError ? err.code : 'NETWORK';
         const message = err instanceof Error ? err.message : 'Selection failed';
@@ -295,6 +328,7 @@ export function CashierShell({
         applyOrder(result.order, selectedLineId);
         await reloadCommercial(result.order.orderId);
         setQuantitySlot(null);
+        await maybePromptModifiers(result.order, slot.catalogItemId);
       } catch (err) {
         const code = err instanceof ApiError ? err.code : 'NETWORK';
         const message = err instanceof Error ? err.message : 'Selection failed';
@@ -635,6 +669,34 @@ export function CashierShell({
           busy={mutationBusy}
           onCancel={() => setQuantitySlot(null)}
           onConfirm={(q) => void onConfirmWeighted(q)}
+        />
+      )}
+
+      {modifierPrompt && order && (
+        <ModifierConfigurationModal
+          line={modifierPrompt.line}
+          groups={modifierPrompt.groups}
+          busy={mutationBusy}
+          onCancel={() => setModifierPrompt(null)}
+          onConfirm={(payload) => {
+            void withMutationGuard(async () => {
+              try {
+                const result = await posApi.configureOrderLineModifiers(
+                  order.orderId,
+                  modifierPrompt.line.orderLineId,
+                  payload,
+                );
+                applyOrder(result.order, modifierPrompt.line.orderLineId);
+                await reloadCommercial(result.order.orderId);
+                setModifierPrompt(null);
+                setFeedback(
+                  `Modifiers saved (+${result.configuration.additivePriceAdjustmentMinor} VND)`,
+                );
+              } catch (err) {
+                await handleMutationError(err, order.orderId);
+              }
+            });
+          }}
         />
       )}
     </div>

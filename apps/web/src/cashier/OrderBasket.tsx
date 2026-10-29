@@ -128,6 +128,11 @@ export function OrderBasketPanel({
                 >
                   <span className="pos-basket__name">{line.catalogItemName}</span>
                   <span className="pos-basket__qty">{formatQty(line)}</span>
+                  {line.modifierConfiguration ? (
+                    <span className="pos-basket__mods" title="Modifier configuration saved">
+                      +{line.modifierConfiguration.additivePriceAdjustmentMinor}
+                    </span>
+                  ) : null}
                   {acceptedLine ? (
                     <span className="pos-basket__gross">
                       {acceptedLine.grossMerchandiseMinor} {commercial?.currencyCode ?? ''}
