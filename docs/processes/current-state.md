@@ -1,7 +1,7 @@
 # MillQ Current State
 
-**Checkpoint:** NEXT-03 — #124 merged; Modifier/Discount Level C STOP; R1.1 gate closed  
-**Tip:** Origin/GitHub MATCH @ `de1e79915c867af7f9bf94068f7010477c45b1f1` (#124)  
+**Checkpoint:** NEXT-04 — PO ACCEPT M1–M8 / D1–D6 / M6 allergy; ADR-0049/0050/0051; Modifier runtime started  
+**Tip:** Origin/GitHub MATCH @ `02f00bf903c3c18e547cac51d816e51345959c05` (#125) — refresh after NEXT-04 merges  
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)  
 **GitHub backup (sole):** `https://github.com/millQ-dev/KiU_POS.git`  
   (`millQ-dev/MillQ` = legacy rename redirect to the same repository ID)  
@@ -11,7 +11,7 @@
 
 | Item | State |
 | --- | --- |
-| Migration head | **036** `036_payments_refund_cash_handover_b2.sql` (CASH handover evidence + append-only triggers; disposable PG / CI — **not** production migrate GO) |
+| Migration head | **036** on main tip `02f00bf…`; **037** Modifier ships in NEXT-04 PR A (disposable/CI — **not** production migrate GO) |
 | ADR-0048 Payments Refund | **ACCEPTED WITH DELTAS** 2026-10-27; B1 #120 merged; B2 = human CASH confirm → MONEY_RETURNED + expected − at Close; VietQR adapter blocked; G2 / FiscalCorrectionPolicy still OPEN; no HTTP payout API; no prod migrate GO |
 | TAX1.1 Tax runtime | **MERGED** Origin PR#74 — canonical closed |
 | ADR-0033 / ADR-0034 / ADR-0037 | **ACCEPTED** |
@@ -31,7 +31,12 @@
 | DEMO-29 | **CLOSED** — `DEMO29_GO`; evidence `docs/processes/demo29/evidence/manual-1793112022/` |
 | NEXT-01 Track P | Counter cash VERIFIED; QR honesty DECLARED_DEFERRED; Modifier/Discount Level C |
 | NEXT-02 | **MERGED** #124 — QR/card unavailable honesty + sale success polish |
-| NEXT-03 | Modifier + Discount **Level C STOP** (`NEXT03_*_LEVEL_C.md`); R1.1 prep only; **POSV1_NO_GO**; **R1_AUDIT_READY** |
+| NEXT-03 | Prep closed by PO ACCEPT 2026-10-28 (historical `NEXT03_*`) |
+| NEXT-04 | **IN PROGRESS** — ADR-0049/0050/0051 Accepted; migration `037_modifier_effective_recipe_v1.sql`; **POSV1_NO_GO**; R1.1 still gated |
+| ADR-0049 Modifier / Effective Recipe v1 | **ACCEPTED** 2026-10-28 |
+| ADR-0050 Order-local allergen M6 | **ACCEPTED** 2026-10-28 |
+| ADR-0051 ApplyOrderMerchantDiscount | **ACCEPTED** 2026-10-28 |
+| Migration head | **037** (Modifier) after NEXT-04 PR A merges — disposable/CI only |
 | C0 Cafe Operability | Counter/prepay cafe path proven via DEMO-29; wider POS-v1 roadmap gaps tracked under NEXT-01 |
 
 ## TAX1.1 (canonical closed)

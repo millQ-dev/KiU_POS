@@ -1,7 +1,9 @@
-# NEXT-03 G1 — Modifier v1 Level C preparation (STOP before code)
+# NEXT-03 G1 — Modifier v1 Level C preparation
 
-**Origin baseline:** `de1e79915c867af7f9bf94068f7010477c45b1f1` (#124 merged; GitHub MATCH)  
-**Autonomy:** **Level C** — no implementation until PO ACCEPT on decisions below  
+**PO ACCEPT:** 2026-10-28 — M1–M8 accepted; implementation authority → **ADR-0049**. This file is **historical audit evidence** (prep + decision list). Do not treat as open STOP.
+
+**Origin baseline (prep):** `de1e79915c867af7f9bf94068f7010477c45b1f1` (#124)  
+**Autonomy (prep):** Level C — **closed by PO ACCEPT**  
 **Reuses:** Menu, Recipe/Preparation (ADR-0003/0009), Orders, Commercial (ADR-0028/0030), Inventory/GoodsIssue (ADR-0025), Allergen boundary (ADR-0024)  
 **Forbidden:** universal rules engine; duplicate financial ledger; free-text bypass of allergen/inventory; inventing Effective Recipe without Accept
 
