@@ -215,6 +215,35 @@ describe('sale consumption resolver', () => {
     ).toThrow(/nested preparation/);
   });
 
+  it('fails closed when a delta target is not on the top-level recipe', () => {
+    const recipe: GraphRecipeVersion = {
+      recipeVersionId: 'rv1',
+      recipeSpecificationId: 'rs1',
+      status: 'PUBLISHED',
+      batchSizeQuantity: '1',
+      batchSizeUnit: 'ea',
+      batchSizeDimension: 'COUNT',
+      components: [
+        {
+          lineNumber: 1,
+          componentKind: 'CATALOG_ITEM',
+          catalogItemId: 'milk',
+          nestedPreparationVersionId: null,
+          quantity: '200',
+          unit: 'ml',
+          dimension: 'VOLUME',
+        },
+      ],
+    };
+    expect(() =>
+      resolveSaleLineConsumption(
+        { catalogItemId: 'dish', quantity: '1', unit: 'ea', dimension: 'COUNT' },
+        lookup({ catalogs: [milk, dish], recipeByItem: { dish: recipe } }),
+        [{ kind: 'REMOVE_COMPONENT', targetCatalogItemId: 'onion' }],
+      ),
+    ).toThrow(/not on the base recipe/);
+  });
+
   it('rejects Effective Recipe deltas on a line with no recipe', () => {
     expect(() =>
       resolveSaleLineConsumption(

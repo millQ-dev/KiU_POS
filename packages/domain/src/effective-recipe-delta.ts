@@ -65,22 +65,13 @@ export function applyEffectiveRecipeDeltas(
   let next = base.map((c) => ({ ...c }));
   for (const d of deltas) {
     if (d.kind === 'REMOVE_COMPONENT') {
-      const before = next.length;
       next = next.filter((c) => c.catalogItemId !== d.targetCatalogItemId);
-      if (next.length === before) {
-        throw new DomainError(
-          'MODIFIER_DELTA_TARGET_MISSING',
-          `REMOVE target ${d.targetCatalogItemId} is not on the base recipe`,
-        );
-      }
       continue;
     }
     if (d.kind === 'REPLACE_COMPONENT') {
       const yieldOverride = replacementYield(d);
-      let hits = 0;
       next = next.map((c) => {
         if (c.catalogItemId !== d.targetCatalogItemId) return c;
-        hits += 1;
         return {
           catalogItemId: d.replacementCatalogItemId,
           quantity: yieldOverride?.quantity ?? c.quantity,
@@ -88,12 +79,6 @@ export function applyEffectiveRecipeDeltas(
           dimension: yieldOverride?.dimension ?? c.dimension,
         };
       });
-      if (hits === 0) {
-        throw new DomainError(
-          'MODIFIER_DELTA_TARGET_MISSING',
-          `REPLACE target ${d.targetCatalogItemId} is not on the base recipe`,
-        );
-      }
       continue;
     }
     next.push({

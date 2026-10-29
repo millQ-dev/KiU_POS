@@ -396,18 +396,26 @@ function recipeWithFrozenDeltas(
 ): GraphRecipeVersion {
   if (deltas.length === 0) return recipe;
   const nested = virtualNestedCatalogIds(recipe.components, lookup, new Set());
+  const catalog = recipe.components.filter(
+    (c) => c.componentKind === 'CATALOG_ITEM' && c.catalogItemId,
+  );
+  const topLevel = new Set(catalog.map((c) => c.catalogItemId));
   for (const delta of deltas) {
-    const target = delta.kind === 'ADD_COMPONENT' ? null : delta.targetCatalogItemId;
-    if (target && nested.has(target)) {
+    if (delta.kind === 'ADD_COMPONENT') continue;
+    const target = delta.targetCatalogItemId;
+    if (nested.has(target)) {
       throw new DomainError(
         'MODIFIER_DELTA_NESTED_TARGET',
         `Effective Recipe delta cannot remove or replace ${target} inside a nested preparation`,
       );
     }
+    if (!topLevel.has(target)) {
+      throw new DomainError(
+        'MODIFIER_DELTA_TARGET_MISSING',
+        `${delta.kind === 'REMOVE_COMPONENT' ? 'REMOVE' : 'REPLACE'} target ${target} is not on the base recipe`,
+      );
+    }
   }
-  const catalog = recipe.components.filter(
-    (c) => c.componentKind === 'CATALOG_ITEM' && c.catalogItemId,
-  );
   const adjusted = applyEffectiveRecipeDeltas(
     catalog.map((c) => ({
       catalogItemId: c.catalogItemId!,
