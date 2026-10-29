@@ -363,11 +363,48 @@ function explodeRecipe(
  * Root selection is structural — no silent priority heuristics.
  * RecipeProfile binding + competing STOCK_TRACKED root → AMBIGUOUS_CONSUMPTION_ROOT.
  */
+function virtualNestedCatalogIds(
+  components: readonly GraphComponent[],
+  lookup: RecipeGraphLookup,
+  visiting: Set<string>,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const component of components) {
+    if (component.componentKind !== 'PREPARATION_VERSION' || !component.nestedPreparationVersionId) {
+      continue;
+    }
+    if (visiting.has(component.nestedPreparationVersionId)) continue;
+    const prep = lookup.getPreparationVersion(component.nestedPreparationVersionId);
+    if (!prep || prep.materializationMode !== 'VIRTUAL') continue;
+    visiting.add(prep.preparationVersionId);
+    for (const inner of prep.components) {
+      if (inner.componentKind === 'CATALOG_ITEM' && inner.catalogItemId) {
+        ids.add(inner.catalogItemId);
+      }
+    }
+    for (const id of virtualNestedCatalogIds(prep.components, lookup, visiting)) {
+      ids.add(id);
+    }
+  }
+  return ids;
+}
+
 function recipeWithFrozenDeltas(
   recipe: GraphRecipeVersion,
   deltas: readonly ModifierRecipeDelta[],
+  lookup: RecipeGraphLookup,
 ): GraphRecipeVersion {
   if (deltas.length === 0) return recipe;
+  const nested = virtualNestedCatalogIds(recipe.components, lookup, new Set());
+  for (const delta of deltas) {
+    const target = delta.kind === 'ADD_COMPONENT' ? null : delta.targetCatalogItemId;
+    if (target && nested.has(target)) {
+      throw new DomainError(
+        'MODIFIER_DELTA_NESTED_TARGET',
+        `Effective Recipe delta cannot remove or replace ${target} inside a nested preparation`,
+      );
+    }
+  }
   const catalog = recipe.components.filter(
     (c) => c.componentKind === 'CATALOG_ITEM' && c.catalogItemId,
   );
@@ -437,7 +474,7 @@ export function resolveSaleLineConsumption(
   }
 
   if (recipe) {
-    const effective = recipeWithFrozenDeltas(recipe, deltas);
+    const effective = recipeWithFrozenDeltas(recipe, deltas, lookup);
     const { leaves, versions } = explodeRecipe(
       effective,
       sold.quantity,

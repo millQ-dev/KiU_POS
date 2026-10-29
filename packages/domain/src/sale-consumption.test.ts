@@ -161,6 +161,60 @@ describe('sale consumption resolver', () => {
     expect(plan.physicalLeaves[0]).toMatchObject({ catalogItemId: 'oat', quantityBase: '0.2' });
   });
 
+  it('fails closed when a delta targets an ingredient inside a nested preparation', () => {
+    const blend: GraphPreparationVersion = {
+      preparationVersionId: 'pv-blend',
+      preparationSpecificationId: 'ps-blend',
+      status: 'PUBLISHED',
+      materializationMode: 'VIRTUAL',
+      outputCatalogItemId: null,
+      normativeOutputQuantity: '1',
+      normativeOutputUnit: 'ea',
+      normativeOutputDimension: 'COUNT',
+      components: [
+        {
+          lineNumber: 1,
+          componentKind: 'CATALOG_ITEM',
+          catalogItemId: 'milk',
+          nestedPreparationVersionId: null,
+          quantity: '100',
+          unit: 'ml',
+          dimension: 'VOLUME',
+        },
+      ],
+    };
+    const recipe: GraphRecipeVersion = {
+      recipeVersionId: 'rv-nest',
+      recipeSpecificationId: 'rs-nest',
+      status: 'PUBLISHED',
+      batchSizeQuantity: '1',
+      batchSizeUnit: 'ea',
+      batchSizeDimension: 'COUNT',
+      components: [
+        {
+          lineNumber: 1,
+          componentKind: 'PREPARATION_VERSION',
+          catalogItemId: null,
+          nestedPreparationVersionId: 'pv-blend',
+          quantity: '1',
+          unit: 'ea',
+          dimension: 'COUNT',
+        },
+      ],
+    };
+    expect(() =>
+      resolveSaleLineConsumption(
+        { catalogItemId: 'dish', quantity: '1', unit: 'ea', dimension: 'COUNT' },
+        lookup({
+          catalogs: [milk, dish],
+          recipeByItem: { dish: recipe },
+          preps: [blend],
+        }),
+        [{ kind: 'REMOVE_COMPONENT', targetCatalogItemId: 'milk' }],
+      ),
+    ).toThrow(/nested preparation/);
+  });
+
   it('rejects Effective Recipe deltas on a line with no recipe', () => {
     expect(() =>
       resolveSaleLineConsumption(
