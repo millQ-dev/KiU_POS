@@ -17,12 +17,14 @@ NEXT03 prep docs stamped PO ACCEPTED (historical).
 
 | PR | Scope | Status |
 | --- | --- | --- |
-| A | ADR docs + migration `037` + domain deltas + `ModifiersService.configureOrderLine` | Origin #127 — Level B gates |
-| B | Counter POS modifier UI + HTTP + wire `assertLineConfigurationComplete` on accept | Follow-on |
-| C | Allergy order-start + resolution + kitchen (legal override gated) | Level B — branch `feature/next04-allergy-m6`, migration `039` (see PR C notes) |
-| D | ApplyOrderMerchantDiscount + cashier UX | Follow-on |
+| A | ADR docs + migration `037` + domain deltas + `ModifiersService.configureOrderLine` | **Merged** Origin #127 @ `65c6754` |
+| B | Counter POS modifier UI + HTTP + wire `assertLineConfigurationComplete` on accept | In flight (`feature/next04-modifier-pos-ui-b`) |
+| C | Allergy order-start + resolution + kitchen (legal override gated) | Level B — `feature/next04-allergy-m6`, migration `039` (see PR C notes) |
+| D | ApplyOrderMerchantDiscount + cashier UX | Parallel branch |
 
-**PR A note:** commercial-accept wiring of `assertLineConfigurationComplete` is deferred to PR B+; configure path is fail-closed for required/ask-every-time. Effective Recipe deltas are snapshotted on `order_line_configuration.effective_recipe_deltas_json` (ADR-0049 #9).
+**PR A note:** Effective Recipe deltas snapshotted on `order_line_configuration.effective_recipe_deltas_json` (ADR-0049 #9).
+
+**PR B note:** HTTP `GET …/modifier-groups` + `POST …/configure-modifiers`; commercial accept calls `assertLineConfigurationComplete`; additive VND folded into line gross; cashier `ModifierConfigurationModal` after slot select.
 
 ## PR C notes (ADR-0050 order-local allergens)
 
@@ -36,7 +38,7 @@ NEXT03 prep docs stamped PO ACCEPTED (historical).
 | Kitchen | Structured `kitchenWarnings`, preparation changes, handling codes, required acknowledgements (`CASHIER_GUEST_INFORMED`, `KITCHEN_ACKNOWLEDGED`) bound to the resolution fingerprint |
 | Revalidation | Any context revision or line configuration change makes the snapshot stale; old acknowledgements stop counting |
 
-**Hooks not yet wired into the accept path** (avoids editing `orders-service.ts` / `pos.ts` owned by PR B/D): `AllergensService.assertReadyForCommercialAccept(client, orderId)` and `freezeForOrder(client, orderId)`. Wire both next to `assertLineConfigurationComplete` after PR B/D merge; until then allergen gating is advisory at the UI and not enforced at commercial accept.
+**Accept-path wiring:** `OrdersService.calculateBaseCommercialTermsLocked` now calls `AllergensService.assertReadyWhenCaptured` right after the ADR-0049 modifier gate: once an order-local context exists, every line must be freshly resolved, not BLOCKED, and carry its required acknowledgements. **Gap (needs PO decision, not invented here):** an order with *no* captured context is not rejected at accept — mandatory-capture enforcement would change every existing accept flow. The cashier UI blocks on an order-start prompt; direct API callers can still skip capture. `freezeForOrder` is implemented but not wired (freezing at accept would block corrections while the basket is editable); wire at CompleteOrder/consumption snapshot.
 
 **Not built (LEGAL GATE, ADR-0050):** any BLOCKED / UNKNOWN safety override catalog, retention/purge policy for order-local allergy data, jurisdiction labeling / medical claims, allergen taxonomy per jurisdiction. Acknowledgements are human-review records, not overrides; BLOCKED lines have no acknowledge path.
 

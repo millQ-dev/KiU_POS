@@ -277,6 +277,12 @@ export class OrdersService {
          WHERE order_line_id = $5`,
         [catalogItemId, qty.value, qty.unit, qty.dimension, cmd.orderLineId],
       );
+      // Catalog change invalidates modifier configuration (ADR-0049 snapshot is item-bound).
+      if (catalogItemId !== line.catalog_item_id) {
+        await client.query(`DELETE FROM order_line_configuration WHERE order_line_id = $1`, [
+          cmd.orderLineId,
+        ]);
+      }
       await this.clearOpenCommercialTerms(client, cmd.orderId);
       await client.query('COMMIT');
       return this.getOrder(cmd.orderId);
@@ -508,6 +514,14 @@ export class OrdersService {
       }
       await this.assertNoLiveSettlement(client, input.orderId);
 
+      // ADR-0049: fail-closed before commercial accept when required / ask-every-time unbound.
+      const { ModifiersService } = await import('../modifiers/index.js');
+      await new ModifiersService(this.pool).assertLineConfigurationComplete(client, input.orderId);
+
+      // ADR-0050: when an order-local allergen context exists, lines must be resolved, unblocked and acknowledged.
+      const { AllergensService } = await import('../allergens/index.js');
+      await new AllergensService(this.pool).assertReadyWhenCaptured(client, input.orderId);
+
       const lockedLines = await this.loadLines(client, input.orderId);
       const policy = await input.policies.resolveForOrder(
         client,
@@ -536,20 +550,44 @@ export class OrdersService {
         }
       }
 
+      const baseCalculated = assembleBaseCommercialLineTerms({
+        orderLines: lockedLines.map((l) => ({
+          orderLineId: l.order_line_id,
+          catalogItemId: l.catalog_item_id,
+          quantity: l.quantity,
+          unit: l.unit,
+          dimension: l.dimension,
+        })),
+        resolvedLines: resolved.lines,
+        policy,
+        businessDateTime: salesContext.businessDateTime,
+      });
+
+      // Additive modifier VND (order_line_configuration) — once per line for v1.
+      const additiveRows = await client.query<{
+        order_line_id: string;
+        additive_price_adjustment_minor: string;
+      }>(
+        `SELECT order_line_id, additive_price_adjustment_minor
+         FROM order_line_configuration WHERE order_id = $1`,
+        [input.orderId],
+      );
+      const additiveByLine = new Map(
+        additiveRows.rows.map((r) => [r.order_line_id, r.additive_price_adjustment_minor]),
+      );
+      let merchandiseGross = 0n;
+      const adjustedLines = baseCalculated.lines.map((l) => {
+        const add = BigInt(additiveByLine.get(l.orderLineId) ?? '0');
+        const gross = (BigInt(l.grossMerchandiseMinor) + add).toString();
+        merchandiseGross += BigInt(gross);
+        return { ...l, grossMerchandiseMinor: gross };
+      });
+
       const calculated = {
         orderId: input.orderId,
-        ...assembleBaseCommercialLineTerms({
-          orderLines: lockedLines.map((l) => ({
-            orderLineId: l.order_line_id,
-            catalogItemId: l.catalog_item_id,
-            quantity: l.quantity,
-            unit: l.unit,
-            dimension: l.dimension,
-          })),
-          resolvedLines: resolved.lines,
-          policy,
-          businessDateTime: salesContext.businessDateTime,
-        }),
+        ...baseCalculated,
+        lines: adjustedLines,
+        merchandiseGrossMinor: merchandiseGross.toString(),
       };
 
       if (!input.persist) {
@@ -587,6 +625,7 @@ export class OrdersService {
           calculationContext: l.calculationContext,
           menuPublicationId: l.menuPublicationId,
           priceRuleId: l.priceRuleId,
+          additivePriceAdjustmentMinor: additiveByLine.get(l.orderLineId) ?? '0',
         },
         exactUnroundedMinorBasis: l.exactUnroundedMinorBasis,
         roundingDelta: l.roundingDelta,

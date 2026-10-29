@@ -460,9 +460,19 @@ export class AllergensService {
   }
 
   /**
-   * Fail-closed readiness gate for commercial accept / send-to-kitchen.
-   * Wire from the accept path in a follow-on PR (same pattern as assertLineConfigurationComplete).
+   * Commercial-accept gate (wired in OrdersService next to the ADR-0049 modifier gate).
+   * Enforces readiness once an allergen context exists. A missing context is NOT enforced here:
+   * mandatory-capture enforcement is a product decision (ADR-0050 says "ask once"; the cashier UI
+   * blocks until answered) and is tracked as a follow-up — see NEXT04_STATUS.md.
    */
+  async assertReadyWhenCaptured(client: PoolClient, orderId: string): Promise<void> {
+    const captured = await client.query(`SELECT 1 FROM order_allergen_context WHERE order_id = $1`, [
+      orderId,
+    ]);
+    if (captured.rowCount) await this.assertReadyForCommercialAccept(client, orderId);
+  }
+
+  /** Fail-closed readiness: context captured, every line freshly resolved, none BLOCKED, acks recorded. */
   async assertReadyForCommercialAccept(client: PoolClient, orderId: string): Promise<void> {
     const ctxRes = await client.query<ContextRow>(
       `SELECT capture_choice, allergen_codes, revision, captured_at, frozen_at

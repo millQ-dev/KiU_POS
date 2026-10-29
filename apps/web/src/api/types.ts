@@ -56,6 +56,36 @@ export type ResolvedPosSurface = {
   quickAccess: ResolvedPosSlot[];
 };
 
+export type ModifierConfigurationSummary = {
+  orderLineConfigurationId: string;
+  additivePriceAdjustmentMinor: string;
+  kitchenInstructions: unknown;
+  configurationFingerprint: string;
+};
+
+export type CatalogModifierOption = {
+  modifierOptionId: string;
+  code: string;
+  name: string;
+  sortOrder: number;
+  isDefault: boolean;
+  priceAdjustmentMinor: string;
+  kitchenInstructionCode: string | null;
+};
+
+export type CatalogModifierGroup = {
+  modifierGroupId: string;
+  code: string;
+  name: string;
+  selectionMode: 'SINGLE' | 'MULTI';
+  minSelect: number;
+  maxSelect: number;
+  askEveryTime: boolean;
+  required: boolean;
+  sortOrder: number;
+  options: CatalogModifierOption[];
+};
+
 export type OrderLine = {
   orderLineId: string;
   lineNumber: number;
@@ -64,6 +94,7 @@ export type OrderLine = {
   quantity: string;
   unit: string;
   dimension: string;
+  modifierConfiguration?: ModifierConfigurationSummary | null;
 };
 
 export type OrderBasket = {

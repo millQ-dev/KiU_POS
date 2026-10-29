@@ -15,8 +15,99 @@ type GroupBinding = {
   selection_mode: string;
 };
 
+export type CatalogModifierOptionView = {
+  modifierOptionId: string;
+  code: string;
+  name: string;
+  sortOrder: number;
+  isDefault: boolean;
+  priceAdjustmentMinor: string;
+  kitchenInstructionCode: string | null;
+};
+
+export type CatalogModifierGroupView = {
+  modifierGroupId: string;
+  code: string;
+  name: string;
+  selectionMode: 'SINGLE' | 'MULTI';
+  minSelect: number;
+  maxSelect: number;
+  askEveryTime: boolean;
+  required: boolean;
+  sortOrder: number;
+  options: CatalogModifierOptionView[];
+};
+
 export class ModifiersService {
   constructor(private readonly pool: Pool) {}
+
+  /**
+   * Menu bindings for a sellable catalog item (counter POS configure UI).
+   */
+  async listCatalogItemModifierGroups(input: {
+    tenantId: string;
+    catalogItemId: string;
+  }): Promise<CatalogModifierGroupView[]> {
+    const bindings = await this.pool.query<{
+      modifier_group_id: string;
+      code: string;
+      name: string;
+      selection_mode: 'SINGLE' | 'MULTI';
+      min_select: number;
+      max_select: number;
+      ask_every_time: boolean;
+      required: boolean;
+      sort_order: number;
+    }>(
+      `SELECT b.modifier_group_id, g.code, g.name, g.selection_mode, g.min_select, g.max_select,
+              g.ask_every_time, b.required, b.sort_order
+       FROM catalog_item_modifier_group b
+       JOIN modifier_group g ON g.modifier_group_id = b.modifier_group_id
+       WHERE b.catalog_item_id = $1 AND b.tenant_id = $2
+       ORDER BY b.sort_order, g.code`,
+      [input.catalogItemId, input.tenantId],
+    );
+    const out: CatalogModifierGroupView[] = [];
+    for (const b of bindings.rows) {
+      const opts = await this.pool.query<{
+        modifier_option_id: string;
+        code: string;
+        name: string;
+        sort_order: number;
+        is_default: boolean;
+        price_adjustment_minor: string;
+        kitchen_instruction_code: string | null;
+      }>(
+        `SELECT modifier_option_id, code, name, sort_order, is_default,
+                price_adjustment_minor, kitchen_instruction_code
+         FROM modifier_option
+         WHERE modifier_group_id = $1 AND tenant_id = $2
+         ORDER BY sort_order, code`,
+        [b.modifier_group_id, input.tenantId],
+      );
+      out.push({
+        modifierGroupId: b.modifier_group_id,
+        code: b.code,
+        name: b.name,
+        selectionMode: b.selection_mode,
+        minSelect: b.min_select,
+        maxSelect: b.max_select,
+        askEveryTime: b.ask_every_time,
+        required: b.required,
+        sortOrder: b.sort_order,
+        options: opts.rows.map((o) => ({
+          modifierOptionId: o.modifier_option_id,
+          code: o.code,
+          name: o.name,
+          sortOrder: o.sort_order,
+          isDefault: o.is_default,
+          priceAdjustmentMinor: o.price_adjustment_minor,
+          kitchenInstructionCode: o.kitchen_instruction_code,
+        })),
+      });
+    }
+    return out;
+  }
 
   /**
    * Configure OPEN OrderLine modifier selections (ADR-0049).
@@ -47,6 +138,19 @@ export class ModifiersService {
       if (!order.rows[0]) throw new ModifierDomainError('ORDER_NOT_FOUND', 'Order not found');
       if (order.rows[0].status !== 'OPEN') {
         throw new ModifierDomainError('ORDER_NOT_OPEN', 'Modifiers only on OPEN orders');
+      }
+      // ADR-0032: live Settlement freezes commercial edits (same as other line mutations).
+      const liveSettlement = await client.query(
+        `SELECT 1 FROM settlement_group
+         WHERE order_id = $1 AND state IN ('COLLECTING', 'SATISFIED')
+         LIMIT 1`,
+        [input.orderId],
+      );
+      if ((liveSettlement.rowCount ?? 0) > 0) {
+        throw new ModifierDomainError(
+          'SETTLEMENT_EDIT_LOCKED',
+          'Order commercial content cannot mutate while a live Settlement exists',
+        );
       }
 
       const line = await client.query<{
@@ -241,6 +345,14 @@ export class ModifiersService {
         );
       }
 
+      // Line economics changed — invalidate accepted commercial terms (must re-accept).
+      await client.query(`DELETE FROM sales_order_commercial_line_terms WHERE order_id = $1`, [
+        input.orderId,
+      ]);
+      await client.query(`DELETE FROM sales_order_commercial_terms WHERE order_id = $1`, [
+        input.orderId,
+      ]);
+
       await client.query('COMMIT');
       return {
         orderLineConfigurationId: configId,
@@ -258,7 +370,7 @@ export class ModifiersService {
 
   /**
    * Fail-closed before commercial accept: every line with required or ask-every-time
-   * bindings must have an order_line_configuration snapshot. Wire from accept path in PR B+.
+   * bindings must have an order_line_configuration snapshot.
    */
   async assertLineConfigurationComplete(client: PoolClient, orderId: string): Promise<void> {
     const lines = await client.query<{

@@ -11,6 +11,7 @@ import { resolvePinPepper } from '../config.js';
 import { runMigrations } from '../db/migrate.js';
 import { IdentityService } from '../modules/identity/index.js';
 import { GoodsIssueService } from '../modules/inventory/goods-issue-service.js';
+import { AllergensService } from '../modules/allergens/index.js';
 import { ModifiersService } from '../modules/modifiers/index.js';
 import { OrdersService } from '../modules/orders/orders-service.js';
 import { seedAllergenFixture, type AllergenFixture } from '../test/allergen-fixture.js';
@@ -24,6 +25,7 @@ import {
 import { seedBlockCFixture, type BlockCFixture } from '../test/seed.js';
 import { registerAllergenRoutes } from './allergens.js';
 import { registerCompanyIdentityRoutes, registerIdentityRoutes } from './identity.js';
+import { registerPosRoutes } from './pos.js';
 
 const DATABASE_URL = process.env.DATABASE_URL ?? '';
 const describeHttp = isPosDisposableDatabaseUrl(DATABASE_URL) ? describe : describe.skip;
@@ -60,6 +62,12 @@ describeHttp('ADR-0050 allergen HTTP (disposable PG)', () => {
       pepper: PEPPER,
       allowedOrigins: [TEST_ORIGIN],
       isProduction: false,
+    });
+    await registerPosRoutes(app, pool, {
+      pepper: PEPPER,
+      allowedOrigins: [TEST_ORIGIN],
+      isProduction: false,
+      databaseUrl: DATABASE_URL,
     });
     await app.ready();
   });
@@ -280,5 +288,65 @@ describeHttp('ADR-0050 allergen HTTP (disposable PG)', () => {
       payload: { captureChoice: 'UNABLE_TO_CLARIFY' },
     });
     expect(put.statusCode).toBe(404);
+  });
+
+  it('commercial accept is gated by allergen readiness once a context exists', async () => {
+    const accept = () =>
+      app.inject({
+        method: 'POST',
+        url: `/api/v1/orders/${orderId}/calculate-and-accept-commercial-terms`,
+        headers: headers(),
+        payload: {
+          salesContext: {
+            tenantId: fx.tenantId,
+            brandId: fx.brandId,
+            outletId: fx.outletId,
+            orderChannel: 'DIRECT',
+            businessDateTime: '2026-09-16T17:30:00.000Z',
+          },
+          idempotencyKey: `allergen-gate-${randomUUID()}`,
+        },
+      });
+    const errorOf = async () => ((await accept()).json() as { error: string }).error;
+
+    // Stale/unresolved after capture via service (no resolve) → revalidation required.
+    await new AllergensService(pool).captureContext({
+      orderId,
+      captureChoice: 'SELECT_ALLERGENS',
+      allergenCodes: ['MILK'],
+    });
+    expect(await errorOf()).toBe('ALLERGEN_REVALIDATION_REQUIRED');
+
+    // Resolved, modification line needs kitchen acknowledgement.
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/orders/${orderId}/allergen-resolution`,
+      headers: headers(),
+      payload: {},
+    });
+    expect(await errorOf()).toBe('ALLERGEN_ACK_REQUIRED');
+
+    // Acknowledged → allergen gate passes (any later failure must not be an allergen error).
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/orders/${orderId}/lines/${lineId}/allergen-acknowledgements`,
+      headers: headers(),
+      payload: { kind: 'KITCHEN_ACKNOWLEDGED' },
+    });
+    expect(await errorOf()).not.toMatch(/^ALLERGEN_/);
+
+    // Switching the line to dairy under a MILK allergy is BLOCKED.
+    await new ModifiersService(pool).configureOrderLine({
+      orderId,
+      orderLineId: lineId,
+      selections: [{ modifierGroupId: al.milkGroupId, modifierOptionId: al.dairyOptionId }],
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/orders/${orderId}/allergen-resolution`,
+      headers: headers(),
+      payload: {},
+    });
+    expect(await errorOf()).toBe('ALLERGEN_LINE_BLOCKED');
   });
 });
