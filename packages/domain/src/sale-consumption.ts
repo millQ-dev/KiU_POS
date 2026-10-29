@@ -6,6 +6,10 @@ import {
   assertSameDimensionCompatibleUnits,
 } from './recipe-graph.js';
 import type { UnitDimension } from './quantity.js';
+import {
+  applyEffectiveRecipeDeltas,
+  type ModifierRecipeDelta,
+} from './effective-recipe-delta.js';
 
 function assertPositiveQty(value: string, label: string): void {
   assertPositive(parseCanonicalDecimal(value), label);
@@ -359,6 +363,93 @@ function explodeRecipe(
  * Root selection is structural — no silent priority heuristics.
  * RecipeProfile binding + competing STOCK_TRACKED root → AMBIGUOUS_CONSUMPTION_ROOT.
  */
+function virtualNestedCatalogIds(
+  components: readonly GraphComponent[],
+  lookup: RecipeGraphLookup,
+  visiting: Set<string>,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const component of components) {
+    if (component.componentKind !== 'PREPARATION_VERSION' || !component.nestedPreparationVersionId) {
+      continue;
+    }
+    if (visiting.has(component.nestedPreparationVersionId)) continue;
+    const prep = lookup.getPreparationVersion(component.nestedPreparationVersionId);
+    if (!prep || prep.materializationMode !== 'VIRTUAL') continue;
+    visiting.add(prep.preparationVersionId);
+    for (const inner of prep.components) {
+      if (inner.componentKind === 'CATALOG_ITEM' && inner.catalogItemId) {
+        ids.add(inner.catalogItemId);
+      }
+    }
+    for (const id of virtualNestedCatalogIds(prep.components, lookup, visiting)) {
+      ids.add(id);
+    }
+  }
+  return ids;
+}
+
+function recipeWithFrozenDeltas(
+  recipe: GraphRecipeVersion,
+  deltas: readonly ModifierRecipeDelta[],
+  lookup: RecipeGraphLookup,
+): GraphRecipeVersion {
+  if (deltas.length === 0) return recipe;
+  const nested = virtualNestedCatalogIds(recipe.components, lookup, new Set());
+  const catalog = recipe.components.filter(
+    (c) => c.componentKind === 'CATALOG_ITEM' && c.catalogItemId,
+  );
+  const topLevel = new Set(catalog.map((c) => c.catalogItemId));
+  const usedTargets = new Set<string>();
+  for (const delta of deltas) {
+    if (delta.kind === 'ADD_COMPONENT') continue;
+    const target = delta.targetCatalogItemId;
+    if (nested.has(target)) {
+      throw new DomainError(
+        'MODIFIER_DELTA_NESTED_TARGET',
+        `Effective Recipe delta cannot remove or replace ${target} inside a nested preparation`,
+      );
+    }
+    if (!topLevel.has(target)) {
+      throw new DomainError(
+        'MODIFIER_DELTA_TARGET_MISSING',
+        `${delta.kind === 'REMOVE_COMPONENT' ? 'REMOVE' : 'REPLACE'} target ${target} is not on the base recipe`,
+      );
+    }
+    if (usedTargets.has(target)) {
+      throw new DomainError(
+        'MODIFIER_DELTA_CONFLICT',
+        `Effective Recipe delta targets ${target} more than once`,
+      );
+    }
+    usedTargets.add(target);
+  }
+  const adjusted = applyEffectiveRecipeDeltas(
+    catalog.map((c) => ({
+      catalogItemId: c.catalogItemId!,
+      quantity: c.quantity,
+      unit: c.unit,
+      dimension: c.dimension,
+    })),
+    deltas,
+  );
+  let lineNumber =
+    recipe.components.reduce((max, c) => Math.max(max, c.lineNumber), 0) + 1;
+  const components: GraphComponent[] = [
+    ...recipe.components.filter((c) => c.componentKind !== 'CATALOG_ITEM'),
+    ...adjusted.map((c) => ({
+      lineNumber: lineNumber++,
+      componentKind: 'CATALOG_ITEM' as const,
+      catalogItemId: c.catalogItemId,
+      nestedPreparationVersionId: null,
+      quantity: c.quantity,
+      unit: c.unit,
+      dimension: c.dimension,
+    })),
+  ];
+  return { ...recipe, components };
+}
+
 export function resolveSaleLineConsumption(
   sold: {
     catalogItemId: string;
@@ -367,6 +458,7 @@ export function resolveSaleLineConsumption(
     dimension: UnitDimension;
   },
   lookup: RecipeGraphLookup,
+  deltas: readonly ModifierRecipeDelta[] = [],
 ): LineConsumptionPlan {
   assertPositiveQty(sold.quantity, 'sold quantity');
   const item = lookup.getCatalogItem(sold.catalogItemId);
@@ -383,6 +475,13 @@ export function resolveSaleLineConsumption(
   const recipe = lookup.getPublishedRecipeForCatalogItem(sold.catalogItemId);
   const stockPrep = lookup.getPublishedStockTrackedPrepForOutput(sold.catalogItemId);
 
+  if (deltas.length > 0 && !recipe) {
+    throw new DomainError(
+      'MODIFIER_DELTAS_REQUIRE_RECIPE',
+      `Sold item ${sold.catalogItemId} has Effective Recipe deltas but no published recipe`,
+    );
+  }
+
   if (recipe && stockPrep) {
     throw new DomainError(
       'AMBIGUOUS_CONSUMPTION_ROOT',
@@ -391,8 +490,9 @@ export function resolveSaleLineConsumption(
   }
 
   if (recipe) {
+    const effective = recipeWithFrozenDeltas(recipe, deltas, lookup);
     const { leaves, versions } = explodeRecipe(
-      recipe,
+      effective,
       sold.quantity,
       sold.unit,
       sold.dimension,

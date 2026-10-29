@@ -155,6 +155,25 @@ describe('resolveCatalogOffer', () => {
     policies: permit,
   };
 
+  it('skips a shared option whose target is not on this item', () => {
+    const r = resolveCatalogOffer(inputs, [
+      {
+        modifierGroupId: 'g-shared',
+        modifierOptionId: 'o-onion',
+        selectionMode: 'MULTI',
+        deltas: [{ kind: 'REMOVE_COMPONENT', targetCatalogItemId: 'onion' }],
+      },
+      {
+        modifierGroupId: 'g1',
+        modifierOptionId: 'o-oat',
+        selectionMode: 'SINGLE',
+        deltas: delta(MILK, EGG),
+      },
+    ]);
+    expect(r.result).toBe('AVAILABLE_WITH_MODIFICATION');
+    expect(r.requiredOptions).toEqual([{ modifierGroupId: 'g1', modifierOptionId: 'o-oat' }]);
+  });
+
   it('offers required options when an approved delta removes the allergen', () => {
     const r = resolveCatalogOffer(inputs, [
       {

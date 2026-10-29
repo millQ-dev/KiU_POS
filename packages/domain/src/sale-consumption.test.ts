@@ -83,6 +83,215 @@ describe('sale consumption resolver', () => {
     });
   });
 
+  it('REPLACE keeps the source unit so explosion converts into the replacement base unit', () => {
+    const oat: GraphCatalogItem = { catalogItemId: 'oat', baseUnit: 'L', dimension: 'VOLUME' };
+    const recipe: GraphRecipeVersion = {
+      recipeVersionId: 'rv1',
+      recipeSpecificationId: 'rs1',
+      status: 'PUBLISHED',
+      batchSizeQuantity: '1',
+      batchSizeUnit: 'ea',
+      batchSizeDimension: 'COUNT',
+      components: [
+        {
+          lineNumber: 1,
+          componentKind: 'CATALOG_ITEM',
+          catalogItemId: 'milk',
+          nestedPreparationVersionId: null,
+          quantity: '200',
+          unit: 'ml',
+          dimension: 'VOLUME',
+        },
+      ],
+    };
+    const plan = resolveSaleLineConsumption(
+      { catalogItemId: 'dish', quantity: '2', unit: 'ea', dimension: 'COUNT' },
+      lookup({ catalogs: [milk, oat, dish], recipeByItem: { dish: recipe } }),
+      [
+        {
+          kind: 'REPLACE_COMPONENT',
+          targetCatalogItemId: 'milk',
+          replacementCatalogItemId: 'oat',
+        },
+      ],
+    );
+    expect(plan.physicalLeaves).toHaveLength(1);
+    expect(plan.physicalLeaves[0]).toMatchObject({
+      catalogItemId: 'oat',
+      quantityBase: '0.4',
+      unitBase: 'L',
+    });
+  });
+
+  it('published REPLACE yield overrides the source quantity before conversion', () => {
+    const oat: GraphCatalogItem = { catalogItemId: 'oat', baseUnit: 'L', dimension: 'VOLUME' };
+    const recipe: GraphRecipeVersion = {
+      recipeVersionId: 'rv1',
+      recipeSpecificationId: 'rs1',
+      status: 'PUBLISHED',
+      batchSizeQuantity: '1',
+      batchSizeUnit: 'ea',
+      batchSizeDimension: 'COUNT',
+      components: [
+        {
+          lineNumber: 1,
+          componentKind: 'CATALOG_ITEM',
+          catalogItemId: 'milk',
+          nestedPreparationVersionId: null,
+          quantity: '200',
+          unit: 'ml',
+          dimension: 'VOLUME',
+        },
+      ],
+    };
+    const plan = resolveSaleLineConsumption(
+      { catalogItemId: 'dish', quantity: '2', unit: 'ea', dimension: 'COUNT' },
+      lookup({ catalogs: [milk, oat, dish], recipeByItem: { dish: recipe } }),
+      [
+        {
+          kind: 'REPLACE_COMPONENT',
+          targetCatalogItemId: 'milk',
+          replacementCatalogItemId: 'oat',
+          replacementQuantity: '100',
+          replacementUnit: 'ml',
+          replacementDimension: 'VOLUME',
+        },
+      ],
+    );
+    expect(plan.physicalLeaves[0]).toMatchObject({ catalogItemId: 'oat', quantityBase: '0.2' });
+  });
+
+  it('fails closed when a delta targets an ingredient inside a nested preparation', () => {
+    const blend: GraphPreparationVersion = {
+      preparationVersionId: 'pv-blend',
+      preparationSpecificationId: 'ps-blend',
+      status: 'PUBLISHED',
+      materializationMode: 'VIRTUAL',
+      outputCatalogItemId: null,
+      normativeOutputQuantity: '1',
+      normativeOutputUnit: 'ea',
+      normativeOutputDimension: 'COUNT',
+      components: [
+        {
+          lineNumber: 1,
+          componentKind: 'CATALOG_ITEM',
+          catalogItemId: 'milk',
+          nestedPreparationVersionId: null,
+          quantity: '100',
+          unit: 'ml',
+          dimension: 'VOLUME',
+        },
+      ],
+    };
+    const recipe: GraphRecipeVersion = {
+      recipeVersionId: 'rv-nest',
+      recipeSpecificationId: 'rs-nest',
+      status: 'PUBLISHED',
+      batchSizeQuantity: '1',
+      batchSizeUnit: 'ea',
+      batchSizeDimension: 'COUNT',
+      components: [
+        {
+          lineNumber: 1,
+          componentKind: 'PREPARATION_VERSION',
+          catalogItemId: null,
+          nestedPreparationVersionId: 'pv-blend',
+          quantity: '1',
+          unit: 'ea',
+          dimension: 'COUNT',
+        },
+      ],
+    };
+    expect(() =>
+      resolveSaleLineConsumption(
+        { catalogItemId: 'dish', quantity: '1', unit: 'ea', dimension: 'COUNT' },
+        lookup({
+          catalogs: [milk, dish],
+          recipeByItem: { dish: recipe },
+          preps: [blend],
+        }),
+        [{ kind: 'REMOVE_COMPONENT', targetCatalogItemId: 'milk' }],
+      ),
+    ).toThrow(/nested preparation/);
+  });
+
+  it('fails closed when a delta target is not on the top-level recipe', () => {
+    const recipe: GraphRecipeVersion = {
+      recipeVersionId: 'rv1',
+      recipeSpecificationId: 'rs1',
+      status: 'PUBLISHED',
+      batchSizeQuantity: '1',
+      batchSizeUnit: 'ea',
+      batchSizeDimension: 'COUNT',
+      components: [
+        {
+          lineNumber: 1,
+          componentKind: 'CATALOG_ITEM',
+          catalogItemId: 'milk',
+          nestedPreparationVersionId: null,
+          quantity: '200',
+          unit: 'ml',
+          dimension: 'VOLUME',
+        },
+      ],
+    };
+    expect(() =>
+      resolveSaleLineConsumption(
+        { catalogItemId: 'dish', quantity: '1', unit: 'ea', dimension: 'COUNT' },
+        lookup({ catalogs: [milk, dish], recipeByItem: { dish: recipe } }),
+        [{ kind: 'REMOVE_COMPONENT', targetCatalogItemId: 'onion' }],
+      ),
+    ).toThrow(/not on the base recipe/);
+  });
+
+  it('fails closed when two deltas target the same component, in either order', () => {
+    const oat: GraphCatalogItem = { catalogItemId: 'oat', baseUnit: 'L', dimension: 'VOLUME' };
+    const recipe: GraphRecipeVersion = {
+      recipeVersionId: 'rv1',
+      recipeSpecificationId: 'rs1',
+      status: 'PUBLISHED',
+      batchSizeQuantity: '1',
+      batchSizeUnit: 'ea',
+      batchSizeDimension: 'COUNT',
+      components: [
+        {
+          lineNumber: 1,
+          componentKind: 'CATALOG_ITEM',
+          catalogItemId: 'milk',
+          nestedPreparationVersionId: null,
+          quantity: '200',
+          unit: 'ml',
+          dimension: 'VOLUME',
+        },
+      ],
+    };
+    const sold = { catalogItemId: 'dish', quantity: '1', unit: 'ea', dimension: 'COUNT' as const };
+    const graph = lookup({ catalogs: [milk, oat, dish], recipeByItem: { dish: recipe } });
+    const remove = { kind: 'REMOVE_COMPONENT' as const, targetCatalogItemId: 'milk' };
+    const replace = {
+      kind: 'REPLACE_COMPONENT' as const,
+      targetCatalogItemId: 'milk',
+      replacementCatalogItemId: 'oat',
+    };
+    expect(() => resolveSaleLineConsumption(sold, graph, [remove, replace])).toThrow(/more than once/);
+    expect(() => resolveSaleLineConsumption(sold, graph, [replace, remove])).toThrow(/more than once/);
+  });
+
+  it('rejects Effective Recipe deltas on a line with no recipe', () => {
+    expect(() =>
+      resolveSaleLineConsumption(
+        { catalogItemId: 'milk', quantity: '1', unit: 'L', dimension: 'VOLUME' },
+        lookup({ catalogs: [milk] }),
+        [
+          {
+            kind: 'REMOVE_COMPONENT',
+            targetCatalogItemId: 'milk',
+          },
+        ],
+      ),
+    ).toThrow(/no published recipe/);
+  });
+
   it('nested VIRTUAL expands; nested STOCK_TRACKED is finished leaf only', () => {
     const virtualBlend: GraphPreparationVersion = {
       preparationVersionId: 'pv-virtual',
