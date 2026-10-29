@@ -52,17 +52,32 @@ async function companyLogin(page: Page, companyCode: string, pin: string) {
   await page.getByTestId('pin-submit').click();
 }
 
+/**
+ * Synthetic guest answers the mandatory order-local allergy question in the
+ * production dialog. Explicit NO_ALLERGIES_CONFIRMED only — not a product
+ * default and not a bypass of allergen validation.
+ */
+async function confirmNoAllergies(page: Page) {
+  const allergyDialog = page.getByRole('dialog', { name: /Ask guests about allergies/i });
+  await expect(allergyDialog).toBeVisible();
+  await allergyDialog.getByRole('radio', { name: /Guests confirmed: no allergies/i }).click();
+  await allergyDialog.getByRole('button', { name: 'Confirm' }).click();
+  await expect(allergyDialog).toBeHidden();
+}
+
 async function openCashShift(page: Page, opening: string) {
   // Disposable DB may already have OPEN CashShift — OpeningCashScreen auto-binds.
   const openingScreen = page.getByTestId('opening-cash-screen');
   const cashierReady = page.getByTestId('open-close-cash-shift');
   await expect(openingScreen.or(cashierReady)).toBeVisible({ timeout: 30_000 });
-  if (await cashierReady.isVisible().catch(() => false)) {
-    return;
+  if (!(await cashierReady.isVisible().catch(() => false))) {
+    await page.getByTestId('opening-amount-input').fill(opening);
+    await page.getByTestId('opening-submit').click();
+    await expect(cashierReady).toBeVisible({ timeout: 30_000 });
   }
-  await page.getByTestId('opening-amount-input').fill(opening);
-  await page.getByTestId('opening-submit').click();
-  await expect(cashierReady).toBeVisible({ timeout: 30_000 });
+  // CashierShell auto-opens an editable order. The capture dialog covers the shell
+  // until this guest answers, including close-shift paths that never sell.
+  await confirmNoAllergies(page);
 }
 
 async function currentCashShiftId(page: Page): Promise<string> {
@@ -103,9 +118,12 @@ async function sellEggAndOpenSettlement(page: Page) {
     await abort.click();
   }
   const newOrder = page.getByRole('button', { name: /New order/i });
-  if (await newOrder.isVisible().catch(() => false)) {
+  if (await newOrder.isVisible().catch(() => false) &&
+      !(await page.getByText(/Empty — tap a product/i).isVisible().catch(() => false))) {
     await newOrder.click();
     await expect(page.getByText(/Empty — tap a product/i)).toBeVisible({ timeout: 15_000 });
+    // A replacement order has no allergen context yet.
+    await confirmNoAllergies(page);
   }
   // Egg is on both Quick Access and page grid — same catalogItemId testid.
   const slot = page.getByTestId(`pos-slot-${fx.eggCatalogItemId}`).first();
@@ -524,6 +542,8 @@ test('surplus requires reason; shortage FORBIDDEN then Manager re-auth closes', 
   await page.getByTestId('pin-input').fill(fx.managerPin);
   await page.getByTestId('pin-submit').click();
   await expect(page.getByTestId('open-close-cash-shift')).toBeVisible({ timeout: 30_000 });
+  // Re-auth remounts CashierShell, which opens a new order and asks again.
+  await confirmNoAllergies(page);
   await page.getByTestId('open-close-cash-shift').click();
   await page.getByTestId('close-actual-input').fill('90000');
   await page.getByTestId('close-reason-input').fill('Manager counted shortage');
