@@ -94,9 +94,12 @@ export async function acceptFinalMerchandiseTerms(
         defaultGross;
       const unit =
         opts?.unitPriceByOrderLineId?.[l.orderLineId] ?? unitPriceForTargetGross(gross, l.quantity);
-      const rounded = calculateRoundedLineGross({
-        unitMoney: createMoney(unit, currencyCode, minorUnitExponent),
+      const rounded = roundConfiguredMerchandiseLine({
+        baseUnitMinor: unit,
+        perUnitModifierMinor: '0',
         quantity: l.quantity,
+        currencyCode,
+        minorUnitExponent,
         roundingPolicy: policy,
       });
       if (rounded.roundedGrossMoney.amountMinor !== gross) {
@@ -123,6 +126,8 @@ export async function acceptFinalMerchandiseTerms(
         provenance: {
           source: 'TEST_HELPER_C1_1',
           commercialGrossPolicy: 'BASE_LIST_LINE_GROSS_ROUNDED',
+          additivePriceAdjustmentMinor: '0',
+          configuredUnitPriceMinor: rounded.configuredUnitMinor,
         },
       };
     },

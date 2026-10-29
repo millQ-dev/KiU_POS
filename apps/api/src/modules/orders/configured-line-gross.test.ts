@@ -118,6 +118,17 @@ describe('configured merchandise validation matches calculation', () => {
     );
   });
 
+  it('rejects a missing effective unit price', () => {
+    expect(() =>
+      accept({
+        quantity: '2',
+        base: '20000',
+        delta: '5000',
+        provenanceExtra: { configuredUnitPriceMinor: undefined },
+      }),
+    ).toThrow(/configured unit price is required/);
+  });
+
   it('rejects a configured unit that does not match the kernel', () => {
     expect(() =>
       accept({
@@ -235,6 +246,14 @@ describe('configured merchandise validation matches calculation', () => {
             orderLineId: lineId,
             provenance: { additivePriceAdjustmentMinor: '5000', configurationFingerprint: 'fp-old' },
           },
+        ],
+      }),
+    ).rejects.toThrow(/stale/);
+    await expect(
+      assertModifierConfigurationMatchesTerms(client as never, {
+        orderId: ORDER_ID,
+        lineTerms: [
+          { orderLineId: lineId, provenance: { additivePriceAdjustmentMinor: '5000' } },
         ],
       }),
     ).rejects.toThrow(/stale/);

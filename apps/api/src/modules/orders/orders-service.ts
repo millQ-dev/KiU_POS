@@ -116,10 +116,13 @@ function assertStoredModifierMatches(
       `Modifier delta for line ${orderLineId} does not match the stored configuration`,
     );
   }
-  if (
-    submitted.fingerprint != null &&
-    submitted.fingerprint !== stored?.configuration_fingerprint
-  ) {
+  if (stored != null && submitted.fingerprint !== stored.configuration_fingerprint) {
+    throw new DomainValidationError(
+      'CONFIGURATION_STALE',
+      `Modifier configuration fingerprint for line ${orderLineId} is stale`,
+    );
+  }
+  if (stored == null && submitted.fingerprint != null) {
     throw new DomainValidationError(
       'CONFIGURATION_STALE',
       `Modifier configuration fingerprint for line ${orderLineId} is stale`,

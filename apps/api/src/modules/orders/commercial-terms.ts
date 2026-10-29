@@ -170,10 +170,13 @@ function assertValidatedRoundingProvenance(input: {
     mapMoney(e);
   }
 
-  if (
-    input.configuredUnitPriceMinor != null &&
-    input.configuredUnitPriceMinor !== expected.configuredUnitMinor
-  ) {
+  if (input.configuredUnitPriceMinor == null) {
+    throw new DomainValidationError(
+      'COMMERCIAL_ROUNDING_POLICY_INVALID',
+      'configured unit price is required',
+    );
+  }
+  if (input.configuredUnitPriceMinor !== expected.configuredUnitMinor) {
     throw new DomainValidationError(
       'COMMERCIAL_ROUNDING_POLICY_INVALID',
       'configured unit price does not match base unit plus per-unit modifier delta',

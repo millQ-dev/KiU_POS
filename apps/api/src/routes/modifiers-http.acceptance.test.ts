@@ -175,7 +175,11 @@ describeHttp('NEXT-04 modifier HTTP (disposable PG)', () => {
     });
     expect(configured.statusCode).toBe(200);
     const cfgBody = configured.json() as {
-      configuration: { additivePriceAdjustmentMinor: string; kitchenInstructions: string[] };
+      configuration: {
+        additivePriceAdjustmentMinor: string;
+        configurationFingerprint: string;
+        kitchenInstructions: string[];
+      };
       order: {
         lines: Array<{ modifierConfiguration: { additivePriceAdjustmentMinor: string } | null }>;
       };
@@ -208,7 +212,10 @@ describeHttp('NEXT-04 modifier HTTP (disposable PG)', () => {
           eligibleForOrderDiscount: true,
           thirdPartyMerchandiseFundingMinor: '0',
           certainty: 'FINAL',
-          provenance: { additivePriceAdjustmentMinor: '5000' },
+          provenance: {
+            additivePriceAdjustmentMinor: '5000',
+            configurationFingerprint: cfgBody.configuration.configurationFingerprint,
+          },
         },
       ],
     });
