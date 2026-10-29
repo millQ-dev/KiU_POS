@@ -104,6 +104,8 @@ CREATE TABLE IF NOT EXISTS order_line_configuration (
   configuration_fingerprint TEXT NOT NULL,
   additive_price_adjustment_minor TEXT NOT NULL DEFAULT '0',
   kitchen_instructions_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  -- ADR-0049 #9: freeze resolved Effective Recipe deltas with the configuration (no live re-resolve).
+  effective_recipe_deltas_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   frozen_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT order_line_configuration_line_uq UNIQUE (order_line_id),

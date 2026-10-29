@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import {
-  applyEffectiveRecipeDeltas,
   sumAdditivePriceAdjustmentsMinor,
   type ModifierRecipeDelta,
 } from '@millq/domain';
@@ -77,8 +76,15 @@ export class ModifiersService {
         [line.rows[0].catalog_item_id, order.rows[0].tenant_id],
       );
 
+      const boundGroupIds = new Set(bindings.rows.map((b) => b.modifier_group_id));
       const byGroup = new Map<string, string[]>();
       for (const s of input.selections) {
+        if (!boundGroupIds.has(s.modifierGroupId)) {
+          throw new ModifierDomainError(
+            'MODIFIER_GROUP_UNBOUND',
+            `Modifier group ${s.modifierGroupId} is not bound to this catalog item`,
+          );
+        }
         const list = byGroup.get(s.modifierGroupId) ?? [];
         list.push(s.modifierOptionId);
         byGroup.set(s.modifierGroupId, list);
@@ -91,6 +97,7 @@ export class ModifiersService {
 
       for (const b of bindings.rows) {
         let chosen = byGroup.get(b.modifier_group_id) ?? [];
+        // Defaults apply only when the group is neither required nor ask-every-time.
         if (chosen.length === 0 && !b.ask_every_time && !b.required) {
           const defaults = await client.query<{ modifier_option_id: string }>(
             `SELECT modifier_option_id FROM modifier_option
@@ -100,18 +107,18 @@ export class ModifiersService {
           );
           chosen = defaults.rows.map((r) => r.modifier_option_id);
         }
-        if (b.required || b.ask_every_time) {
-          if (chosen.length < Math.max(b.min_select, b.required ? 1 : b.min_select)) {
+        // ADR-0049 #5: ask-every-time always needs an explicit selection (≥1), even if min_select=0.
+        const explicitMin = b.required || b.ask_every_time ? Math.max(1, b.min_select) : b.min_select;
+        if (chosen.length < explicitMin || chosen.length > b.max_select) {
+          if ((b.required || b.ask_every_time) && chosen.length === 0) {
             throw new ModifierDomainError(
               'MODIFIER_REQUIRED',
               `Modifier group ${b.modifier_group_id} requires selection`,
             );
           }
-        }
-        if (chosen.length < b.min_select || chosen.length > b.max_select) {
           throw new ModifierDomainError(
             'MODIFIER_SELECTION_COUNT',
-            `Group ${b.modifier_group_id} expects ${b.min_select}..${b.max_select} selections`,
+            `Group ${b.modifier_group_id} expects ${explicitMin}..${b.max_select} selections`,
           );
         }
         if (b.selection_mode === 'SINGLE' && chosen.length > 1) {
@@ -190,8 +197,8 @@ export class ModifiersService {
       }
 
       const additive = sumAdditivePriceAdjustmentsMinor(priceParts);
-      // Touch deltas for fingerprint stability (effective apply happens at consumption time).
-      void applyEffectiveRecipeDeltas([], deltas);
+      // Snapshot deltas now (ADR-0049 #9); consumption must not re-resolve live menu deltas.
+      const recipeDeltasJson = JSON.stringify(deltas);
       const fingerprint = createHash('sha256')
         .update(
           JSON.stringify({
@@ -210,8 +217,9 @@ export class ModifiersService {
       await client.query(
         `INSERT INTO order_line_configuration (
            order_line_configuration_id, tenant_id, order_id, order_line_id,
-           configuration_fingerprint, additive_price_adjustment_minor, kitchen_instructions_json
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+           configuration_fingerprint, additive_price_adjustment_minor, kitchen_instructions_json,
+           effective_recipe_deltas_json
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb)`,
         [
           configId,
           order.rows[0].tenant_id,
@@ -220,6 +228,7 @@ export class ModifiersService {
           fingerprint,
           additive,
           JSON.stringify(kitchen),
+          recipeDeltasJson,
         ],
       );
       for (const s of validatedSelections) {
@@ -247,18 +256,25 @@ export class ModifiersService {
     }
   }
 
+  /**
+   * Fail-closed before commercial accept: every line with required or ask-every-time
+   * bindings must have an order_line_configuration snapshot. Wire from accept path in PR B+.
+   */
   async assertLineConfigurationComplete(client: PoolClient, orderId: string): Promise<void> {
     const lines = await client.query<{
       order_line_id: string;
       catalog_item_id: string;
     }>(`SELECT order_line_id, catalog_item_id FROM sales_order_line WHERE order_id = $1`, [orderId]);
     for (const line of lines.rows) {
-      const required = await client.query<{ modifier_group_id: string }>(
-        `SELECT modifier_group_id FROM catalog_item_modifier_group
-         WHERE catalog_item_id = $1 AND required = TRUE`,
+      const needsConfig = await client.query<{ modifier_group_id: string }>(
+        `SELECT b.modifier_group_id
+         FROM catalog_item_modifier_group b
+         JOIN modifier_group g ON g.modifier_group_id = b.modifier_group_id
+         WHERE b.catalog_item_id = $1
+           AND (b.required = TRUE OR g.ask_every_time = TRUE)`,
         [line.catalog_item_id],
       );
-      if (required.rowCount === 0) continue;
+      if (needsConfig.rowCount === 0) continue;
       const cfg = await client.query<{ order_line_configuration_id: string }>(
         `SELECT order_line_configuration_id FROM order_line_configuration WHERE order_line_id = $1`,
         [line.order_line_id],

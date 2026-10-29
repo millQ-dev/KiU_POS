@@ -117,5 +117,72 @@ describeModifiers('ADR-0049 modifiers (disposable PG)', () => {
     expect(ok.additivePriceAdjustmentMinor).toBe('5000');
     expect(ok.kitchenInstructions).toContain('MILK_OAT');
     expect(ok.configurationFingerprint.length).toBe(64);
+
+    const snap = await pool.query<{
+      kitchen_instructions_json: unknown;
+      effective_recipe_deltas_json: unknown;
+    }>(
+      `SELECT kitchen_instructions_json, effective_recipe_deltas_json
+       FROM order_line_configuration WHERE order_line_id = $1`,
+      [lineId],
+    );
+    expect(snap.rows[0]?.kitchen_instructions_json).toEqual(['MILK_OAT']);
+    expect(Array.isArray(snap.rows[0]?.effective_recipe_deltas_json)).toBe(true);
+  });
+
+  it('ask-every-time with min_select=0 still requires explicit selection (ADR-0049 #5)', async () => {
+    const cappuccino = fx.milkItemId;
+    const groupId = randomUUID();
+    const optExtra = randomUUID();
+    await pool.query(
+      `INSERT INTO modifier_group (
+         modifier_group_id, tenant_id, code, name, selection_mode, min_select, max_select, ask_every_time
+       ) VALUES ($1,$2,'extra_ask','Extra ask','SINGLE',0,1,TRUE)`,
+      [groupId, fx.tenantId],
+    );
+    await pool.query(
+      `INSERT INTO modifier_option (
+         modifier_option_id, tenant_id, modifier_group_id, code, name, sort_order, is_default, price_adjustment_minor
+       ) VALUES ($1,$2,$3,'none','None',1,TRUE,'0')`,
+      [optExtra, fx.tenantId, groupId],
+    );
+    // Binding is NOT required — ask_every_time alone must fail-closed.
+    await pool.query(
+      `INSERT INTO catalog_item_modifier_group (
+         catalog_item_modifier_group_id, tenant_id, catalog_item_id, modifier_group_id, required, sort_order
+       ) VALUES ($1,$2,$3,$4,FALSE,1)`,
+      [randomUUID(), fx.tenantId, cappuccino, groupId],
+    );
+
+    const opened = await orders.openOrder({
+      tenantId: fx.tenantId,
+      legalEntityId: fx.legalEntityId,
+      outletId: fx.outletId,
+      channel: 'DIRECT',
+    });
+    const withLine = await orders.addOrderLine({
+      orderId: opened.orderId,
+      catalogItemId: cappuccino,
+      quantity: '1',
+      unit: 'L',
+      dimension: 'VOLUME',
+    });
+    const lineId = withLine.lines[0]!.orderLineId;
+
+    await expect(
+      modifiers.configureOrderLine({
+        orderId: opened.orderId,
+        orderLineId: lineId,
+        selections: [],
+      }),
+    ).rejects.toMatchObject({ code: 'MODIFIER_REQUIRED' });
+
+    const ok = await modifiers.configureOrderLine({
+      orderId: opened.orderId,
+      orderLineId: lineId,
+      selections: [{ modifierGroupId: groupId, modifierOptionId: optExtra }],
+      guestNote: 'no foam',
+    });
+    expect(ok.kitchenInstructions).toContain('GUEST_NOTE_NON_AUTHORITATIVE:no foam');
   });
 });

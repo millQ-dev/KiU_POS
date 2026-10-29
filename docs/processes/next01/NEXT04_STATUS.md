@@ -17,10 +17,12 @@ NEXT03 prep docs stamped PO ACCEPTED (historical).
 
 | PR | Scope | Status |
 | --- | --- | --- |
-| A | ADR docs + migration `037_modifier_effective_recipe_v1.sql` + domain deltas + `ModifiersService` | This ship |
-| B | Counter POS modifier UI + HTTP | Follow-on |
+| A | ADR docs + migration `037` + domain deltas + `ModifiersService.configureOrderLine` | Origin #127 — Level B gates |
+| B | Counter POS modifier UI + HTTP + wire `assertLineConfigurationComplete` on accept | Follow-on |
 | C | Allergy order-start + resolution + kitchen (legal override gated) | Follow-on |
 | D | ApplyOrderMerchantDiscount + cashier UX | Follow-on |
+
+**PR A note:** commercial-accept wiring of `assertLineConfigurationComplete` is deferred to PR B+; configure path is fail-closed for required/ask-every-time. Effective Recipe deltas are snapshotted on `order_line_configuration.effective_recipe_deltas_json` (ADR-0049 #9).
 
 ## CI flake
 
