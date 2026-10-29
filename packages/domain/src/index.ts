@@ -128,6 +128,7 @@ export {
 } from './order-commercial.js';
 export {
   MAX_ORDER_MERCHANT_DISCOUNT_BASIS_POINTS,
+  MERCHANT_DISCOUNT_PERCENT_TO_MINOR,
   MerchantDiscountPolicyError,
   normalizeDiscountReason,
   parsePercentToBasisPoints,

@@ -3,11 +3,23 @@
  * Pure resolution of an order-level merchant-funded discount amount from a cashier request.
  * Allocation across lines stays in allocateOrderMerchantDiscount (ADR-0028).
  */
+import { Decimal, parseCanonicalDecimal, toCanonicalDecimal } from './decimal.js';
 import { DomainError } from './errors.js';
 
 /** ADR-0051 D3 — maximum order-level discount: 20% of eligible merchandise basis. */
 export const MAX_ORDER_MERCHANT_DISCOUNT_BASIS_POINTS = 2000;
 const BASIS_POINTS_DENOMINATOR = 10000n;
+
+/**
+ * ADR-0051 Accepted WITH CHANGES — named rounding context for percent → minor.
+ * Not BASE_LIST_LINE_GROSS. HALF_UP, quantum 1, versioned on the commercial snapshot.
+ */
+export const MERCHANT_DISCOUNT_PERCENT_TO_MINOR = {
+  calculationContext: 'MERCHANT_DISCOUNT_PERCENT_TO_MINOR',
+  roundingMode: 'HALF_UP',
+  quantumMinor: '1',
+  policyVersion: 1,
+} as const;
 
 export class MerchantDiscountPolicyError extends DomainError {
   constructor(code: string, message: string) {
@@ -66,7 +78,7 @@ function assertWithinCap(discount: bigint, basis: bigint): void {
 
 /**
  * Resolves the discount amount in minor units.
- * PERCENT rounds DOWN to a whole minor unit (never favours the guest over the cap).
+ * PERCENT converts through MERCHANT_DISCOUNT_PERCENT_TO_MINOR (HALF_UP, quantum 1).
  */
 export function resolveOrderMerchantDiscount(input: {
   readonly request: OrderMerchantDiscountRequest;
@@ -113,16 +125,22 @@ export function resolveOrderMerchantDiscount(input: {
       'Order merchant discount exceeds 20% of eligible merchandise basis',
     );
   }
-  const discount = (basis * BigInt(basisPoints)) / BASIS_POINTS_DENOMINATOR;
+  const exact = parseCanonicalDecimal(basis.toString())
+    .mul(basisPoints)
+    .div(Number(BASIS_POINTS_DENOMINATOR));
+  const rounded = exact.toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+  const discountMinor = toCanonicalDecimal(rounded);
+  const discount = BigInt(discountMinor);
   if (discount === 0n) {
     throw new MerchantDiscountPolicyError(
       'DISCOUNT_AMOUNT_INVALID',
       'Percentage discount rounds to zero minor units',
     );
   }
+  assertWithinCap(discount, basis);
   return {
     mode: 'PERCENT',
-    discountMinor: discount.toString(),
+    discountMinor,
     percentBasisPoints: basisPoints,
     eligibleBasisMinor: basis.toString(),
     reason,
