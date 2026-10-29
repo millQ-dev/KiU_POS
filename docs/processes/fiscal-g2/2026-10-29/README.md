@@ -17,4 +17,4 @@ This directory is the G0 record for the 29 October 2026 Vietnam fiscal pilot ass
 
 Autonomy of the original handoff: **Level A** (documentation). It does not change FiscalPolicy, LegalEntity behavior, or authority semantics.
 
-PO correction (same day): sandbox implementation authorization and production provider approval are separate. G2-18 does not block local synthetic fixtures, interface design on the existing port, vendor negotiations, or the start of an isolated sandbox adapter. Binding architecture, a live vendor API, and data egress wait for acceptance of proposed [ADR-0053](../../../decisions/ADR-0053-fiscal-sandbox-adapter-boundary.md). No G2 row is closed.
+PO ACCEPT WITH CHANGES 2026-10-29 records [ADR-0053](../../../decisions/ADR-0053-fiscal-sandbox-adapter-boundary.md) for S1–S6 only. Local synthetic adapter work may proceed without G2-18 and without a vendor call. A real sandbox network call still needs a written API contract, permitted credentials, vendor authorization, and a destination-specific egress record. No G2 row is closed. Production GO is not granted.

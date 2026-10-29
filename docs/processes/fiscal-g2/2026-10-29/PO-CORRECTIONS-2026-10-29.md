@@ -14,7 +14,7 @@ G2-01 through G2-18 stay **OPEN** until a real artifact exists. Nothing in a pro
 
 | | Sandbox implementation | Production provider approval |
 | --- | --- | --- |
-| What it allows | An isolated adapter behind the existing `FiscalProviderAdapter`, sandbox credentials, synthetic or otherwise egress-approved calls | Real merchant issuance on a production process |
+| What it allows | Local synthetic work on the existing `FiscalProviderAdapter`, and later a SANDBOX binding. A real network call waits for a written API contract, permitted credentials, vendor authorization, and a destination-specific egress record | Real merchant issuance on a production process |
 | What it does not allow | Production `enabled`, production credentials, or gate `SATISFIED` from an unreviewed evidence class | Follows only from the production GO in `PRODUCTION-STOP.md` |
 | G2-18 | Not required to begin | Required. G2-18 is that production GO and the persistent-database migrate GO |
 
@@ -22,17 +22,15 @@ G2-01 through G2-18 stay **OPEN** until a real artifact exists. Nothing in a pro
 
 - Controlled vendor negotiations, contracts, and onboarding preparation. A contract or an onboarding checklist does not enable real merchant issuance and does not mark G2-06, G2-16, or G2-18 PASS.
 - Harmless local fixtures and interface design on the existing fiscal port. Synthetic transport only. No fabricated provider confirmation. No second invoice for the same fiscal intent. The disposable test adapter stays off production routes. `FiscalCheckoutGate` stays fail-closed.
-- Isolated sandbox adapter implementation, after the Level C items in section 3 are accepted for that slice.
+- Isolated local synthetic adapter preparation. It does not call Viettel or MISA.
 
-## 3. Level C still required before these three
+## 3. Live sandbox network call
 
-Proposed text: [ADR-0053](../../../decisions/ADR-0053-fiscal-sandbox-adapter-boundary.md). Status **Proposed**. Landing that file is not PO ACCEPT.
+Accepted text: [ADR-0053](../../../decisions/ADR-0053-fiscal-sandbox-adapter-boundary.md). Status **Accepted with changes** on 2026-10-29, scope S1–S6 only. That acceptance does not grant a live network call.
 
-- New provider-binding architecture (LegalEntity credential reference, environment, enablement).
-- Technical API requirements for the vendor call (version, idempotency, status mapping) when the adapter will perform a real call.
-- Data-egress controls for anything leaving KiU, including sandbox.
+A real sandbox network call, including one that sends only synthetic payloads, still needs a written provider API contract, permitted credentials, relevant vendor authorization, and a destination-specific approved egress record.
 
-Local fixtures and interface design do not wait on production GO. They also do not need a new binding table.
+Local synthetic adapter work does not wait on G2-18 and does not call a vendor.
 
 ## 4. `PROVIDER_CONFIRMED_ISSUED`
 

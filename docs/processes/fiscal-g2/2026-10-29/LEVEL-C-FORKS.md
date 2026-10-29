@@ -12,7 +12,7 @@ Viettel S-Invoice is the commercial diligence candidate. MISA meInvoice is the p
 
 **PO correction 2026-10-29:** sandbox implementation authorization is not this production decision. G2-18 does not have to be PASS before isolated sandbox work begins. Negotiations, contracts, and onboarding preparation are allowed and do not enable issuance.
 
-**Still required before a live sandbox call:** Level C acceptance of binding architecture, technical API requirements, and data-egress controls. Proposed text: ADR-0053. Local synthetic fixtures and interface design on the existing port are not blocked on G2-18.
+**Still required before a live sandbox network call, including synthetic payloads:** a written provider API contract, permitted credentials, relevant vendor authorization, and a destination-specific approved egress record. ADR-0053 is Accepted with changes for the SANDBOX boundary only. Local synthetic work that does not call a vendor is not blocked on G2-18.
 
 **Production** `enabled`, a production credential, and a provider switch stay forbidden until a named production approval and G2-18. Do not fabricate provider confirmation, create a duplicate invoice, enable the test adapter in production, or bypass `FiscalCheckoutGate`.
 
@@ -30,7 +30,7 @@ ADR-0014 D8 already says profiles are versioned and fail-closed and do **not** c
 
 The suggested shape (provider code, merchant tax code, vault `credentialRef`, registered mode, tax-office evidence id, `SANDBOX|PRODUCTION`, `enabled`) matches the Proposed `integration_provider_binding` in INTEGRATIONS-0 §3.2. It is not Accepted. No `apps/api/src/modules/integrations/` package exists. No vault module exists. Adapter selection today is process-wide (`resolveFiscalProviderAdapter`), not per LegalEntity.
 
-Unclear Level B vs Level C is Level C. The proposal is ADR-0053 (Proposed). A binding migration, credential resolution, or egress hook waits for ACCEPT of that ADR. It does not wait for G2-18. This correction does not add the table.
+ADR-0053 is Accepted with changes for a LegalEntity-scoped SANDBOX binding behind the existing port. This document does not add the table. A live network call still needs the written API contract, credentials, vendor authorization, and destination egress record. Production `enabled` stays false until G2-18. G2-18 does not block local synthetic work.
 
 ## Fork 4 — Counsel conclusion on C0 prepaid issue time (G2-04)
 
