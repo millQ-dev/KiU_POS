@@ -298,7 +298,7 @@ export class ApprovalRequestService {
 
     const requestId = randomUUID();
     const expiresAt = new Date(Date.now() + APPROVAL_TTL_SECONDS * 1000);
-    const fingerprint = {
+    const fingerprintRaw: Record<string, unknown> = {
       ...cmd.operationFingerprint,
       operationType: cmd.operationType,
       tenantId: principal.tenantId,
@@ -306,6 +306,14 @@ export class ApprovalRequestService {
       terminalId: cmd.terminalId,
       requesterUserId: principal.userId,
     };
+    // ADR-0051: trim reason so create/consume fingerprints match ApplyOrderMerchantDiscount.
+    if (
+      cmd.operationType === ORDER_MERCHANT_DISCOUNT_OPERATION_TYPE &&
+      typeof fingerprintRaw.reason === 'string'
+    ) {
+      fingerprintRaw.reason = fingerprintRaw.reason.trim();
+    }
+    const fingerprint = fingerprintRaw;
 
     await this.pool.query(
       `INSERT INTO identity_approval_request (

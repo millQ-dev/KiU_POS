@@ -435,6 +435,17 @@ describeDiscount('ADR-0051 ApplyOrderMerchantDiscount v1 (disposable PG)', () =>
     expect(await discountOnOrder(orderId)).toBe('0');
   });
 
+  it('padded reason still matches ApprovalRequest fingerprint after trim', async () => {
+    const orderId = await openAcceptedOrder();
+    const request = fixed('2500', '  Guest goodwill  ');
+    const approvalRequestId = await approvedRequest(orderId, request);
+    const res = await apply(orderId, applyBody(request, approvalRequestId));
+    expect(res.statusCode).toBe(200);
+    expect(res.json().reason).toBe('Guest goodwill');
+    expect(await discountOnOrder(orderId)).toBe('2500');
+    expect(await approvalStatus(approvalRequestId)).toBe('CONSUMED');
+  });
+
   it('approval evidence is mandatory and must be a valid, bound, single-use APPROVED request', async () => {
     const orderId = await openAcceptedOrder();
     const request = fixed('3000');

@@ -109,7 +109,8 @@ export function buildOrderMerchantDiscountFingerprint(input: {
     ...(input.request.mode === 'FIXED_MINOR'
       ? { amountMinor: input.request.amountMinor }
       : { percentBasisPoints: input.percentBasisPoints }),
-    reason: input.reason,
+    // Always store the normalized reason so ApprovalRequest create/consume cannot diverge on whitespace.
+    reason: normalizeDiscountReason(input.reason),
   };
 }
 
