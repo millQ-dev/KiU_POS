@@ -12,6 +12,7 @@ import pg from 'pg';
 import { OperationalFactType } from '@millq/contracts';
 import { allocateOrderMerchantDiscount, parseCanonicalDecimal, toCanonicalDecimal } from '@millq/domain';
 import { runMigrations } from '../db/migrate.js';
+import { ensureAllergenReadyForCommercialAccept } from '../test/allergen-commercial-ready.js';
 import { acceptFinalMerchandiseTerms, setOrderCommercialTermsWithRounding } from '../test/commercial-terms.js';
 import { seedBlockCFixture, type BlockCFixture } from '../test/seed.js';
 import { GoodsIssueService } from '../modules/inventory/goods-issue-service.js';
@@ -1825,6 +1826,7 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
         dimension: 'VOLUME',
       });
 
+      await ensureAllergenReadyForCommercialAccept(pool, order.orderId);
       const accepted = await acceptance.calculateAndAcceptBaseCommercialTerms({
         orderId: order.orderId,
         salesContext,
@@ -1846,6 +1848,7 @@ describe('GOLDEN-1 — Golden Restaurant Scenario / Torture Test (PostgreSQL)', 
       let commercial = await orders.getOpenCommercialStatus(order.orderId);
       expect(commercial.commercialState).toBe('NOT_ACCEPTED');
 
+      await ensureAllergenReadyForCommercialAccept(pool, order.orderId);
       await acceptance.calculateAndAcceptBaseCommercialTerms({
         orderId: order.orderId,
         salesContext,

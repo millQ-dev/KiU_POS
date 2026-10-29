@@ -35,3 +35,7 @@ Universal promotions engine; replace-price matrices; production migrate GO; Floo
 - Migration `037_modifier_effective_recipe_v1.sql` (disposable/CI first).  
 - Domain module under Menu + Orders configuration + sale-consumption Effective Recipe apply.  
 - Implementation Level B review discipline after this Accept.
+
+## Operational contract (does not replace this Accept)
+
+[ADR-0052](ADR-0052-modifier-v1-contract.md) records the 2026-10-29 APPROVE WITH CHANGES corrections. ADR-0049 M1–M8 remain the accepted product rules.

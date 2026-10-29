@@ -76,7 +76,8 @@ export type KitchenWarning = {
     | 'ALLERGEN_MODIFICATION'
     | 'ALLERGEN_UNCERTAINTY'
     | 'CROSS_CONTACT_RISK'
-    | 'ALLERGEN_BLOCKED';
+    | 'ALLERGEN_BLOCKED'
+    | 'ALLERGEN_RESOLUTION_MISSING';
   severity: 'CRITICAL';
   allergenCodes: string[];
   handlingCodes: string[];

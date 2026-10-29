@@ -1,6 +1,8 @@
 # NEXT-03 G2 — Operator Discount inspection + Level C STOP
 
-**PO ACCEPT:** 2026-10-28 — D1–D6 accepted; implementation authority → **ADR-0051**. This file remains the pre-Accept audit that proved no cashier E2E path existed.
+**PO ACCEPT:** 2026-10-28 — short D1–D6 → **ADR-0051**. This file remains the pre-Accept audit that proved no cashier E2E path existed.
+
+**2026-10-29:** PO contract review APPROVE WITH CHANGES. D1–D6 stay accepted. Operational corrections are in ADR-0051. `RevokeOrderMerchantDiscount` is not part of v1.
 
 **Origin baseline (audit):** `de1e79915c867af7f9bf94068f7010477c45b1f1`  
 **Pre-Accept verdict:** No Level B without Accept — **superseded by ADR-0051 Accept**.

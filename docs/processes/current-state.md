@@ -11,7 +11,7 @@
 
 | Item | State |
 | --- | --- |
-| Migration head | **036** on main tip `02f00bf…`; **037** Modifier ships in NEXT-04 PR A (disposable/CI — **not** production migrate GO) |
+| Migration head | **036** on main tip `02f00bf…`; **037** Modifier ships in NEXT-04 PR A; **038** ApplyOrderMerchantDiscount approver permission ships in PR D (disposable/CI — **not** production migrate GO) |
 | ADR-0048 Payments Refund | **ACCEPTED WITH DELTAS** 2026-10-27; B1 #120 merged; B2 = human CASH confirm → MONEY_RETURNED + expected − at Close; VietQR adapter blocked; G2 / FiscalCorrectionPolicy still OPEN; no HTTP payout API; no prod migrate GO |
 | TAX1.1 Tax runtime | **MERGED** Origin PR#74 — canonical closed |
 | ADR-0033 / ADR-0034 / ADR-0037 | **ACCEPTED** |

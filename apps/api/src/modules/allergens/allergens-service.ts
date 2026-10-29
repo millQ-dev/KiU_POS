@@ -395,16 +395,18 @@ export class AllergensService {
     try {
       await this.requireOrder(client, orderId);
       const ctx = await this.getContext(orderId);
-      const lines = await this.readLineResolutions(client, orderId);
+      const orderLines = await this.loadLines(client, orderId);
+      const resolved = await this.readLineResolutions(client, orderId);
+      const byLine = new Map(resolved.map((l) => [l.orderLineId, l]));
       const names = new Map<string, string>();
       const ids = new Set<string>();
       const lineDeltas = new Map<string, ModifierRecipeDelta[]>();
       const lineInstructions = new Map<string, string[]>();
-      for (const l of lines) {
-        const cfg = await this.loadLineConfig(client, l.orderLineId);
-        lineDeltas.set(l.orderLineId, cfg.deltas);
-        lineInstructions.set(l.orderLineId, cfg.kitchenInstructions);
-        ids.add(l.catalogItemId);
+      for (const ol of orderLines) {
+        ids.add(ol.catalog_item_id);
+        const cfg = await this.loadLineConfig(client, ol.order_line_id);
+        lineDeltas.set(ol.order_line_id, cfg.deltas);
+        lineInstructions.set(ol.order_line_id, cfg.kitchenInstructions);
         for (const d of cfg.deltas) {
           if (d.kind === 'REMOVE_COMPONENT') ids.add(d.targetCatalogItemId);
           else if (d.kind === 'REPLACE_COMPONENT') {
@@ -432,30 +434,65 @@ export class AllergensService {
           : null,
         notice:
           'Structured allergy handling data. Not a safety certification; UNKNOWN is never safe.',
-        lines: lines.map((l) => ({
-          orderLineId: l.orderLineId,
-          catalogItemId: l.catalogItemId,
-          catalogItemName: nameOf(l.catalogItemId),
-          result: l.result,
-          kitchenWarnings: l.kitchenWarnings,
-          preparationChanges: (lineDeltas.get(l.orderLineId) ?? []).map((d) =>
-            d.kind === 'REMOVE_COMPONENT'
-              ? { kind: d.kind, component: nameOf(d.targetCatalogItemId) }
-              : d.kind === 'REPLACE_COMPONENT'
-                ? {
-                    kind: d.kind,
-                    component: nameOf(d.targetCatalogItemId),
-                    replacement: nameOf(d.replacementCatalogItemId),
-                  }
-                : { kind: d.kind, component: nameOf(d.addCatalogItemId) },
-          ),
-          // Guest note is carried verbatim but is non-authoritative (ADR-0049 #8).
-          kitchenInstructions: lineInstructions.get(l.orderLineId) ?? [],
-          requiredAcknowledgements: l.requiredAcknowledgements.map((a) => ({
-            kind: a.kind,
-            acknowledged: l.acknowledgedKinds.includes(a.kind),
-          })),
-        })),
+        // Emit every open order line. Unresolved lines fail closed as REQUIRES_CONFIRMATION
+        // so kitchen never receives a partial ticket that omits a newly added line.
+        lines: orderLines.map((ol) => {
+          const l = byLine.get(ol.order_line_id);
+          if (!l) {
+            return {
+              orderLineId: ol.order_line_id,
+              catalogItemId: ol.catalog_item_id,
+              catalogItemName: nameOf(ol.catalog_item_id),
+              result: 'REQUIRES_CONFIRMATION' as const,
+              kitchenWarnings: [
+                {
+                  code: 'ALLERGEN_RESOLUTION_MISSING' as const,
+                  severity: 'CRITICAL' as const,
+                  allergenCodes: ctx?.allergenCodes ?? [],
+                  handlingCodes: [],
+                  message: 'Line has no allergen resolution — revalidate before prep',
+                },
+              ],
+              preparationChanges: (lineDeltas.get(ol.order_line_id) ?? []).map((d) =>
+                d.kind === 'REMOVE_COMPONENT'
+                  ? { kind: d.kind, component: nameOf(d.targetCatalogItemId) }
+                  : d.kind === 'REPLACE_COMPONENT'
+                    ? {
+                        kind: d.kind,
+                        component: nameOf(d.targetCatalogItemId),
+                        replacement: nameOf(d.replacementCatalogItemId),
+                      }
+                    : { kind: d.kind, component: nameOf(d.addCatalogItemId) },
+              ),
+              kitchenInstructions: lineInstructions.get(ol.order_line_id) ?? [],
+              requiredAcknowledgements: [],
+            };
+          }
+          return {
+            orderLineId: l.orderLineId,
+            catalogItemId: l.catalogItemId,
+            catalogItemName: nameOf(l.catalogItemId),
+            result: l.result,
+            kitchenWarnings: l.kitchenWarnings,
+            preparationChanges: (lineDeltas.get(l.orderLineId) ?? []).map((d) =>
+              d.kind === 'REMOVE_COMPONENT'
+                ? { kind: d.kind, component: nameOf(d.targetCatalogItemId) }
+                : d.kind === 'REPLACE_COMPONENT'
+                  ? {
+                      kind: d.kind,
+                      component: nameOf(d.targetCatalogItemId),
+                      replacement: nameOf(d.replacementCatalogItemId),
+                    }
+                  : { kind: d.kind, component: nameOf(d.addCatalogItemId) },
+            ),
+            // Guest note is carried verbatim but is non-authoritative (ADR-0049 #8).
+            kitchenInstructions: lineInstructions.get(l.orderLineId) ?? [],
+            requiredAcknowledgements: l.requiredAcknowledgements.map((a) => ({
+              kind: a.kind,
+              acknowledged: l.acknowledgedKinds.includes(a.kind),
+            })),
+          };
+        }),
       };
     } finally {
       client.release();

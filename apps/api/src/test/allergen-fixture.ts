@@ -69,7 +69,9 @@ export async function seedAllergenFixture(
   for (const leaf of [ids.coffeeItemId, ids.oatDrinkItemId, ids.milkItemId]) {
     await pool.query(
       `INSERT INTO catalog_item_allergen_profile (catalog_item_id, tenant_id, declaration_status)
-       VALUES ($1,$2,'COMPLETE')`,
+       VALUES ($1,$2,'COMPLETE')
+       ON CONFLICT (catalog_item_id) DO UPDATE
+         SET declaration_status = 'COMPLETE', updated_at = NOW()`,
       [leaf, fx.tenantId],
     );
   }

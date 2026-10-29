@@ -446,6 +446,44 @@ export class OrdersService {
   }
 
   /**
+   * ADR-0051 D6 — run a narrow commercial mutation inside one transaction with the Order row
+   * locked, OPEN-only and with no live Settlement (never mutates paid/completed economic facts).
+   * Callers own the work; COMMIT/ROLLBACK is handled here.
+   */
+  async withOpenOrderCommercialLock<T>(
+    orderId: string,
+    work: (
+      client: Client,
+      order: { orderId: string; tenantId: string; legalEntityId: string; outletId: string },
+    ) => Promise<T>,
+  ): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const order = await this.lockOrder(client, orderId);
+      if (order.status !== 'OPEN') {
+        throw new OrderImmutableError(
+          `${order.status} order commercial terms are immutable; explicit commercial changes are OPEN-only`,
+        );
+      }
+      await this.assertNoLiveSettlement(client, orderId);
+      const result = await work(client, {
+        orderId,
+        tenantId: order.tenant_id,
+        legalEntityId: order.legal_entity_id,
+        outletId: order.outlet_id,
+      });
+      await client.query('COMMIT');
+      return result;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * C1.1 — under Order row lock: re-read lines, resolve Menu+policy at business instant,
    * calculate BASE_LIST_LINE_GROSS, optionally persist via SetOrderCommercialTerms path.
    * Prevents TOCTOU between preview calculation and accept.

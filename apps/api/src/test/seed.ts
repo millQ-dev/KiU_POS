@@ -100,6 +100,14 @@ export async function seedBlockCFixture(pool: pg.Pool): Promise<BlockCFixture> {
         ($4,$5,'Eggs','ea','COUNT')`,
       [ids.milkItemId, ids.oilItemId, ids.meatItemId, ids.eggItemId, ids.tenantId],
     );
+    // ADR-0050: COMPLETE empty profiles so non-allergen suites can resolve AVAILABLE under
+    // NO_ALLERGIES_CONFIRMED without inventing SAFE. Declarations stay empty.
+    await client.query(
+      `INSERT INTO catalog_item_allergen_profile (catalog_item_id, tenant_id, declaration_status) VALUES
+        ($1,$5,'COMPLETE'), ($2,$5,'COMPLETE'), ($3,$5,'COMPLETE'), ($4,$5,'COMPLETE')
+       ON CONFLICT (catalog_item_id) DO NOTHING`,
+      [ids.milkItemId, ids.oilItemId, ids.meatItemId, ids.eggItemId, ids.tenantId],
+    );
 
     // Milk: 1 L bottle (units_per_package=1); receive N bottles → N L
     await client.query(

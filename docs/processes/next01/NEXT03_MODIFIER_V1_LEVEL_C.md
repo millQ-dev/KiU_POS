@@ -1,6 +1,8 @@
 # NEXT-03 G1 — Modifier v1 Level C preparation
 
-**PO ACCEPT:** 2026-10-28 — M1–M8 accepted; implementation authority → **ADR-0049**. This file is **historical audit evidence** (prep + decision list). Do not treat as open STOP.
+**PO ACCEPT:** 2026-10-28 — short M1–M8 direction → **ADR-0049**. This file remains **historical audit evidence** of that prep.
+
+**2026-10-29:** PO contract review APPROVE WITH CHANGES. Operational corrections are in [ADR-0052](../../decisions/ADR-0052-modifier-v1-contract.md). M1–M8 in ADR-0049 stay accepted. The original eight questions are not reopened.
 
 **Origin baseline (prep):** `de1e79915c867af7f9bf94068f7010477c45b1f1` (#124)  
 **Autonomy (prep):** Level C — **closed by PO ACCEPT**  
