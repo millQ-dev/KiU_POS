@@ -734,7 +734,7 @@ export class AllergensService {
     const res = await client.query<{
       configuration_fingerprint: string;
       effective_recipe_deltas_json: ModifierRecipeDelta[];
-      kitchen_instructions_json: string[];
+      kitchen_instructions_json: unknown;
     }>(
       `SELECT configuration_fingerprint, effective_recipe_deltas_json, kitchen_instructions_json
        FROM order_line_configuration WHERE order_line_id = $1`,
@@ -742,10 +742,15 @@ export class AllergensService {
     );
     const row = res.rows[0];
     if (!row) return { fingerprint: NO_CONFIGURATION, deltas: [], kitchenInstructions: [] };
+    // ADR-0052 M5: only instruction codes enter allergen/kitchen preparation paths.
+    const { parseKitchenInstructionsSnapshot } = await import(
+      '../modifiers/kitchen-instructions.js'
+    );
+    const kitchen = parseKitchenInstructionsSnapshot(row.kitchen_instructions_json);
     return {
       fingerprint: row.configuration_fingerprint,
       deltas: row.effective_recipe_deltas_json,
-      kitchenInstructions: row.kitchen_instructions_json,
+      kitchenInstructions: kitchen.instructionCodes,
     };
   }
 

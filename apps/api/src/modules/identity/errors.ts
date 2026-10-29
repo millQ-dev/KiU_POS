@@ -49,6 +49,9 @@ export const PERMISSION_ORDERS_MERCHANT_DISCOUNT_APPROVE =
 /** ApprovalRequest operation_type for ApplyOrderMerchantDiscount (ADR-0051). */
 export const ORDER_MERCHANT_DISCOUNT_OPERATION_TYPE = 'orders.merchant_discount.apply' as const;
 
+/** ADR-0052 M7 — cashier selects published modifier options on an OPEN OrderLine. */
+export const PERMISSION_ORDERS_LINE_CONFIGURE = 'orders.line_configure' as const;
+
 export const PIN_MAX_ATTEMPTS = 5;
 export const PIN_LOCK_MINUTES = 15;
 export const SESSION_TTL_HOURS = 12;

@@ -132,7 +132,10 @@ export const posApi = {
       orderLineConfigurationId: string;
       additivePriceAdjustmentMinor: string;
       configurationFingerprint: string;
-      kitchenInstructions: string[];
+      kitchenInstructions: {
+        instructionCodes: string[];
+        guestNote: string | null;
+      };
     };
     order: OrderBasket;
   }> {

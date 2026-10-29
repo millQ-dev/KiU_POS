@@ -178,17 +178,15 @@ describeHttp('NEXT-04 modifier HTTP (disposable PG)', () => {
       configuration: {
         additivePriceAdjustmentMinor: string;
         configurationFingerprint: string;
-        kitchenInstructions: string[];
+        kitchenInstructions: { instructionCodes: string[]; guestNote: string | null };
       };
       order: {
         lines: Array<{ modifierConfiguration: { additivePriceAdjustmentMinor: string } | null }>;
       };
     };
     expect(cfgBody.configuration.additivePriceAdjustmentMinor).toBe('5000');
-    expect(cfgBody.configuration.kitchenInstructions).toContain('MILK_OAT');
-    expect(cfgBody.configuration.kitchenInstructions).toContain(
-      'GUEST_NOTE_NON_AUTHORITATIVE:extra hot',
-    );
+    expect(cfgBody.configuration.kitchenInstructions.instructionCodes).toContain('MILK_OAT');
+    expect(cfgBody.configuration.kitchenInstructions.guestNote).toBe('extra hot');
     expect(cfgBody.order.lines[0]?.modifierConfiguration?.additivePriceAdjustmentMinor).toBe('5000');
 
     // ADR-0052 M2: (base unit + per-unit modifier) × quantity, one ADR-0030 round.

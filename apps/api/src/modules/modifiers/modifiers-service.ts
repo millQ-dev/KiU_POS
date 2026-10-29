@@ -5,6 +5,10 @@ import {
   type ModifierRecipeDelta,
 } from '@millq/domain';
 import { ModifierDomainError } from './errors.js';
+import {
+  buildKitchenInstructionsSnapshot,
+  type KitchenInstructionsSnapshot,
+} from './kitchen-instructions.js';
 
 type GroupBinding = {
   modifier_group_id: string;
@@ -122,7 +126,7 @@ export class ModifiersService {
     orderLineConfigurationId: string;
     additivePriceAdjustmentMinor: string;
     configurationFingerprint: string;
-    kitchenInstructions: string[];
+    kitchenInstructions: KitchenInstructionsSnapshot;
   }> {
     const client = await this.pool.connect();
     try {
@@ -201,8 +205,9 @@ export class ModifiersService {
 
       for (const b of bindings.rows) {
         let chosen = byGroup.get(b.modifier_group_id) ?? [];
-        // Defaults apply only when the group is neither required nor ask-every-time.
-        if (chosen.length === 0 && !b.ask_every_time && !b.required) {
+        // ADR-0052 M4: a valid default satisfies a mandatory group unless askEveryTime.
+        // askEveryTime never auto-applies a default — operator must confirm explicitly.
+        if (chosen.length === 0 && !b.ask_every_time) {
           const defaults = await client.query<{ modifier_option_id: string }>(
             `SELECT modifier_option_id FROM modifier_option
              WHERE modifier_group_id = $1 AND is_default = TRUE
@@ -211,7 +216,7 @@ export class ModifiersService {
           );
           chosen = defaults.rows.map((r) => r.modifier_option_id);
         }
-        // ADR-0049 #5: ask-every-time always needs an explicit selection (≥1), even if min_select=0.
+        // ADR-0049 #5 / ADR-0052 M4: ask-every-time always needs an explicit selection (≥1).
         const explicitMin = b.required || b.ask_every_time ? Math.max(1, b.min_select) : b.min_select;
         if (chosen.length < explicitMin || chosen.length > b.max_select) {
           if ((b.required || b.ask_every_time) && chosen.length === 0) {
@@ -321,11 +326,11 @@ export class ModifiersService {
         }
       }
 
-      // Guest note is non-authoritative — kitchen display hint only; never recipe/allergen/inventory SoT.
-      const guestNote = input.guestNote?.trim();
-      if (guestNote) {
-        kitchen.push(`GUEST_NOTE_NON_AUTHORITATIVE:${guestNote}`);
-      }
+      // ADR-0052 M5: typed separation — codes authoritative; guestNote never recipe/allergen/inventory SoT.
+      const kitchenSnapshot = buildKitchenInstructionsSnapshot({
+        instructionCodes: kitchen,
+        ...(input.guestNote !== undefined ? { guestNote: input.guestNote } : {}),
+      });
 
       const additive = sumAdditivePriceAdjustmentsMinor(priceParts);
       // Snapshot deltas now (ADR-0049 #9); consumption must not re-resolve live menu deltas.
@@ -358,7 +363,7 @@ export class ModifiersService {
           input.orderLineId,
           fingerprint,
           additive,
-          JSON.stringify(kitchen),
+          JSON.stringify(kitchenSnapshot),
           recipeDeltasJson,
         ],
       );
@@ -388,7 +393,7 @@ export class ModifiersService {
         orderLineConfigurationId: configId,
         additivePriceAdjustmentMinor: additive,
         configurationFingerprint: fingerprint,
-        kitchenInstructions: kitchen,
+        kitchenInstructions: kitchenSnapshot,
       };
     } catch (e) {
       await client.query('ROLLBACK');
@@ -396,6 +401,21 @@ export class ModifiersService {
     } finally {
       client.release();
     }
+  }
+
+  /** ADR-0052 T8 — pin configuration when commercial terms are accepted. */
+  async freezeConfigurationsForOrder(client: PoolClient, orderId: string): Promise<void> {
+    await client.query(
+      `UPDATE order_line_configuration SET frozen_at = COALESCE(frozen_at, NOW()) WHERE order_id = $1`,
+      [orderId],
+    );
+  }
+
+  /** Lift configuration freeze when open commercial terms are invalidated. */
+  async unfreezeConfigurationsForOrder(client: PoolClient, orderId: string): Promise<void> {
+    await client.query(`UPDATE order_line_configuration SET frozen_at = NULL WHERE order_id = $1`, [
+      orderId,
+    ]);
   }
 
   /**
