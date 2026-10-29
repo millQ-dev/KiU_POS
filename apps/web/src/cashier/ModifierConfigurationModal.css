@@ -1,0 +1,112 @@
+.pos-mod-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  padding: var(--pos-space-4);
+}
+
+.pos-mod-modal__panel {
+  width: min(28rem, 100%);
+  max-height: min(90vh, 40rem);
+  overflow: auto;
+  background: var(--pos-surface);
+  border: 1px solid var(--pos-border);
+  border-radius: var(--pos-radius);
+  padding: var(--pos-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pos-space-3);
+}
+
+.pos-mod-modal__title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.pos-mod-modal__meta,
+.pos-mod-modal__hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--pos-text-muted);
+  font-weight: 400;
+}
+
+.pos-mod-modal__group {
+  margin: 0;
+  padding: var(--pos-space-2);
+  border: 1px solid var(--pos-border);
+  border-radius: var(--pos-radius);
+}
+
+.pos-mod-modal__legend {
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0 var(--pos-space-1);
+}
+
+.pos-mod-modal__options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pos-space-2);
+}
+
+.pos-mod-modal__option {
+  display: flex;
+  align-items: center;
+  gap: var(--pos-space-2);
+  font-size: 0.9rem;
+}
+
+.pos-mod-modal__label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pos-space-2);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.pos-mod-modal__input {
+  font: inherit;
+  padding: var(--pos-space-2);
+  border: 1px solid var(--pos-border);
+  border-radius: var(--pos-radius);
+  background: var(--pos-bg);
+  color: var(--pos-text);
+}
+
+.pos-mod-modal__error {
+  margin: 0;
+  color: var(--pos-danger, #b00020);
+  font-size: 0.85rem;
+}
+
+.pos-mod-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--pos-space-2);
+}
+
+.pos-mod-modal__btn {
+  font: inherit;
+  padding: var(--pos-space-2) var(--pos-space-3);
+  border: 1px solid var(--pos-border);
+  border-radius: var(--pos-radius);
+  background: var(--pos-bg);
+  color: var(--pos-text);
+  cursor: pointer;
+}
+
+.pos-mod-modal__btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.pos-mod-modal__btn--primary {
+  background: var(--pos-accent, #1a5f4a);
+  border-color: var(--pos-accent, #1a5f4a);
+  color: #fff;
+}

@@ -17,12 +17,14 @@ NEXT03 prep docs stamped PO ACCEPTED (historical).
 
 | PR | Scope | Status |
 | --- | --- | --- |
-| A | ADR docs + migration `037` + domain deltas + `ModifiersService.configureOrderLine` | Origin #127 — Level B gates |
-| B | Counter POS modifier UI + HTTP + wire `assertLineConfigurationComplete` on accept | Follow-on |
+| A | ADR docs + migration `037` + domain deltas + `ModifiersService.configureOrderLine` | **Merged** Origin #127 @ `65c6754` |
+| B | Counter POS modifier UI + HTTP + wire `assertLineConfigurationComplete` on accept | **Merged** Origin #129 @ `42957b6` |
 | C | Allergy order-start + resolution + kitchen (legal override gated) | Follow-on |
 | D | ApplyOrderMerchantDiscount v1 (API + domain policy + migration `038` + acceptance); cashier UX deferred | Level B — Origin PR open (`feature/next04-discount-d1-d6`) |
 
-**PR A note:** commercial-accept wiring of `assertLineConfigurationComplete` is deferred to PR B+; configure path is fail-closed for required/ask-every-time. Effective Recipe deltas are snapshotted on `order_line_configuration.effective_recipe_deltas_json` (ADR-0049 #9).
+**PR A note:** Effective Recipe deltas snapshotted on `order_line_configuration.effective_recipe_deltas_json` (ADR-0049 #9).
+
+**PR B note:** HTTP `GET …/modifier-groups` + `POST …/configure-modifiers`; commercial accept calls `assertLineConfigurationComplete`; additive VND folded into line gross; cashier `ModifierConfigurationModal` after slot select.
 
 ## PR D — ApplyOrderMerchantDiscount v1 (ADR-0051)
 

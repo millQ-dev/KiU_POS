@@ -15,6 +15,7 @@ import {
 import { ApplyOrderMerchantDiscountService, DiscountDomainError } from '../modules/discounts/index.js';
 import { GoodsIssueService } from '../modules/inventory/goods-issue-service.js';
 import { MenuResolver } from '../modules/menu/index.js';
+import { ModifierDomainError, ModifiersService } from '../modules/modifiers/index.js';
 import { OrdersService } from '../modules/orders/orders-service.js';
 import {
   DomainValidationError,
@@ -52,6 +53,15 @@ function mapError(err: unknown): { status: number; body: Record<string, unknown>
     }
     if (err.code === 'FORBIDDEN' || err.code === 'CSRF_REJECTED') {
       return { status: 403, body: { error: err.code, message: err.message } };
+    }
+    return { status: 400, body: { error: err.code, message: err.message } };
+  }
+  if (err instanceof ModifierDomainError) {
+    if (err.code === 'ORDER_NOT_FOUND' || err.code === 'LINE_NOT_FOUND') {
+      return { status: 404, body: { error: err.code, message: err.message } };
+    }
+    if (err.code === 'CONFIGURATION_FROZEN' || err.code === 'SETTLEMENT_EDIT_LOCKED') {
+      return { status: 409, body: { error: err.code, message: err.message } };
     }
     return { status: 400, body: { error: err.code, message: err.message } };
   }
@@ -108,7 +118,12 @@ async function enrichOrderLines(pool: pg.Pool, order: Awaited<ReturnType<OrdersS
   if (order.lines.length === 0) {
     return {
       ...order,
-      lines: [] as Array<(typeof order.lines)[number] & { catalogItemName: string }>,
+      lines: [] as Array<
+        (typeof order.lines)[number] & {
+          catalogItemName: string;
+          modifierConfiguration: null;
+        }
+      >,
     };
   }
   const ids = [...new Set(order.lines.map((l) => l.catalogItemId))];
@@ -117,12 +132,37 @@ async function enrichOrderLines(pool: pg.Pool, order: Awaited<ReturnType<OrdersS
     [ids],
   );
   const byId = new Map(names.rows.map((r) => [r.catalog_item_id, r.name]));
+  const lineIds = order.lines.map((l) => l.orderLineId);
+  const cfgs = await pool.query<{
+    order_line_id: string;
+    order_line_configuration_id: string;
+    additive_price_adjustment_minor: string;
+    kitchen_instructions_json: unknown;
+    configuration_fingerprint: string;
+  }>(
+    `SELECT order_line_id, order_line_configuration_id, additive_price_adjustment_minor,
+            kitchen_instructions_json, configuration_fingerprint
+     FROM order_line_configuration WHERE order_line_id = ANY($1::uuid[])`,
+    [lineIds],
+  );
+  const cfgByLine = new Map(cfgs.rows.map((r) => [r.order_line_id, r]));
   return {
     ...order,
-    lines: order.lines.map((l) => ({
-      ...l,
-      catalogItemName: byId.get(l.catalogItemId) ?? 'Unknown item',
-    })),
+    lines: order.lines.map((l) => {
+      const cfg = cfgByLine.get(l.orderLineId);
+      return {
+        ...l,
+        catalogItemName: byId.get(l.catalogItemId) ?? 'Unknown item',
+        modifierConfiguration: cfg
+          ? {
+              orderLineConfigurationId: cfg.order_line_configuration_id,
+              additivePriceAdjustmentMinor: cfg.additive_price_adjustment_minor,
+              kitchenInstructions: cfg.kitchen_instructions_json,
+              configurationFingerprint: cfg.configuration_fingerprint,
+            }
+          : null,
+      };
+    }),
   };
 }
 
@@ -222,6 +262,7 @@ export async function registerPosRoutes(
   const baseCommercial = new BaseCommercialAcceptanceService(pool, orders);
   const merchantDiscount = new ApplyOrderMerchantDiscountService(orders, identity);
   const tax = new TaxService(pool);
+  const modifiers = new ModifiersService(pool);
 
   app.post('/api/v1/pos/surface/resolve', async (req, reply) => {
     try {
@@ -367,6 +408,51 @@ export async function registerPosRoutes(
       return reply.code(mapped.status).send(mapped.body);
     }
   });
+
+  app.get<{ Params: { catalogItemId: string } }>(
+    '/api/v1/catalog-items/:catalogItemId/modifier-groups',
+    async (req, reply) => {
+      try {
+        const principal = await requireFinancialPrincipal(req, finAuth, { outletId: null });
+        const groups = await modifiers.listCatalogItemModifierGroups({
+          tenantId: principal.tenantId,
+          catalogItemId: req.params.catalogItemId,
+        });
+        return { catalogItemId: req.params.catalogItemId, groups };
+      } catch (err) {
+        const mapped = mapError(err);
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    },
+  );
+
+  app.post<{ Params: { orderId: string; lineId: string } }>(
+    '/api/v1/orders/:orderId/lines/:lineId/configure-modifiers',
+    async (req, reply) => {
+      try {
+        await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
+        const body = (req.body ?? {}) as {
+          selections?: Array<{ modifierGroupId?: string; modifierOptionId?: string }>;
+          guestNote?: string | null;
+        };
+        const selections = (body.selections ?? []).map((s) => ({
+          modifierGroupId: String(s.modifierGroupId ?? ''),
+          modifierOptionId: String(s.modifierOptionId ?? ''),
+        }));
+        const configuration = await modifiers.configureOrderLine({
+          orderId: req.params.orderId,
+          orderLineId: req.params.lineId,
+          selections,
+          ...(body.guestNote !== undefined ? { guestNote: body.guestNote } : {}),
+        });
+        const order = await enrichOrderLines(pool, await orders.getOrder(req.params.orderId));
+        return { configuration, order };
+      } catch (err) {
+        const mapped = mapError(err);
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    },
+  );
 
   app.patch<{ Params: { orderId: string; lineId: string } }>(
     '/api/v1/orders/:orderId/lines/:lineId',
