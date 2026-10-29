@@ -13,7 +13,9 @@ import {
   APPROVAL_TTL_SECONDS,
   CHALLENGE_TTL_SECONDS,
   IdentityDomainError,
+  ORDER_MERCHANT_DISCOUNT_OPERATION_TYPE,
   PERMISSION_CASH_SHIFT_OPEN_APPROVE,
+  PERMISSION_ORDERS_MERCHANT_DISCOUNT_APPROVE,
 } from './errors.js';
 import type { NotificationPort } from './notification-port.js';
 
@@ -214,6 +216,13 @@ export class LoginChallengeService {
   }
 }
 
+/** Approval permission is bound to the requested operation (ADR-0036 §10 / ADR-0051 D1). */
+function approvePermissionFor(operationType: string): string {
+  return operationType === ORDER_MERCHANT_DISCOUNT_OPERATION_TYPE
+    ? PERMISSION_ORDERS_MERCHANT_DISCOUNT_APPROVE
+    : PERMISSION_CASH_SHIFT_OPEN_APPROVE;
+}
+
 export class ApprovalRequestService {
   constructor(
     private readonly pool: Pool,
@@ -364,6 +373,7 @@ export class ApprovalRequestService {
         outlet_id: string;
         terminal_id: string;
         requester_user_id: string;
+        operation_type: string;
         status: string;
         expires_at: Date;
       }>(
@@ -378,7 +388,7 @@ export class ApprovalRequestService {
         client,
         principal.tenantId,
         principal.userId,
-        PERMISSION_CASH_SHIFT_OPEN_APPROVE,
+        approvePermissionFor(row.operation_type),
         row.outlet_id,
         row.terminal_id,
       );

@@ -12,6 +12,7 @@ import {
   type AuthenticatedPrincipal,
   type FinancialAuthOptions,
 } from '../modules/identity/index.js';
+import { ApplyOrderMerchantDiscountService, DiscountDomainError } from '../modules/discounts/index.js';
 import { GoodsIssueService } from '../modules/inventory/goods-issue-service.js';
 import { MenuResolver } from '../modules/menu/index.js';
 import { OrdersService } from '../modules/orders/orders-service.js';
@@ -56,6 +57,17 @@ function mapError(err: unknown): { status: number; body: Record<string, unknown>
   }
   if (err instanceof DomainValidationError) {
     return { status: 400, body: { error: err.code, message: err.message } };
+  }
+  if (err instanceof DiscountDomainError) {
+    const status =
+      err.code === 'NOT_FOUND'
+        ? 404
+        : err.code === 'FORBIDDEN' || err.code === 'AUTH_EVIDENCE_INVALID'
+          ? 403
+          : err.code === 'APPROVAL_REQUIRED'
+            ? 409
+            : 400;
+    return { status, body: { error: err.code, message: err.message } };
   }
   if (err instanceof PublishedImmutableError) {
     return { status: 409, body: { error: err.code, message: err.message } };
@@ -208,6 +220,7 @@ export async function registerPosRoutes(
   const selection = new PosSelectionService(pool, orders);
   const menuResolver = new MenuResolver(pool);
   const baseCommercial = new BaseCommercialAcceptanceService(pool, orders);
+  const merchantDiscount = new ApplyOrderMerchantDiscountService(orders, identity);
   const tax = new TaxService(pool);
 
   app.post('/api/v1/pos/surface/resolve', async (req, reply) => {
@@ -526,6 +539,28 @@ export async function registerPosRoutes(
           actorId: principal.userId,
           ...(body.deviceId ? { deviceId: body.deviceId } : {}),
         });
+      } catch (err) {
+        const mapped = mapError(err);
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    },
+  );
+
+  /**
+   * ADR-0051 ApplyOrderMerchantDiscount v1 — narrow command (no arbitrary commercial-terms input).
+   * Cashier requests; a Manager/Owner-approved ApprovalRequest (single-use) is mandatory.
+   * Applies only to OPEN orders with accepted FINAL commercial terms and no live Settlement.
+   */
+  app.post<{ Params: { orderId: string } }>(
+    '/api/v1/orders/:orderId/apply-merchant-discount',
+    async (req, reply) => {
+      try {
+        const { principal } = await requireOrderPrincipal(req, finAuth, pool, req.params.orderId);
+        const result = await merchantDiscount.apply(principal, {
+          ...((req.body ?? {}) as object),
+          orderId: req.params.orderId,
+        });
+        return reply.code(result.status === 'applied' ? 201 : 200).send(result);
       } catch (err) {
         const mapped = mapError(err);
         return reply.code(mapped.status).send(mapped.body);
