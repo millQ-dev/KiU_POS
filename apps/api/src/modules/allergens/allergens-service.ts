@@ -434,12 +434,23 @@ export class AllergensService {
           : null,
         notice:
           'Structured allergy handling data. Not a safety certification; UNKNOWN is never safe.',
-        // Emit every open order line. Unresolved lines fail closed as REQUIRES_CONFIRMATION
-        // so kitchen never receives a partial ticket that omits a newly added line.
-        lines: orderLines.map((ol) => {
-          const l = byLine.get(ol.order_line_id);
-          if (!l) {
-            return {
+        // Emit every open order line. Unresolved or stale snapshots fail closed as
+        // REQUIRES_CONFIRMATION so kitchen never sees a partial or outdated ticket.
+        lines: await Promise.all(
+          orderLines.map(async (ol) => {
+            const l = byLine.get(ol.order_line_id);
+            const prep = (lineDeltas.get(ol.order_line_id) ?? []).map((d) =>
+              d.kind === 'REMOVE_COMPONENT'
+                ? { kind: d.kind, component: nameOf(d.targetCatalogItemId) }
+                : d.kind === 'REPLACE_COMPONENT'
+                  ? {
+                      kind: d.kind,
+                      component: nameOf(d.targetCatalogItemId),
+                      replacement: nameOf(d.replacementCatalogItemId),
+                    }
+                  : { kind: d.kind, component: nameOf(d.addCatalogItemId) },
+            );
+            const unresolved = {
               orderLineId: ol.order_line_id,
               catalogItemId: ol.catalog_item_id,
               catalogItemName: nameOf(ol.catalog_item_id),
@@ -450,49 +461,48 @@ export class AllergensService {
                   severity: 'CRITICAL' as const,
                   allergenCodes: ctx?.allergenCodes ?? [],
                   handlingCodes: [],
-                  message: 'Line has no allergen resolution — revalidate before prep',
+                  message: 'Line has no fresh allergen resolution — revalidate before prep',
                 },
               ],
-              preparationChanges: (lineDeltas.get(ol.order_line_id) ?? []).map((d) =>
-                d.kind === 'REMOVE_COMPONENT'
-                  ? { kind: d.kind, component: nameOf(d.targetCatalogItemId) }
-                  : d.kind === 'REPLACE_COMPONENT'
-                    ? {
-                        kind: d.kind,
-                        component: nameOf(d.targetCatalogItemId),
-                        replacement: nameOf(d.replacementCatalogItemId),
-                      }
-                    : { kind: d.kind, component: nameOf(d.addCatalogItemId) },
-              ),
+              preparationChanges: prep,
               kitchenInstructions: lineInstructions.get(ol.order_line_id) ?? [],
-              requiredAcknowledgements: [],
+              requiredAcknowledgements: [] as Array<{ kind: AcknowledgementKind; acknowledged: boolean }>,
             };
-          }
-          return {
-            orderLineId: l.orderLineId,
-            catalogItemId: l.catalogItemId,
-            catalogItemName: nameOf(l.catalogItemId),
-            result: l.result,
-            kitchenWarnings: l.kitchenWarnings,
-            preparationChanges: (lineDeltas.get(l.orderLineId) ?? []).map((d) =>
-              d.kind === 'REMOVE_COMPONENT'
-                ? { kind: d.kind, component: nameOf(d.targetCatalogItemId) }
-                : d.kind === 'REPLACE_COMPONENT'
-                  ? {
-                      kind: d.kind,
-                      component: nameOf(d.targetCatalogItemId),
-                      replacement: nameOf(d.replacementCatalogItemId),
-                    }
-                  : { kind: d.kind, component: nameOf(d.addCatalogItemId) },
-            ),
-            // Guest note is carried verbatim but is non-authoritative (ADR-0049 #8).
-            kitchenInstructions: lineInstructions.get(l.orderLineId) ?? [],
-            requiredAcknowledgements: l.requiredAcknowledgements.map((a) => ({
-              kind: a.kind,
-              acknowledged: l.acknowledgedKinds.includes(a.kind),
-            })),
-          };
-        }),
+            if (!l) return unresolved;
+            const snap = await client.query<{
+              context_revision: number;
+              configuration_fingerprint: string;
+            }>(
+              `SELECT context_revision, configuration_fingerprint
+               FROM order_line_allergen_resolution WHERE order_line_id = $1`,
+              [ol.order_line_id],
+            );
+            const cfg = await this.loadLineConfig(client, ol.order_line_id);
+            const row = snap.rows[0];
+            if (
+              !row ||
+              !ctx ||
+              row.context_revision !== ctx.revision ||
+              row.configuration_fingerprint !== cfg.fingerprint
+            ) {
+              return unresolved;
+            }
+            return {
+              orderLineId: l.orderLineId,
+              catalogItemId: l.catalogItemId,
+              catalogItemName: nameOf(l.catalogItemId),
+              result: l.result,
+              kitchenWarnings: l.kitchenWarnings,
+              preparationChanges: prep,
+              // Guest note is carried verbatim but is non-authoritative (ADR-0049 #8).
+              kitchenInstructions: lineInstructions.get(l.orderLineId) ?? [],
+              requiredAcknowledgements: l.requiredAcknowledgements.map((a) => ({
+                kind: a.kind,
+                acknowledged: l.acknowledgedKinds.includes(a.kind),
+              })),
+            };
+          }),
+        ),
       };
     } finally {
       client.release();
@@ -570,6 +580,20 @@ export class AllergensService {
     );
     await client.query(
       `UPDATE order_line_allergen_resolution SET frozen_at = COALESCE(frozen_at, NOW()) WHERE order_id = $1`,
+      [orderId],
+    );
+  }
+
+  /**
+   * When accepted commercial terms are invalidated on an still-OPEN order, allergen freeze must
+   * lift so lines can be re-resolved before the next accept (ADR-0050 revalidation).
+   */
+  async unfreezeForCommercialInvalidation(client: PoolClient, orderId: string): Promise<void> {
+    await client.query(`UPDATE order_allergen_context SET frozen_at = NULL WHERE order_id = $1`, [
+      orderId,
+    ]);
+    await client.query(
+      `UPDATE order_line_allergen_resolution SET frozen_at = NULL WHERE order_id = $1`,
       [orderId],
     );
   }
@@ -797,6 +821,7 @@ export class AllergensService {
   private async clearOpenCommercialTerms(client: PoolClient, orderId: string): Promise<void> {
     await client.query(`DELETE FROM sales_order_commercial_line_terms WHERE order_id = $1`, [orderId]);
     await client.query(`DELETE FROM sales_order_commercial_terms WHERE order_id = $1`, [orderId]);
+    await this.unfreezeForCommercialInvalidation(client, orderId);
   }
 
   private async inTx<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {

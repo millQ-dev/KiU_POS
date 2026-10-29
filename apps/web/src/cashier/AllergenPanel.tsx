@@ -196,7 +196,7 @@ export function AllergenPanel({ orderId, lines, editable, refreshKey, suggestedC
                       <span key={a.kind} className="pos-allergen__ack">
                         ✓ {ACK_LABEL[a.kind]}
                       </span>
-                    ) : a.kind === 'CASHIER_GUEST_INFORMED' && editable ? (
+                    ) : editable ? (
                       <button
                         key={a.kind}
                         type="button"

@@ -125,7 +125,7 @@ describe('AllergenPanel', () => {
     api.acknowledge.mockResolvedValue({});
     renderPanel();
     expect(await screen.findByText(/Latte: Uncertain/)).toBeTruthy();
-    expect(screen.getByText('Kitchen acknowledgement pending')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Kitchen acknowledgement' })).toBeTruthy();
     fireEvent.click(screen.getByText('Guest informed'));
     await waitFor(() => expect(api.acknowledge).toHaveBeenCalledWith('o1', 'line-1', 'CASHIER_GUEST_INFORMED'));
   });

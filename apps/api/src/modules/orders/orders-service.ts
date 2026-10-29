@@ -1685,6 +1685,9 @@ export class OrdersService {
   private async clearOpenCommercialTerms(client: Client, orderId: string): Promise<void> {
     await client.query(`DELETE FROM sales_order_commercial_line_terms WHERE order_id = $1`, [orderId]);
     await client.query(`DELETE FROM sales_order_commercial_terms WHERE order_id = $1`, [orderId]);
+    // ADR-0050: commercial invalidation lifts allergen freeze so lines can re-resolve before re-accept.
+    const { AllergensService } = await import('../allergens/index.js');
+    await new AllergensService(this.pool).unfreezeForCommercialInvalidation(client, orderId);
   }
 
   private assertOpenMutable(order: OrderRow): void {
