@@ -6,11 +6,15 @@ The forks below are the decisions that are **not** already accepted. Implementat
 
 ## Fork 1 — Production provider for merchant #1
 
-**Decision needed:** which provider, API version, and credential model is the live issuer for one named LegalEntity.
+**Decision needed for production:** which provider, API version, and credential model is the live issuer for one named LegalEntity.
 
 Viettel S-Invoice is the commercial diligence candidate. MISA meInvoice is the parallel technical candidate. That ordering is not a contract and not an Accepted ADR. `docs/architecture/integrations-0-vietnam-provider-onboarding-gate.md` (2026-10-18) and `docs/processes/review-packets/integrations-0-po-decision-packet.md` still say Proposed / MERGE HOLD / STOP BEFORE RUNTIME. They nominate Viettel as a candidate only.
 
-**Do not code** a Viettel or MISA client, a production `enabled` flag, or a provider switch until PO ACCEPT names the provider for that LegalEntity, and until G2-06, G2-08, G2-16, and G2-18 are evidenced. G2-18 is a separate production GO (`PRODUCTION-STOP.md`).
+**PO correction 2026-10-29:** sandbox implementation authorization is not this production decision. G2-18 does not have to be PASS before isolated sandbox work begins. Negotiations, contracts, and onboarding preparation are allowed and do not enable issuance.
+
+**Still required before a live sandbox call:** Level C acceptance of binding architecture, technical API requirements, and data-egress controls. Proposed text: ADR-0053. Local synthetic fixtures and interface design on the existing port are not blocked on G2-18.
+
+**Production** `enabled`, a production credential, and a provider switch stay forbidden until a named production approval and G2-18. Do not fabricate provider confirmation, create a duplicate invoice, enable the test adapter in production, or bypass `FiscalCheckoutGate`.
 
 ## Fork 2 — Legally sufficient evidence for the registered mode (G2-11)
 
@@ -18,7 +22,7 @@ Viettel S-Invoice is the commercial diligence candidate. MISA meInvoice is the p
 
 ADR-0014 D8 already says profiles are versioned and fail-closed and do **not** claim legal sufficiency. `defaultC0SatisfactionProfile()` currently accepts `AUTHORITY_ACCEPTED`, `PROVIDER_CONFIRMED_ISSUED`, and `AUTHORITATIVE_RETRIEVAL` when `verificationStatus = VERIFIED`. That helper is technical configuration. It is not a counsel memo.
 
-**Do not code** a production profile, and do not change which classes can satisfy the gate, until G2-04 and G2-11 are written and PO/legal ACCEPT is recorded. HTTP 200, provider “published”, or `PROVIDER_CONFIRMED_ISSUED` must not be treated as legally sufficient by this task.
+`PROVIDER_CONFIRMED_ISSUED` stays in the enum as a technical class. Keep it. Legal sufficiency for `FiscalCheckoutGate` waits for merchant-specific G2-11. Do not change which classes can satisfy the gate until G2-04 and G2-11 are written and PO/legal ACCEPT is recorded. HTTP 200 and a provider “published” state are not that review.
 
 ## Fork 3 — LegalEntity provider binding runtime
 
@@ -26,7 +30,7 @@ ADR-0014 D8 already says profiles are versioned and fail-closed and do **not** c
 
 The suggested shape (provider code, merchant tax code, vault `credentialRef`, registered mode, tax-office evidence id, `SANDBOX|PRODUCTION`, `enabled`) matches the Proposed `integration_provider_binding` in INTEGRATIONS-0 §3.2. It is not Accepted. No `apps/api/src/modules/integrations/` package exists. No vault module exists. Adapter selection today is process-wide (`resolveFiscalProviderAdapter`), not per LegalEntity.
 
-Unclear Level B vs Level C is Level C. **Do not add** the binding migration, credential resolution, or egress hook in this handoff.
+Unclear Level B vs Level C is Level C. The proposal is ADR-0053 (Proposed). A binding migration, credential resolution, or egress hook waits for ACCEPT of that ADR. It does not wait for G2-18. This correction does not add the table.
 
 ## Fork 4 — Counsel conclusion on C0 prepaid issue time (G2-04)
 

@@ -1,7 +1,13 @@
 # Provider diligence questions — not sent
 
-**Date:** 2026-10-29.  
-**No email was sent. No form was submitted. No account was registered.**
+**Date:** 2026-10-29. Updated the same day after PO APPROVE WITH CHANGES.  
+**No email was sent. No form was submitted. No account was registered by this change.**
+
+## Commercial preparation (allowed)
+
+Negotiations, contracts, and onboarding preparation with Viettel and with MISA may proceed in parallel. Keep sandbox commercial terms and production commercial terms in separate clauses. A signed contract, a price, or an onboarding slot does not enable real merchant issuance, does not set a production binding, and does not move G2-06, G2-16, or G2-18 off OPEN. File the signed document as the artifact before any human reviewer changes a row.
+
+Ask each vendor for a sandbox credential pack separately from any production credential. Do not request that production issuance be switched on.
 
 Draft text to copy later, after bracketed sender identity is filled with real business data, is in [source/03_PROVIDER_EMAILS_EN_VI.md](source/03_PROVIDER_EMAILS_EN_VI.md). Do not invent a legal entity name, MST, or personal phone to send it.
 

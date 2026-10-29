@@ -1,5 +1,7 @@
 # G0 — Origin fiscal gap at 2026-10-29
 
+PO corrections after this record was accepted: [PO-CORRECTIONS-2026-10-29.md](PO-CORRECTIONS-2026-10-29.md). G2-18 is not a prerequisite for sandbox work. This file stays the gap record.
+
 **Class:** documentation only. Level A.  
 **LEGAL GATE G2:** OPEN.  
 **Origin `main` HEAD inspected:** `42957b698c985d13d646599a429945730eb9ade5` (2026-10-29, `feat(modifiers): NEXT-04 PR B — counter POS UI + accept gate (Level B) (#129)`).  
