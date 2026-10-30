@@ -14,7 +14,10 @@ import { parseCanonicalDecimal } from '@millq/domain';
 import { OperationalFactType } from '@millq/contracts';
 import { runMigrations } from '../../db/migrate.js';
 import { seedBlockCFixture, type BlockCFixture } from '../../test/seed.js';
-import { isPosDisposableDatabaseUrl } from '../../test/disposable-database-url.js';
+import {
+  assertPosDisposableDatabaseUrl,
+  isPosDisposableDatabaseUrl,
+} from '../../test/disposable-database-url.js';
 import { setOrderCommercialTermsWithRounding } from '../../test/commercial-terms.js';
 import { GoodsIssueService } from '../inventory/goods-issue-service.js';
 import { GoodsReceiptService } from '../procurement/goods-receipt-service.js';
@@ -24,7 +27,11 @@ import { OrdersService } from './orders-service.js';
 import type { SaleInventoryWriteOffPort } from './sale-write-off-port.js';
 
 const DATABASE_URL = process.env.DATABASE_URL ?? '';
-const describeReplace = isPosDisposableDatabaseUrl(DATABASE_URL) ? describe : describe.skip;
+const RUN_DISPOSABLE = isPosDisposableDatabaseUrl(DATABASE_URL);
+const describeReplace = RUN_DISPOSABLE ? describe : describe.skip;
+
+const BASE_UNIT_MINOR = '50000';
+const OAT_DELTA_MINOR = '5000';
 
 type ReplaceFixture = {
   latteItemId: string;
@@ -46,6 +53,7 @@ describeReplace('ADR-0049/0052 frozen REPLACE → CompleteOrder (disposable PG)'
   let receiptSeq = 0;
 
   beforeAll(async () => {
+    assertPosDisposableDatabaseUrl(DATABASE_URL);
     await runMigrations(DATABASE_URL);
     pool = new pg.Pool({ connectionString: DATABASE_URL });
     modifiers = new ModifiersService(pool);
@@ -58,6 +66,7 @@ describeReplace('ADR-0049/0052 frozen REPLACE → CompleteOrder (disposable PG)'
   });
 
   beforeEach(async () => {
+    assertPosDisposableDatabaseUrl(DATABASE_URL);
     await pool.query(`
       TRUNCATE
         operational_fact_feed,
@@ -180,6 +189,7 @@ describeReplace('ADR-0049/0052 frozen REPLACE → CompleteOrder (disposable PG)'
   }
 
   async function openConfiguredLatte(opts?: {
+    quantity?: string;
     yieldOverride?: { quantity: string; unit: string; dimension: 'MASS' | 'VOLUME' | 'COUNT' };
   }) {
     if (opts?.yieldOverride) {
@@ -198,6 +208,7 @@ describeReplace('ADR-0049/0052 frozen REPLACE → CompleteOrder (disposable PG)'
       );
     }
 
+    const quantity = opts?.quantity ?? '1';
     const opened = await orders.openOrder({
       tenantId: fx.tenantId,
       legalEntityId: fx.legalEntityId,
@@ -207,7 +218,7 @@ describeReplace('ADR-0049/0052 frozen REPLACE → CompleteOrder (disposable PG)'
     const withLine = await orders.addOrderLine({
       orderId: opened.orderId,
       catalogItemId: ids.latteItemId,
-      quantity: '1',
+      quantity,
       unit: 'ea',
       dimension: 'COUNT',
     });
@@ -217,7 +228,7 @@ describeReplace('ADR-0049/0052 frozen REPLACE → CompleteOrder (disposable PG)'
       orderLineId: lineId,
       selections: [{ modifierGroupId: ids.milkGroupId, modifierOptionId: ids.oatOptionId }],
     });
-    return { orderId: opened.orderId, lineId, configured };
+    return { orderId: opened.orderId, lineId, configured, quantity };
   }
 
   async function acceptConfiguredCommercial(
@@ -226,8 +237,10 @@ describeReplace('ADR-0049/0052 frozen REPLACE → CompleteOrder (disposable PG)'
     lineId: string,
     configurationFingerprint: string,
     idempotencyKey: string,
+    quantity = '1',
   ) {
-    // Base 50000 + per-unit oat delta 5000 → gross 55000 (qty 1).
+    const qty = Number(quantity);
+    const grossMerchandiseMinor = String((Number(BASE_UNIT_MINOR) + Number(OAT_DELTA_MINOR)) * qty);
     await setOrderCommercialTermsWithRounding(service, {
       orderId,
       idempotencyKey: `commercial:${idempotencyKey}`,
@@ -239,14 +252,14 @@ describeReplace('ADR-0049/0052 frozen REPLACE → CompleteOrder (disposable PG)'
       lineTerms: [
         {
           orderLineId: lineId,
-          resolvedUnitPriceMinor: '50000',
-          grossMerchandiseMinor: '55000',
+          resolvedUnitPriceMinor: BASE_UNIT_MINOR,
+          grossMerchandiseMinor,
           lineMerchantFundedDiscountMinor: '0',
           eligibleForOrderDiscount: true,
           thirdPartyMerchandiseFundingMinor: '0',
           certainty: 'FINAL',
           provenance: {
-            additivePriceAdjustmentMinor: '5000',
+            additivePriceAdjustmentMinor: OAT_DELTA_MINOR,
             configurationFingerprint,
           },
         },
@@ -259,8 +272,16 @@ describeReplace('ADR-0049/0052 frozen REPLACE → CompleteOrder (disposable PG)'
     lineId: string,
     configurationFingerprint: string,
     idempotencyKey: string,
+    quantity = '1',
   ) {
-    await acceptConfiguredCommercial(orders, orderId, lineId, configurationFingerprint, idempotencyKey);
+    await acceptConfiguredCommercial(
+      orders,
+      orderId,
+      lineId,
+      configurationFingerprint,
+      idempotencyKey,
+      quantity,
+    );
     return orders.completeOrder({
       orderId,
       idempotencyKey,
@@ -341,6 +362,34 @@ describeReplace('ADR-0049/0052 frozen REPLACE → CompleteOrder (disposable PG)'
       [ids.coffeeItemId, ids.oatDrinkItemId].sort(),
     );
     expect(outs.rows.find((r) => r.catalog_item_id === ids.milkItemId)).toBeUndefined();
+  });
+
+  it('3a — quantity 2 scales REPLACE consumption and per-unit modifier gross', async () => {
+    const { orderId, lineId, configured, quantity } = await openConfiguredLatte({ quantity: '2' });
+    const result = await completeConfigured(
+      orderId,
+      lineId,
+      configured.configurationFingerprint,
+      'rep-qty2-1',
+      quantity,
+    );
+    expect(result.status).toBe('completed');
+
+    const leaves = await leavesForOrder(orderId);
+    const qty = (id: string) => leaves.find((r) => r.catalog_item_id === id)?.quantity_base;
+    expect(parseCanonicalDecimal(qty(ids.coffeeItemId)!).eq(parseCanonicalDecimal('0.036'))).toBe(
+      true,
+    );
+    expect(parseCanonicalDecimal(qty(ids.oatDrinkItemId)!).eq(parseCanonicalDecimal('0.4'))).toBe(
+      true,
+    );
+    expect(qty(ids.milkItemId)).toBeUndefined();
+
+    const snap = await pool.query<{ gross_merchandise_minor: string }>(
+      `SELECT gross_merchandise_minor FROM order_line_commercial_snapshot WHERE order_line_id = $1`,
+      [lineId],
+    );
+    expect(snap.rows[0]!.gross_merchandise_minor).toBe('110000');
   });
 
   it('3b — published REPLACE yield override converts before issue', async () => {
@@ -495,7 +544,10 @@ describeReplace('ADR-0049/0052 frozen REPLACE → CompleteOrder (disposable PG)'
         businessOrder: 1,
         actorId: fx.actorId,
       }),
-    ).rejects.toBeInstanceOf(DomainValidationError);
+    ).rejects.toMatchObject({
+      name: 'DomainValidationError',
+      message: expect.stringMatching(/dimension|Incompatible|incompatible/i),
+    });
 
     const after = await orders.getOrder(orderId);
     expect(after.status).toBe('OPEN');
@@ -609,6 +661,11 @@ describeReplace('ADR-0049/0052 frozen REPLACE → CompleteOrder (disposable PG)'
 
     const after = await orders.getOrder(opened.orderId);
     expect(after.status).toBe('OPEN');
+    const gi = await pool.query(
+      `SELECT COUNT(*)::int AS c FROM goods_issue WHERE source_order_id = $1`,
+      [opened.orderId],
+    );
+    expect(gi.rows[0]!.c).toBe(0);
   });
 
   it('7 — inventory write-off failure rolls back completion and movements', async () => {
