@@ -40,6 +40,11 @@ export const PERMISSION_PAYMENTS_REFUND_RECONCILE = 'payments.refund.reconcile' 
 export const PERMISSION_PROCUREMENT_GOODS_RECEIPT_MANAGE =
   'procurement.goods_receipt.manage' as const;
 
+/** ADR-0054 I-07 — typed Imprint outlet summary (outlet-scoped grant required). */
+export const PERMISSION_IMPRINT_READ = 'imprint.read' as const;
+/** ADR-0054 I-07 — minimized Imprint provenance; additional to imprint.read. */
+export const PERMISSION_IMPRINT_PROVENANCE_READ = 'imprint.provenance.read' as const;
+
 /**
  * ADR-0051 D1 — Manager/Owner approves an order-level merchant discount requested by a cashier.
  * Held by the approver only; the requesting cashier needs pos.operate.

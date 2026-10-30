@@ -74,8 +74,8 @@ export class ImprintScope {
   ) {}
 
   /**
-   * Principal-bound scope for future HTTP. Outlet membership is required.
-   * AccessGrant keys for Imprint read remain a deferred I-07 decision.
+   * Principal-bound scope for HTTP reads. Outlet membership is required.
+   * AccessGrant enforcement (outlet-scoped imprint.read) is done by the HTTP route.
    */
   static async open(
     pool: pg.Pool,

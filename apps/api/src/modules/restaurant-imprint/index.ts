@@ -10,6 +10,7 @@ export {
   ImprintGoodsReceiptAdapter,
   pickLastPostedReceipt,
 } from './imprint-goods-receipt-adapter.js';
+export { ImprintHttpReadService } from './imprint-http-read.js';
 export { ImprintPersistence } from './imprint-persistence.js';
 export {
   imprintPayloadFingerprint,
