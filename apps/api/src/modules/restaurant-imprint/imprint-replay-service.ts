@@ -32,6 +32,11 @@ export type ImprintReplayResult = {
   sourceFailureRetained: boolean;
 };
 
+type SoftDegradation = {
+  sourceModule: 'organization' | 'procurement';
+  errorCode: 'IMPRINT_SOURCE_READ_FAILED' | 'IMPRINT_SOURCE_SCHEMA_LIMIT';
+};
+
 /**
  * Deterministic outlet snapshot rebuild from claims (+ optional source re-sync).
  * ADR-0054 I-08 — disposable / internal only. No HTTP, no new AccessGrant keys.
@@ -58,7 +63,7 @@ export class ImprintReplayService {
     const scope = await ImprintScope.openInternal(this.pool, this.authority, tenantId, outletId);
     const prior = await this.readHead(scope.tenantId, scope.outletId);
     const resync = opts.resyncSources === true;
-    let softDegradedModule: 'organization' | 'procurement' | null = null;
+    let soft: SoftDegradation | null = null;
 
     if (resync) {
       const org = await this.safeSyncOrganization(scope);
@@ -69,7 +74,7 @@ export class ImprintReplayService {
           freshness: 'STALE',
         });
       }
-      if (org.degraded) softDegradedModule = 'organization';
+      if (org.degradation) soft = org.degradation;
 
       const procurement = await this.safeSyncProcurement(scope);
       if (procurement.kind === 'HARD_FAIL') {
@@ -79,19 +84,12 @@ export class ImprintReplayService {
           freshness: 'STALE',
         });
       }
-      if (procurement.degraded && softDegradedModule == null) {
-        softDegradedModule = 'procurement';
-      }
+      if (procurement.degradation && soft == null) soft = procurement.degradation;
 
-      // Soft source degradation with an existing head: keep last-good revision, mark STALE.
-      // Procurement adapter soft-fails on read errors; Organization soft-fails on schema limits.
-      if (softDegradedModule && prior) {
+      if (soft && prior) {
         return this.retainLastGood(scope, prior, {
-          sourceModule: softDegradedModule,
-          errorCode:
-            softDegradedModule === 'procurement'
-              ? 'IMPRINT_SOURCE_READ_FAILED'
-              : 'IMPRINT_SOURCE_SCHEMA_LIMIT',
+          sourceModule: soft.sourceModule,
+          errorCode: soft.errorCode,
           freshness: 'STALE',
         });
       }
@@ -127,11 +125,10 @@ export class ImprintReplayService {
       fields,
     });
 
-    // First snapshot after soft degradation: publish then mark DEGRADED on that head.
-    if (softDegradedModule) {
+    if (soft) {
       await this.claims.recordSourceFailure(scope, {
-        sourceModule: softDegradedModule,
-        errorCode: 'IMPRINT_SOURCE_SCHEMA_LIMIT',
+        sourceModule: soft.sourceModule,
+        errorCode: soft.errorCode,
         freshness: 'DEGRADED',
       });
       const current = (await this.readHead(scope.tenantId, scope.outletId)) ?? {
@@ -160,10 +157,19 @@ export class ImprintReplayService {
 
   private async safeSyncOrganization(
     scope: ImprintScope,
-  ): Promise<{ kind: 'OK'; degraded: boolean } | { kind: 'HARD_FAIL' }> {
+  ): Promise<
+    | { kind: 'OK'; degradation: SoftDegradation | null }
+    | { kind: 'HARD_FAIL' }
+  > {
     try {
       const result = await this.organization.syncOutlet(scope.tenantId, scope.outletId);
-      return { kind: 'OK', degraded: result.degraded };
+      return {
+        kind: 'OK',
+        degradation:
+          result.degraded && result.degradationCode
+            ? { sourceModule: 'organization', errorCode: result.degradationCode }
+            : null,
+      };
     } catch (err) {
       if (err instanceof ImprintServiceError && err.code === 'IMPRINT_SCOPE_DENIED') throw err;
       return { kind: 'HARD_FAIL' };
@@ -172,10 +178,19 @@ export class ImprintReplayService {
 
   private async safeSyncProcurement(
     scope: ImprintScope,
-  ): Promise<{ kind: 'OK'; degraded: boolean } | { kind: 'HARD_FAIL' }> {
+  ): Promise<
+    | { kind: 'OK'; degradation: SoftDegradation | null }
+    | { kind: 'HARD_FAIL' }
+  > {
     try {
       const result = await this.goodsReceipts.syncOutlet(scope.tenantId, scope.outletId);
-      return { kind: 'OK', degraded: result.degraded };
+      return {
+        kind: 'OK',
+        degradation:
+          result.degraded && result.degradationCode
+            ? { sourceModule: 'procurement', errorCode: result.degradationCode }
+            : null,
+      };
     } catch (err) {
       if (err instanceof ImprintServiceError && err.code === 'IMPRINT_SCOPE_DENIED') throw err;
       return { kind: 'HARD_FAIL' };
@@ -202,7 +217,6 @@ export class ImprintReplayService {
       errorCode: failure.errorCode,
       freshness: failure.freshness,
     });
-    // Re-read under the failure write so concurrent publishRevision is visible.
     const current = await this.readHead(scope.tenantId, scope.outletId);
     const head = current ?? { ...prior, freshness: failure.freshness };
     return {

@@ -50,6 +50,7 @@ export class ImprintOrganizationAdapter {
     outcomes: AppendOutcome[];
     watermark: string | null;
     degraded: boolean;
+    degradationCode: 'IMPRINT_SOURCE_SCHEMA_LIMIT' | null;
   }> {
     const scope = await ImprintScope.openInternal(this.pool, this.authority, tenantId, outletId);
     const source = await this.readOutlet(scope);
@@ -89,7 +90,12 @@ export class ImprintOrganizationAdapter {
           freshness: 'DEGRADED',
         });
       }
-      return { outcomes: [], watermark: null, degraded };
+      return {
+        outcomes: [],
+        watermark: null,
+        degraded,
+        degradationCode: degraded ? 'IMPRINT_SOURCE_SCHEMA_LIMIT' : null,
+      };
     }
 
     const watermark = contentRevision(
@@ -108,7 +114,12 @@ export class ImprintOrganizationAdapter {
         freshness: 'DEGRADED',
       });
     }
-    return { outcomes: result.outcomes, watermark: result.watermark, degraded };
+    return {
+      outcomes: result.outcomes,
+      watermark: result.watermark,
+      degraded,
+      degradationCode: degraded ? 'IMPRINT_SOURCE_SCHEMA_LIMIT' : null,
+    };
   }
 
   private async readOutlet(scope: ImprintScope): Promise<OutletSource | null> {
