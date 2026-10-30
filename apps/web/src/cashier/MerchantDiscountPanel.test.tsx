@@ -287,4 +287,88 @@ describe('MerchantDiscountPanel', () => {
     expect(screen.getByTestId('merchant-discount-result').textContent).toMatch(/3000/);
     expect(screen.queryByTestId('merchant-discount-apply')).toBeNull();
   });
+
+  it('clears stale applied UI when commercial re-accept drops merchantDiscount', async () => {
+    const withDiscount = acceptedCommercial({
+      roundingProvenance: {
+        orderProvenance: {
+          merchantDiscount: {
+            discountMinor: '3000',
+            reason: 'vip',
+            mode: 'FIXED_MINOR',
+          },
+        },
+      },
+    });
+    const { rerender } = render(
+      <MerchantDiscountPanel
+        orderId={orderId}
+        outletId={outletId}
+        terminalId={terminalId}
+        commercial={withDiscount}
+        settlementLive={false}
+        editable
+        busy={false}
+        onApplied={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('merchant-discount-result')).toBeTruthy();
+
+    rerender(
+      <MerchantDiscountPanel
+        orderId={orderId}
+        outletId={outletId}
+        terminalId={terminalId}
+        commercial={acceptedCommercial({ roundingProvenance: null })}
+        settlementLive={false}
+        editable
+        busy={false}
+        onApplied={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(screen.getByTestId('merchant-discount-apply')).toBeTruthy());
+    expect(screen.queryByTestId('merchant-discount-result')).toBeNull();
+  });
+
+  it('keeps uncertain recovery actions when settlement becomes live', async () => {
+    mockedApi.applyMerchantDiscount.mockRejectedValueOnce(new TypeError('network'));
+    const { rerender } = render(
+      <MerchantDiscountPanel
+        orderId={orderId}
+        outletId={outletId}
+        terminalId={terminalId}
+        commercial={acceptedCommercial()}
+        settlementLive={false}
+        editable
+        busy={false}
+        onApplied={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('merchant-discount-amount'), {
+      target: { value: '4000' },
+    });
+    fireEvent.change(screen.getByTestId('merchant-discount-reason'), {
+      target: { value: 'guest' },
+    });
+    fireEvent.click(screen.getByTestId('merchant-discount-apply'));
+    await waitFor(() => expect(screen.getByTestId('merchant-discount-check-order')).toBeTruthy());
+
+    rerender(
+      <MerchantDiscountPanel
+        orderId={orderId}
+        outletId={outletId}
+        terminalId={terminalId}
+        commercial={acceptedCommercial()}
+        settlementLive
+        editable
+        busy={false}
+        onApplied={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('merchant-discount-check-order')).toBeTruthy();
+    expect(screen.getByText(/Settlement has started — reconcile/i)).toBeTruthy();
+    expect(
+      (screen.getByTestId('merchant-discount-retry-same') as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
 });

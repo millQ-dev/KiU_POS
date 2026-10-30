@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { posApi } from '../api/client.js';
 import { ApiError } from '../api/types.js';
 import type { CommercialStatus as CommercialStatusDto } from '../api/types.js';
@@ -45,6 +45,14 @@ function readAppliedFromCommercial(
     reason: typeof md.reason === 'string' ? md.reason : '',
     mode: md.mode === 'PERCENT' ? 'PERCENT' : 'FIXED_MINOR',
   };
+}
+
+/** Stable signature of server discount provenance for remount / stale-clear. */
+export function merchantDiscountCommercialSignature(
+  commercial: CommercialStatusDto | null,
+): string {
+  const md = readAppliedFromCommercial(commercial);
+  return `${commercial?.commercialState ?? 'none'}:${md?.discountMinor ?? '0'}:${commercial?.presentationHint ?? ''}`;
 }
 
 function loadOrCreateIdempotencyKey(orderId: string, attemptToken: string): string {
@@ -100,6 +108,50 @@ export function MerchantDiscountPanel({
   const [applied, setApplied] = useState<MerchantDiscountAppliedView | null>(fromServer);
   const attemptTokenRef = useRef(crypto.randomUUID());
   const pendingKeyRef = useRef<string | null>(null);
+  const holdLocalAppliedRef = useRef(false);
+  const lastSignatureRef = useRef(merchantDiscountCommercialSignature(commercial));
+
+  // Clear stale "applied" when commercial re-accept drops merchantDiscount; do not
+  // clobber a just-succeeded local apply while parent reloads commercial.
+  useEffect(() => {
+    const signature = merchantDiscountCommercialSignature(commercial);
+    const server = readAppliedFromCommercial(commercial);
+    if (server) {
+      holdLocalAppliedRef.current = false;
+      lastSignatureRef.current = signature;
+      setApplied(server);
+      if (phase === 'uncertain' || phase === 'awaiting_approval' || phase === 'entry') {
+        setPhase('applied');
+        setApprovalId(null);
+        setError(null);
+        pendingKeyRef.current = null;
+      }
+      return;
+    }
+    if (phase === 'uncertain' || phase === 'awaiting_approval') {
+      lastSignatureRef.current = signature;
+      return;
+    }
+    if (holdLocalAppliedRef.current) {
+      if (signature !== lastSignatureRef.current) {
+        // Parent reloaded commercial without discount after our local apply — unlikely;
+        // drop the hold so a later reset can clear.
+        holdLocalAppliedRef.current = false;
+        lastSignatureRef.current = signature;
+      }
+      return;
+    }
+    if (phase === 'applied' && signature !== lastSignatureRef.current) {
+      lastSignatureRef.current = signature;
+      setApplied(null);
+      setPhase('entry');
+      setApprovalId(null);
+      pendingKeyRef.current = null;
+      attemptTokenRef.current = crypto.randomUUID();
+      return;
+    }
+    lastSignatureRef.current = signature;
+  }, [commercial, phase]);
 
   const disabled =
     !editable ||
@@ -163,6 +215,7 @@ export function MerchantDiscountPanel({
       clearIdempotencyKey(orderId, attemptTokenRef.current);
       pendingKeyRef.current = null;
       attemptTokenRef.current = crypto.randomUUID();
+      holdLocalAppliedRef.current = true;
       setApplied(view);
       setPhase('applied');
       setApprovalId(null);
@@ -281,6 +334,80 @@ export function MerchantDiscountPanel({
     );
   }
 
+  // Uncertain / approval must win over settlement lock so recovery actions stay available.
+  if (phase === 'awaiting_approval') {
+    return (
+      <section className="pos-merchant-discount" aria-label="Merchant discount">
+        <h3 className="pos-merchant-discount__title">Approval required</h3>
+        <p className="pos-merchant-discount__hint">
+          Waiting for a manager with orders.merchant_discount.approve. Continue only after they
+          approve this request.
+        </p>
+        {settlementLive ? (
+          <p className="pos-merchant-discount__alert" role="status">
+            Settlement is already open — finish or abandon this approval attempt carefully.
+          </p>
+        ) : null}
+        {error ? (
+          <p className="pos-merchant-discount__alert" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <div className="pos-merchant-discount__actions">
+          <button
+            type="button"
+            data-testid="merchant-discount-continue-approval"
+            disabled={localBusy || busy || !approvalId || settlementLive}
+            onClick={() => void onContinueAfterApproval()}
+          >
+            Continue after approval
+          </button>
+          <button type="button" disabled={localBusy || busy} onClick={onCancelAttempt}>
+            Cancel attempt
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  if (phase === 'uncertain') {
+    return (
+      <section className="pos-merchant-discount" aria-label="Merchant discount">
+        <h3 className="pos-merchant-discount__title">Discount outcome uncertain</h3>
+        <p className="pos-merchant-discount__hint" role="alert">
+          {error ??
+            'The apply response was lost or incomplete. Check the order before mutating again. This screen will not auto-replay with a new key.'}
+        </p>
+        {settlementLive ? (
+          <p className="pos-merchant-discount__alert" role="status">
+            Settlement has started — reconcile this attempt before trusting the payable.
+          </p>
+        ) : null}
+        <div className="pos-merchant-discount__actions">
+          <button
+            type="button"
+            data-testid="merchant-discount-check-order"
+            disabled={localBusy || busy}
+            onClick={() => void onCheckOrder()}
+          >
+            Check order
+          </button>
+          <button
+            type="button"
+            data-testid="merchant-discount-retry-same"
+            disabled={localBusy || busy || settlementLive}
+            onClick={() => void onRetrySameAttempt()}
+          >
+            Retry same attempt
+          </button>
+          <button type="button" disabled={localBusy || busy} onClick={onCancelAttempt}>
+            Cancel attempt
+          </button>
+        </div>
+      </section>
+    );
+  }
+
   if (settlementLive) {
     return (
       <section className="pos-merchant-discount" aria-label="Merchant discount">
@@ -290,7 +417,7 @@ export function MerchantDiscountPanel({
         </p>
         {applied || fromServer ? (
           <p className="pos-merchant-discount__result" data-testid="merchant-discount-result">
-            Discount { (applied ?? fromServer)!.discountMinor } {currency}; net merchandise{' '}
+            Discount {(applied ?? fromServer)!.discountMinor} {currency}; net merchandise{' '}
             {(applied ?? fromServer)!.netMerchandiseSalesMinor} {currency} (server)
           </p>
         ) : null}
@@ -313,69 +440,6 @@ export function MerchantDiscountPanel({
           A second apply is not offered from this screen — re-apply requires a new commercial
           decision path.
         </p>
-      </section>
-    );
-  }
-
-  if (phase === 'awaiting_approval') {
-    return (
-      <section className="pos-merchant-discount" aria-label="Merchant discount">
-        <h3 className="pos-merchant-discount__title">Approval required</h3>
-        <p className="pos-merchant-discount__hint">
-          Waiting for a manager with orders.merchant_discount.approve. Continue only after they
-          approve this request.
-        </p>
-        {error ? (
-          <p className="pos-merchant-discount__alert" role="alert">
-            {error}
-          </p>
-        ) : null}
-        <div className="pos-merchant-discount__actions">
-          <button
-            type="button"
-            data-testid="merchant-discount-continue-approval"
-            disabled={localBusy || busy || !approvalId}
-            onClick={() => void onContinueAfterApproval()}
-          >
-            Continue after approval
-          </button>
-          <button type="button" disabled={localBusy || busy} onClick={onCancelAttempt}>
-            Cancel attempt
-          </button>
-        </div>
-      </section>
-    );
-  }
-
-  if (phase === 'uncertain') {
-    return (
-      <section className="pos-merchant-discount" aria-label="Merchant discount">
-        <h3 className="pos-merchant-discount__title">Discount outcome uncertain</h3>
-        <p className="pos-merchant-discount__hint" role="alert">
-          {error ??
-            'The apply response was lost or incomplete. Check the order before mutating again. This screen will not auto-replay with a new key.'}
-        </p>
-        <div className="pos-merchant-discount__actions">
-          <button
-            type="button"
-            data-testid="merchant-discount-check-order"
-            disabled={localBusy || busy}
-            onClick={() => void onCheckOrder()}
-          >
-            Check order
-          </button>
-          <button
-            type="button"
-            data-testid="merchant-discount-retry-same"
-            disabled={localBusy || busy}
-            onClick={() => void onRetrySameAttempt()}
-          >
-            Retry same attempt
-          </button>
-          <button type="button" disabled={localBusy || busy} onClick={onCancelAttempt}>
-            Cancel attempt
-          </button>
-        </div>
       </section>
     );
   }
