@@ -544,9 +544,10 @@ describeReplace('ADR-0049/0052 frozen REPLACE → CompleteOrder (disposable PG)'
         businessOrder: 1,
         actorId: fx.actorId,
       }),
-    ).rejects.toMatchObject({
-      name: 'DomainValidationError',
-      message: expect.stringMatching(/dimension|Incompatible|incompatible/i),
+    ).rejects.toSatisfy((err: unknown) => {
+      expect(err).toBeInstanceOf(DomainValidationError);
+      expect((err as Error).message).toMatch(/dimension|Incompatible|incompatible/i);
+      return true;
     });
 
     const after = await orders.getOrder(orderId);
