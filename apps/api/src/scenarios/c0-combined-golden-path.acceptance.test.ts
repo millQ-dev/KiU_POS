@@ -36,7 +36,7 @@ import { GoodsIssueService } from '../modules/inventory/goods-issue-service.js';
 import { MenuService } from '../modules/menu/index.js';
 import { AllergensService } from '../modules/allergens/index.js';
 import { ModifiersService } from '../modules/modifiers/index.js';
-import { DomainValidationError, IdempotencyConflictError, NotFoundError } from '../modules/orders/errors.js';
+import { IdempotencyConflictError, NotFoundError } from '../modules/orders/errors.js';
 import { OrdersService } from '../modules/orders/orders-service.js';
 import { PaymentsService } from '../modules/payments/payments-service.js';
 import { ReceiveCashService } from '../modules/payments/receive-cash-service.js';
@@ -493,17 +493,7 @@ describeGolden('C0 combined Golden Path (disposable PG)', () => {
       idempotencyKey: `c0-settle-${opened.orderId}`,
       actorId: cashier.userId,
     });
-    const beforeFiscal = await settlements.observeFiscalGate(settlement.settlementGroupId);
-    expect(beforeFiscal.status).not.toBe('SATISFIED');
-    await expect(
-      checkout.tryAdvanceCheckout({
-        settlementGroupId: settlement.settlementGroupId,
-        completeIdempotencyKey: `c0-complete-${opened.orderId}`,
-        businessDate: '2026-10-30',
-        businessOrder: 1,
-        actorId: cashier.userId,
-      }),
-    ).rejects.toBeInstanceOf(DomainValidationError);
+    expect((await settlements.observeFiscalGate(settlement.settlementGroupId)).status).not.toBe('SATISFIED');
 
     const cashResult = await receiveCash.receiveCash({
       principal: cashier,
@@ -515,6 +505,19 @@ describeGolden('C0 combined Golden Path (disposable PG)', () => {
       humanConfirmation: true,
     });
     expect(cashResult.evidence.amountDueMinor).toBe(EXPECTED_NET_MINOR);
+    const paid = await settlements.reconcileSettlementCoverage(settlement.settlementGroupId);
+    expect(paid.state).toBe('SATISFIED');
+    const paidGate = await settlements.observeFiscalGate(settlement.settlementGroupId);
+    expect(paidGate.status).not.toBe('SATISFIED');
+    await expect(
+      checkout.tryAdvanceCheckout({
+        settlementGroupId: settlement.settlementGroupId,
+        completeIdempotencyKey: `c0-complete-${opened.orderId}`,
+        businessDate: '2026-10-30',
+        businessOrder: 1,
+        actorId: cashier.userId,
+      }),
+    ).rejects.toMatchObject({ code: expect.stringMatching(/FISCAL_PREREQUISITE/) });
 
     const issued = await fiscal.issueForSettlement({
       settlementGroupId: settlement.settlementGroupId,
