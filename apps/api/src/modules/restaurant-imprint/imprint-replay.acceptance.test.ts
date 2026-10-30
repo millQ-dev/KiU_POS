@@ -287,6 +287,7 @@ describeReplay('restaurant imprint disposable replay (I-08)', () => {
         [tenantId, outletId],
       );
       expect(err.rows[0]?.source_module).toBe('procurement');
+      expect(err.rows[0]?.error_code).toBe('IMPRINT_SOURCE_READ_FAILED');
     } finally {
       pool.query = originalQuery;
     }

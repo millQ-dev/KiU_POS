@@ -84,10 +84,14 @@ export class ImprintReplayService {
       }
 
       // Soft source degradation with an existing head: keep last-good revision, mark STALE.
+      // Procurement adapter soft-fails on read errors; Organization soft-fails on schema limits.
       if (softDegradedModule && prior) {
         return this.retainLastGood(scope, prior, {
           sourceModule: softDegradedModule,
-          errorCode: 'IMPRINT_SOURCE_SCHEMA_LIMIT',
+          errorCode:
+            softDegradedModule === 'procurement'
+              ? 'IMPRINT_SOURCE_READ_FAILED'
+              : 'IMPRINT_SOURCE_SCHEMA_LIMIT',
           freshness: 'STALE',
         });
       }
