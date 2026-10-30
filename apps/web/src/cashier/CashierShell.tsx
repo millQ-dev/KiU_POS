@@ -84,6 +84,58 @@ function lineNeedsModifierPrompt(groups: CatalogModifierGroup[]): boolean {
   return groups.length > 0;
 }
 
+// An unreadable response is not evidence that the server did not commit the selection.
+function isOrderFor(value: unknown, orderId: string): value is OrderBasket {
+  if (!value || typeof value !== 'object') return false;
+  const o = value as Partial<OrderBasket>;
+  return o.orderId === orderId && typeof o.tenantId === 'string' &&
+    typeof o.legalEntityId === 'string' && typeof o.outletId === 'string' &&
+    typeof o.channel === 'string' && typeof o.status === 'string' && Array.isArray(o.lines) &&
+    o.lines.every((line) => line && typeof line.orderLineId === 'string' &&
+      typeof line.lineNumber === 'number' &&
+      typeof line.catalogItemId === 'string' && typeof line.catalogItemName === 'string' &&
+      typeof line.quantity === 'string' && typeof line.unit === 'string' &&
+      typeof line.dimension === 'string');
+}
+
+function isCommercialFor(value: unknown, orderId: string): value is CommercialStatus {
+  if (!value || typeof value !== 'object') return false;
+  const c = value as Partial<CommercialStatus>;
+  return c.orderId === orderId && typeof c.orderStatus === 'string' &&
+    (c.commercialState === 'ACCEPTED' || c.commercialState === 'NOT_ACCEPTED') &&
+    (c.presentationHint === 'NEEDS_REACCEPTANCE' || c.presentationHint === 'COMMERCIAL_CURRENT') &&
+    (c.currencyCode === null || typeof c.currencyCode === 'string') &&
+    (c.minorUnitExponent === null || typeof c.minorUnitExponent === 'number') &&
+    (c.acceptedGrossMerchandiseMinor === null || typeof c.acceptedGrossMerchandiseMinor === 'string') &&
+    Array.isArray(c.lines) && c.lines.every((line) => line &&
+      typeof line.orderLineId === 'string' && typeof line.grossMerchandiseMinor === 'string');
+}
+
+function isSettlementFor(value: unknown, orderId: string): value is SettlementProjection {
+  if (!value || typeof value !== 'object') return false;
+  const s = value as Partial<SettlementProjection>;
+  return s.orderId === orderId && typeof s.settlementGroupId === 'string' &&
+    (s.state === 'COLLECTING' || s.state === 'SATISFIED' || s.state === 'ABORTED') &&
+    typeof s.currencyCode === 'string' && typeof s.merchandiseGrossMinor === 'string' &&
+    typeof s.customerPayableMinor === 'string' && typeof s.allocatedAmountMinor === 'string' &&
+    typeof s.outstandingAmountMinor === 'string' && typeof s.version === 'number' &&
+    Array.isArray(s.checks) && s.checks.every((check) => check &&
+      typeof check.settlementCheckId === 'string' && typeof check.checkNumber === 'number' &&
+      typeof check.state === 'string' && typeof check.customerPayableMinor === 'string' &&
+      typeof check.allocatedAmountMinor === 'string' && typeof check.outstandingAmountMinor === 'string');
+}
+
+function selectionDefinitelyRejected(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  // These route errors occur before selection; other errors may occur while enriching a committed order.
+  return (err.status === 401 || err.status === 403) || (err.status === 400 && [
+    'POS_SLOT_UNAVAILABLE', 'POS_SLOT_PRICE_UNAVAILABLE', 'POS_SLOT_NOT_ACTIVE',
+    'POS_QUANTITY_ENTRY_DEFERRED',
+  ].includes(err.code));
+}
+
+type SelectionRecovery = { orderId: string; phase: 'loading' | 'failed' | 'review' };
+
 export function CashierShell({
   context,
   mode = 'dev',
@@ -116,14 +168,28 @@ export function CashierShell({
   const [settlementBusy, setSettlementBusy] = useState(false);
   const [modifierSaves, setModifierSaves] = useState(0);
   const inFlightRef = useRef(false);
+  const recoveryRef = useRef<SelectionRecovery | null>(null);
+  const [recovery, setRecovery] = useState<SelectionRecovery | null>(null);
+  const orderIdRef = useRef<string | null>(null);
+
+  const updateRecovery = (next: SelectionRecovery | null) => {
+    recoveryRef.current = next;
+    setRecovery(next);
+  };
+
+  useEffect(() => () => {
+    orderIdRef.current = null;
+    recoveryRef.current = null;
+  }, []);
 
   const liveSettlement =
     settlement && (settlement.state === 'COLLECTING' || settlement.state === 'SATISFIED')
       ? settlement
       : null;
-  const editable = order?.status === 'OPEN' && !liveSettlement;
+  const editable = order?.status === 'OPEN' && !liveSettlement && !recovery;
 
   const applyOrder = useCallback((next: OrderBasket, preferLineId?: string | null) => {
+    orderIdRef.current = next.orderId;
     setOrder(next);
     setPriceResolution(null);
     setSelectedLineId((prev) => {
@@ -225,7 +291,7 @@ export function CashierShell({
   }, [surface, selectedPageId]);
 
   const withMutationGuard = async (fn: () => Promise<void>) => {
-    if (inFlightRef.current) return;
+    if (inFlightRef.current || recoveryRef.current) return;
     inFlightRef.current = true;
     setMutationBusy(true);
     setFeedback(null);
@@ -235,6 +301,42 @@ export function CashierShell({
       inFlightRef.current = false;
       setMutationBusy(false);
     }
+  };
+
+  const reconcileSelection = async (orderId: string) => {
+    if (orderIdRef.current !== orderId || recoveryRef.current?.phase === 'loading') return;
+    updateRecovery({ orderId, phase: 'loading' });
+    try {
+      // Read all three independently; a failed settlement read must never mean "no settlement".
+      const [next, commercialStatus, live] = await Promise.all([
+        posApi.getOrder(orderId),
+        posApi.getCommercialStatus(orderId),
+        posApi.getLiveSettlement(orderId),
+      ]);
+      if (!isOrderFor(next, orderId) || !isCommercialFor(commercialStatus, orderId) ||
+          !live || live.orderId !== orderId || !('settlement' in live) ||
+          (live.settlement !== null && !isSettlementFor(live.settlement, orderId))) {
+        throw new Error('Invalid recovery response');
+      }
+      if (orderIdRef.current !== orderId || recoveryRef.current?.orderId !== orderId) return;
+      applyOrder(next, null);
+      setCommercial(commercialStatus);
+      setSettlement(live.settlement);
+      updateRecovery({ orderId, phase: 'review' });
+    } catch {
+      if (orderIdRef.current === orderId && recoveryRef.current?.orderId === orderId) {
+        updateRecovery({ orderId, phase: 'failed' });
+      }
+    }
+  };
+
+  const startSelectionRecovery = async (orderId: string) => {
+    // Set the synchronous lock before starting any reads or allowing another event.
+    updateRecovery({ orderId, phase: 'failed' });
+    setFeedback(null);
+    setQuantitySlot(null);
+    setModifierPrompt(null);
+    await reconcileSelection(orderId);
   };
 
   const handleMutationError = async (err: unknown, orderId: string | undefined) => {
@@ -272,6 +374,7 @@ export function CashierShell({
   };
 
   const onSelectSlot = async (slot: ResolvedPosSlot) => {
+    if (recoveryRef.current || inFlightRef.current) return;
     if (!order || order.status !== 'OPEN') {
       setFeedback('Open an order first');
       return;
@@ -293,10 +396,15 @@ export function CashierShell({
           orderId: order.orderId,
           layoutPublicationSlotId: slot.layoutPublicationSlotId,
         });
+        if (!isOrderFor(result?.order, order.orderId)) throw new Error('Invalid selection response');
         applyOrder(result.order, selectedLineId);
         await reloadCommercial(result.order.orderId);
         await maybePromptModifiers(result.order, slot.catalogItemId);
       } catch (err) {
+        if (!selectionDefinitelyRejected(err)) {
+          await startSelectionRecovery(order.orderId);
+          return;
+        }
         const code = err instanceof ApiError ? err.code : 'NETWORK';
         const message = err instanceof Error ? err.message : 'Selection failed';
         setFeedback(`${code}: ${message}`);
@@ -316,7 +424,7 @@ export function CashierShell({
   };
 
   const onConfirmWeighted = async (quantity: string) => {
-    if (!order || !quantitySlot) return;
+    if (!order || !quantitySlot || recoveryRef.current) return;
     const slot = quantitySlot;
     await withMutationGuard(async () => {
       setSelectingSlotId(slot.layoutPublicationSlotId);
@@ -327,11 +435,16 @@ export function CashierShell({
           layoutPublicationSlotId: slot.layoutPublicationSlotId,
           quantity,
         });
+        if (!isOrderFor(result?.order, order.orderId)) throw new Error('Invalid selection response');
         applyOrder(result.order, selectedLineId);
         await reloadCommercial(result.order.orderId);
         setQuantitySlot(null);
         await maybePromptModifiers(result.order, slot.catalogItemId);
       } catch (err) {
+        if (!selectionDefinitelyRejected(err)) {
+          await startSelectionRecovery(order.orderId);
+          return;
+        }
         const code = err instanceof ApiError ? err.code : 'NETWORK';
         const message = err instanceof Error ? err.message : 'Selection failed';
         setFeedback(`${code}: ${message}`);
@@ -554,12 +667,12 @@ export function CashierShell({
             type="button"
             className="pos-shell__btn"
             onClick={() => void loadSurface()}
-            disabled={surfaceLoading}
+            disabled={surfaceLoading || !!recovery}
           >
             Refresh surface
           </button>
           {!production && onChangeContext ? (
-            <button type="button" className="pos-shell__btn" onClick={onChangeContext}>
+            <button type="button" className="pos-shell__btn" disabled={!!recovery} onClick={onChangeContext}>
               Change context
             </button>
           ) : null}
@@ -568,13 +681,14 @@ export function CashierShell({
               type="button"
               className="pos-shell__btn"
               data-testid="open-close-cash-shift"
+              disabled={!!recovery}
               onClick={onCloseCashShift}
             >
               Close cash shift
             </button>
           ) : null}
           {production && onSignOut ? (
-            <button type="button" className="pos-shell__btn" onClick={onSignOut}>
+            <button type="button" className="pos-shell__btn" disabled={!!recovery} onClick={onSignOut}>
               Sign out
             </button>
           ) : null}
@@ -586,6 +700,37 @@ export function CashierShell({
           {feedback}
         </div>
       )}
+
+      {recovery && (
+        <div className="pos-shell__feedback" role="alert" aria-live="polite">
+          {recovery.phase === 'loading' && 'Selection response was not confirmed. Checking the server order…'}
+          {recovery.phase === 'failed' && (
+            <>
+              Server order or checkout state could not be read. The basket is locked; retry the check.
+              <button type="button" className="pos-shell__btn" onClick={() => void reconcileSelection(recovery.orderId)}>
+                Retry order check
+              </button>
+            </>
+          )}
+          {recovery.phase === 'review' && (
+            <>
+              Server state was read. Check the basket and modifiers before continuing. The original request
+              may still be processing; this check cannot confirm its final outcome. Do not add the product
+              again unless you have confirmed what happened.
+              <button type="button" className="pos-shell__btn" onClick={() => void reconcileSelection(recovery.orderId)}>
+                Check again
+              </button>
+              <button type="button" className="pos-shell__btn" onClick={() => {
+                if (recoveryRef.current?.phase === 'review') updateRecovery(null);
+              }}>
+                I checked the order
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      <fieldset disabled={!!recovery} className="pos-shell__workarea">
 
       {!editable && order && order.status === 'OPEN' && liveSettlement && (
         <div className="pos-shell__feedback" role="status">
@@ -666,6 +811,8 @@ export function CashierShell({
             onOrderCompleted={onOrderCompleted}
             onCancelOrder={onCancelOrder}
             onNewOrder={() => {
+              if (recoveryRef.current || inFlightRef.current) return;
+              orderIdRef.current = null;
               setOrder(null);
               setSettlement(null);
               setCommercial(null);
@@ -711,6 +858,7 @@ export function CashierShell({
           }}
         />
       )}
+      </fieldset>
     </div>
   );
 }

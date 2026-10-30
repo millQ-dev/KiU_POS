@@ -33,6 +33,7 @@ vi.mock('./api/client.js', () => ({
     getOrder: vi.fn(),
     selectCountTap: vi.fn(),
     selectQuantityTap: vi.fn(),
+    getCatalogItemModifierGroups: vi.fn(),
     updateOrderLine: vi.fn(),
     removeOrderLine: vi.fn(),
     cancelOrder: vi.fn(),
@@ -458,6 +459,8 @@ describe('CashierShell integration (mocked API)', () => {
     mockedApi.getOrder.mockReset();
     mockedApi.selectCountTap.mockReset();
     mockedApi.selectQuantityTap.mockReset();
+    mockedApi.getCatalogItemModifierGroups.mockReset();
+    mockedApi.getCatalogItemModifierGroups.mockResolvedValue({ catalogItemId: eggLine.catalogItemId, groups: [] });
     mockedApi.updateOrderLine.mockReset();
     mockedApi.removeOrderLine.mockReset();
     mockedApi.cancelOrder.mockReset();
@@ -494,6 +497,179 @@ describe('CashierShell integration (mocked API)', () => {
     expect(JSON.stringify(mockedApi.selectCountTap.mock.calls)).not.toMatch(
       /setOrderCommercialTerms|completeOrder|grossMerchandise/,
     );
+  });
+
+  it('locks mutations after a lost COUNT response, reads server state, and never replays the selection', async () => {
+    mockedApi.resolveSurface.mockResolvedValue(surfaceWith(activeCount()));
+    mockedApi.openOrder.mockResolvedValue(emptyOrder);
+    mockedApi.selectCountTap.mockRejectedValue(new TypeError('response lost'));
+    let completeRead!: (order: OrderBasket) => void;
+    mockedApi.getOrder.mockReturnValue(new Promise((resolve) => { completeRead = resolve; }));
+
+    render(<CashierShell context={ctx} />);
+    const tile = await screen.findByRole('button', { name: /Eggs,/i });
+    await waitFor(() => expect(mockedApi.openOrder).toHaveBeenCalledTimes(1));
+    fireEvent.click(tile);
+    expect(await screen.findByText(/Checking the server order/)).toBeTruthy();
+    fireEvent.click(tile);
+    fireEvent.click(screen.getByRole('button', { name: /New order/i }));
+    expect(mockedApi.selectCountTap).toHaveBeenCalledTimes(1);
+    expect(mockedApi.openOrder).toHaveBeenCalledTimes(1);
+    completeRead(orderWithEgg);
+    expect(await screen.findByText(/2 ea/)).toBeTruthy();
+    expect(await screen.findByText(/original request may still be processing/i)).toBeTruthy();
+    fireEvent.click(tile);
+    expect(mockedApi.selectCountTap).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: /I checked the order/i }));
+    expect(screen.queryByText(/original request may still be processing/i)).toBeNull();
+  });
+
+  it('keeps the old basket locked if a recovery read fails, and retries only GETs', async () => {
+    mockedApi.resolveSurface.mockResolvedValue(surfaceWith(activeCount()));
+    mockedApi.openOrder.mockResolvedValue(emptyOrder);
+    mockedApi.selectCountTap.mockRejectedValue(new TypeError('network down'));
+    mockedApi.getOrder.mockRejectedValueOnce(new TypeError('offline')).mockResolvedValueOnce(emptyOrder);
+
+    render(<CashierShell context={ctx} />);
+    const tile = await screen.findByRole('button', { name: /Eggs,/i });
+    await waitFor(() => expect(mockedApi.openOrder).toHaveBeenCalledTimes(1));
+    fireEvent.click(tile);
+    expect(await screen.findByText(/basket is locked/i)).toBeTruthy();
+    fireEvent.click(tile);
+    expect(mockedApi.selectCountTap).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: /I checked the order/i })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Retry order check/i }));
+    expect(await screen.findByText(/original request may still be processing/i)).toBeTruthy();
+    expect(mockedApi.getOrder).toHaveBeenCalledTimes(2);
+    expect(mockedApi.selectCountTap).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/Empty — tap a product/i)).toBeTruthy();
+  });
+
+  it('does not treat a failed or malformed settlement read as an absent settlement', async () => {
+    mockedApi.resolveSurface.mockResolvedValue(surfaceWith(activeCount()));
+    mockedApi.openOrder.mockResolvedValue(emptyOrder);
+    mockedApi.selectCountTap.mockRejectedValue(new ApiError(500, 'ERROR', 'unknown'));
+    mockedApi.getOrder.mockResolvedValue(orderWithEgg);
+    mockedApi.getLiveSettlement
+      .mockResolvedValueOnce({ orderId: emptyOrder.orderId, settlement: null })
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValueOnce({ orderId: emptyOrder.orderId } as never)
+      .mockResolvedValueOnce({ orderId: emptyOrder.orderId, settlement: null });
+
+    render(<CashierShell context={ctx} />);
+    const tile = await screen.findByRole('button', { name: /Eggs,/i });
+    await waitFor(() => expect(mockedApi.getLiveSettlement).toHaveBeenCalledTimes(1));
+    fireEvent.click(tile);
+    expect(await screen.findByText(/basket is locked/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Retry order check/i }));
+    await waitFor(() => expect(mockedApi.getLiveSettlement).toHaveBeenCalledTimes(3));
+    expect(await screen.findByText(/basket is locked/i)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /I checked the order/i })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Retry order check/i }));
+    expect(await screen.findByText(/2 ea/)).toBeTruthy();
+    expect(mockedApi.selectCountTap).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciles a weighted selection after a lost response without reopening or resubmitting its modal', async () => {
+    const milk = activeCount({ displayLabel: 'Milk', dimension: 'VOLUME', quantityEntry: 'DEFERRED_WEIGHTED', baseUnit: 'L' });
+    mockedApi.resolveSurface.mockResolvedValue(surfaceWith(milk));
+    mockedApi.openOrder.mockResolvedValue(emptyOrder);
+    mockedApi.selectQuantityTap.mockRejectedValue(new TypeError('connection lost'));
+    mockedApi.getOrder.mockResolvedValue({ ...emptyOrder, lines: [{ ...eggLine, catalogItemName: 'Milk', quantity: '0.5', unit: 'L', dimension: 'VOLUME' }] });
+
+    render(<CashierShell context={ctx} />);
+    const tile = await screen.findByRole('button', { name: /Milk,/i });
+    await waitFor(() => expect(mockedApi.openOrder).toHaveBeenCalledTimes(1));
+    fireEvent.click(tile);
+    fireEvent.change(screen.getByLabelText('Weighted quantity'), { target: { value: '0.5' } });
+    fireEvent.click(screen.getByRole('button', { name: /Add to order/i }));
+    expect(await screen.findByText(/0.5 L/)).toBeTruthy();
+    expect(screen.queryByLabelText('Weighted quantity')).toBeNull();
+    fireEvent.click(tile);
+    expect(mockedApi.selectQuantityTap).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a malformed successful selection or mismatched order read as unknown', async () => {
+    mockedApi.resolveSurface.mockResolvedValue(surfaceWith(activeCount()));
+    mockedApi.openOrder.mockResolvedValue(emptyOrder);
+    mockedApi.selectCountTap.mockResolvedValue({ order: undefined } as never);
+    mockedApi.getOrder.mockResolvedValue({ ...emptyOrder, orderId: 'different-order' });
+
+    render(<CashierShell context={ctx} />);
+    const tile = await screen.findByRole('button', { name: /Eggs,/i });
+    await waitFor(() => expect(mockedApi.openOrder).toHaveBeenCalledTimes(1));
+    fireEvent.click(tile);
+    expect(await screen.findByText(/basket is locked/i)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /I checked the order/i })).toBeNull();
+    expect(mockedApi.selectCountTap).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a 500 as ambiguous even when it carries a stale-slot error code', async () => {
+    mockedApi.resolveSurface.mockResolvedValue(surfaceWith(activeCount()));
+    mockedApi.openOrder.mockResolvedValue(emptyOrder);
+    mockedApi.selectCountTap.mockRejectedValue(new ApiError(500, 'POS_SLOT_UNAVAILABLE', 'unknown'));
+    mockedApi.getOrder.mockResolvedValue(orderWithEgg);
+
+    render(<CashierShell context={ctx} />);
+    const tile = await screen.findByRole('button', { name: /Eggs,/i });
+    await waitFor(() => expect(mockedApi.openOrder).toHaveBeenCalledTimes(1));
+    fireEvent.click(tile);
+    expect(await screen.findByText(/2 ea/)).toBeTruthy();
+    expect(await screen.findByText(/original request may still be processing/i)).toBeTruthy();
+    expect(mockedApi.getOrder).toHaveBeenCalledTimes(1);
+    expect(mockedApi.selectCountTap).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects truncated commercial and settlement projections during recovery', async () => {
+    mockedApi.resolveSurface.mockResolvedValue(surfaceWith(activeCount()));
+    mockedApi.openOrder.mockResolvedValue(emptyOrder);
+    mockedApi.selectCountTap.mockRejectedValue(new TypeError('offline'));
+    mockedApi.getOrder.mockResolvedValue(orderWithEgg);
+    mockedApi.getCommercialStatus
+      .mockResolvedValueOnce(needsReacceptance)
+      .mockResolvedValueOnce({ orderId: emptyOrder.orderId, commercialState: 'ACCEPTED' } as never)
+      .mockResolvedValue(needsReacceptance);
+    mockedApi.getLiveSettlement
+      .mockResolvedValueOnce({ orderId: emptyOrder.orderId, settlement: null })
+      .mockResolvedValueOnce({ orderId: emptyOrder.orderId, settlement: null })
+      .mockResolvedValueOnce({ orderId: emptyOrder.orderId, settlement: { orderId: emptyOrder.orderId, settlementGroupId: 's', state: 'COLLECTING' } } as never)
+      .mockResolvedValueOnce({ orderId: emptyOrder.orderId, settlement: null });
+
+    render(<CashierShell context={ctx} />);
+    const tile = await screen.findByRole('button', { name: /Eggs,/i });
+    await waitFor(() => expect(mockedApi.openOrder).toHaveBeenCalledTimes(1));
+    fireEvent.click(tile);
+    expect(await screen.findByText(/basket is locked/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Retry order check/i }));
+    await waitFor(() => expect(mockedApi.getLiveSettlement).toHaveBeenCalledTimes(3));
+    expect(await screen.findByText(/basket is locked/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Retry order check/i }));
+    expect(await screen.findByText(/2 ea/)).toBeTruthy();
+  });
+
+  it('does not overlap checks or acknowledge a check still in flight', async () => {
+    mockedApi.resolveSurface.mockResolvedValue(surfaceWith(activeCount()));
+    mockedApi.openOrder.mockResolvedValue(emptyOrder);
+    mockedApi.selectCountTap.mockRejectedValue(new TypeError('offline'));
+    let finishSecond!: (value: OrderBasket) => void;
+    mockedApi.getOrder.mockResolvedValueOnce(orderWithEgg)
+      .mockReturnValueOnce(new Promise((resolve) => { finishSecond = resolve; }));
+
+    render(<CashierShell context={ctx} />);
+    const tile = await screen.findByRole('button', { name: /Eggs,/i });
+    await waitFor(() => expect(mockedApi.openOrder).toHaveBeenCalledTimes(1));
+    fireEvent.click(tile);
+    const checkAgain = await screen.findByRole('button', { name: /Check again/i });
+    const acknowledge = screen.getByRole('button', { name: /I checked the order/i });
+    fireEvent.click(checkAgain);
+    fireEvent.click(checkAgain);
+    fireEvent.click(acknowledge);
+    expect(mockedApi.getOrder).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText(/Checking the server order/i)).toBeTruthy();
+    fireEvent.click(tile);
+    expect(mockedApi.selectCountTap).toHaveBeenCalledTimes(1);
+    finishSecond(orderWithEgg);
+    expect(await screen.findByText(/original request may still be processing/i)).toBeTruthy();
   });
 
   it('stale-slot error refreshes surface and does not invent a local line', async () => {

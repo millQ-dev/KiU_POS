@@ -94,6 +94,7 @@ That audit reported no accepted-scope backend defect. It also recorded that ther
 - DEV cashier path gated: `import.meta.env.DEV` **AND** `?devCashier=1`
 - Production CashierShell without DEV context controls
 - Tax / Fiscal / no-tender blocked states remain fail-closed (no fake success)
+- If an add-product response is uncertain, CashierShell locks the work area, reads the order, commercial and settlement state, and asks the operator to inspect it. A failed read remains locked and may be retried; the add-product POST is never automatically replayed. A GET is only a snapshot and cannot prove a still-running POST has finished. The operator must not assume an absent line means the original request failed; a server-side operation identity/completion contract is a follow-up, not part of this UI change. Recovery state is in-memory and does not provide order recovery across reloads.
 
 **Explicitly out:** DeviceIdentity; Quick Lock; FE Tax math; fiscal success fabrication; Favorites / Stop/Go-list; production send policy; Floor/Table.
 
