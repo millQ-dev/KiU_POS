@@ -243,6 +243,50 @@ describeReplay('restaurant imprint disposable replay (I-08)', () => {
       );
       expect(head.rows[0]?.revision_id).toBe(good.head.revisionId);
       expect(head.rows[0]?.freshness).toBe('STALE');
+      const revisions = await pool.query<{ c: string }>(
+        `SELECT COUNT(*)::text AS c FROM imprint_projection_revision
+         WHERE tenant_id = $1 AND outlet_id = $2`,
+        [tenantId, outletId],
+      );
+      expect(Number(revisions.rows[0]?.c)).toBe(1);
+    } finally {
+      pool.query = originalQuery;
+    }
+  });
+
+  it('retains last-good on soft procurement degradation without publishing a new head', async () => {
+    const outletId = await createOutlet('Soft Procure');
+    const warehouseId = await createWarehouse(outletId, 'WH');
+    await insertPostedReceipt(warehouseId, '2026-10-11', 1);
+    await org.syncOutlet(tenantId, outletId);
+    await receipts.syncOutlet(tenantId, outletId);
+    const good = await replay.rebuildOutlet(tenantId, outletId);
+
+    const originalQuery = pool.query.bind(pool);
+    pool.query = (async (sql: unknown, params?: unknown) => {
+      if (typeof sql === 'string' && sql.includes('FROM goods_receipt gr')) {
+        throw new Error('simulated procurement soft failure');
+      }
+      return originalQuery(sql as never, params as never);
+    }) as typeof pool.query;
+    try {
+      const failed = await replay.rebuildOutlet(tenantId, outletId, { resyncSources: true });
+      expect(failed.sourceFailureRetained).toBe(true);
+      expect(failed.head.revisionId).toBe(good.head.revisionId);
+      expect(failed.head.freshness).toBe('STALE');
+      const revisions = await pool.query<{ c: string }>(
+        `SELECT COUNT(*)::text AS c FROM imprint_projection_revision
+         WHERE tenant_id = $1 AND outlet_id = $2`,
+        [tenantId, outletId],
+      );
+      expect(Number(revisions.rows[0]?.c)).toBe(1);
+      const err = await pool.query<{ source_module: string; error_code: string }>(
+        `SELECT source_module, error_code FROM imprint_projection_error
+         WHERE tenant_id = $1 AND outlet_id = $2
+         ORDER BY recorded_at DESC LIMIT 1`,
+        [tenantId, outletId],
+      );
+      expect(err.rows[0]?.source_module).toBe('procurement');
     } finally {
       pool.query = originalQuery;
     }

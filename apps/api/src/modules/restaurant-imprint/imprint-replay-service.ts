@@ -57,36 +57,39 @@ export class ImprintReplayService {
   ): Promise<ImprintReplayResult> {
     const scope = await ImprintScope.openInternal(this.pool, this.authority, tenantId, outletId);
     const prior = await this.readHead(scope.tenantId, scope.outletId);
-    let degraded = false;
-    let sourceFailureRetained = false;
     const resync = opts.resyncSources === true;
+    let softDegradedModule: 'organization' | 'procurement' | null = null;
 
     if (resync) {
-      try {
-        const org = await this.organization.syncOutlet(scope.tenantId, scope.outletId);
-        const procurement = await this.goodsReceipts.syncOutlet(scope.tenantId, scope.outletId);
-        degraded = org.degraded || procurement.degraded;
-      } catch (err) {
-        if (err instanceof ImprintServiceError && err.code === 'IMPRINT_SCOPE_DENIED') throw err;
-        await this.claims.recordSourceFailure(scope, {
+      const org = await this.safeSyncOrganization(scope);
+      if (org.kind === 'HARD_FAIL') {
+        return this.retainLastGood(scope, prior, {
           sourceModule: 'organization',
           errorCode: 'IMPRINT_SOURCE_READ_FAILED',
           freshness: 'STALE',
         });
-        if (!prior) {
-          throw new ImprintServiceError(
-            'IMPRINT_TRANSACTION_ROLLED_BACK',
-            'source resync failed before a snapshot existed',
-          );
-        }
-        return {
-          head: { ...prior, freshness: 'STALE' },
-          fields: await this.readPublishedFields(prior.revisionId),
-          resolverVersion: IMPRINT_RESOLVER_VERSION,
-          resynced: false,
-          degraded: true,
-          sourceFailureRetained: true,
-        };
+      }
+      if (org.degraded) softDegradedModule = 'organization';
+
+      const procurement = await this.safeSyncProcurement(scope);
+      if (procurement.kind === 'HARD_FAIL') {
+        return this.retainLastGood(scope, prior, {
+          sourceModule: 'procurement',
+          errorCode: 'IMPRINT_SOURCE_READ_FAILED',
+          freshness: 'STALE',
+        });
+      }
+      if (procurement.degraded && softDegradedModule == null) {
+        softDegradedModule = 'procurement';
+      }
+
+      // Soft source degradation with an existing head: keep last-good revision, mark STALE.
+      if (softDegradedModule && prior) {
+        return this.retainLastGood(scope, prior, {
+          sourceModule: softDegradedModule,
+          errorCode: 'IMPRINT_SOURCE_SCHEMA_LIMIT',
+          freshness: 'STALE',
+        });
       }
     }
 
@@ -120,20 +123,24 @@ export class ImprintReplayService {
       fields,
     });
 
-    if (degraded) {
+    // First snapshot after soft degradation: publish then mark DEGRADED on that head.
+    if (softDegradedModule) {
       await this.claims.recordSourceFailure(scope, {
-        sourceModule: 'organization',
+        sourceModule: softDegradedModule,
         errorCode: 'IMPRINT_SOURCE_SCHEMA_LIMIT',
         freshness: 'DEGRADED',
       });
-      sourceFailureRetained = true;
+      const current = (await this.readHead(scope.tenantId, scope.outletId)) ?? {
+        ...head,
+        freshness: 'DEGRADED' as const,
+      };
       return {
-        head: { ...head, freshness: 'DEGRADED' },
+        head: current,
         fields: projected,
         resolverVersion: IMPRINT_RESOLVER_VERSION,
         resynced: resync,
         degraded: true,
-        sourceFailureRetained,
+        sourceFailureRetained: true,
       };
     }
 
@@ -144,6 +151,63 @@ export class ImprintReplayService {
       resynced: resync,
       degraded: false,
       sourceFailureRetained: false,
+    };
+  }
+
+  private async safeSyncOrganization(
+    scope: ImprintScope,
+  ): Promise<{ kind: 'OK'; degraded: boolean } | { kind: 'HARD_FAIL' }> {
+    try {
+      const result = await this.organization.syncOutlet(scope.tenantId, scope.outletId);
+      return { kind: 'OK', degraded: result.degraded };
+    } catch (err) {
+      if (err instanceof ImprintServiceError && err.code === 'IMPRINT_SCOPE_DENIED') throw err;
+      return { kind: 'HARD_FAIL' };
+    }
+  }
+
+  private async safeSyncProcurement(
+    scope: ImprintScope,
+  ): Promise<{ kind: 'OK'; degraded: boolean } | { kind: 'HARD_FAIL' }> {
+    try {
+      const result = await this.goodsReceipts.syncOutlet(scope.tenantId, scope.outletId);
+      return { kind: 'OK', degraded: result.degraded };
+    } catch (err) {
+      if (err instanceof ImprintServiceError && err.code === 'IMPRINT_SCOPE_DENIED') throw err;
+      return { kind: 'HARD_FAIL' };
+    }
+  }
+
+  private async retainLastGood(
+    scope: ImprintScope,
+    prior: SnapshotHead | null,
+    failure: {
+      sourceModule: 'organization' | 'procurement';
+      errorCode: 'IMPRINT_SOURCE_READ_FAILED' | 'IMPRINT_SOURCE_SCHEMA_LIMIT';
+      freshness: 'STALE' | 'DEGRADED';
+    },
+  ): Promise<ImprintReplayResult> {
+    if (!prior) {
+      throw new ImprintServiceError(
+        'IMPRINT_TRANSACTION_ROLLED_BACK',
+        'source resync failed before a snapshot existed',
+      );
+    }
+    await this.claims.recordSourceFailure(scope, {
+      sourceModule: failure.sourceModule,
+      errorCode: failure.errorCode,
+      freshness: failure.freshness,
+    });
+    // Re-read under the failure write so concurrent publishRevision is visible.
+    const current = await this.readHead(scope.tenantId, scope.outletId);
+    const head = current ?? { ...prior, freshness: failure.freshness };
+    return {
+      head,
+      fields: await this.readPublishedFields(head.revisionId),
+      resolverVersion: IMPRINT_RESOLVER_VERSION,
+      resynced: false,
+      degraded: true,
+      sourceFailureRetained: true,
     };
   }
 
