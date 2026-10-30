@@ -46,14 +46,21 @@ function message(code: string): string {
  * Sealed server authority for internal Imprint source adapters (ADR-0054 R2).
  * It is not a user, grant, or OfficeSession. Request JSON cannot construct it.
  * Exact grant names remain deferred to I-07 and are not invented here.
+ * Organization and Procurement adapters each use a distinct sealed kind.
  */
 export class ImprintInternalAuthority {
-  private constructor(readonly kind: 'ORGANIZATION_ADAPTER') {}
+  private constructor(readonly kind: 'ORGANIZATION_ADAPTER' | 'PROCUREMENT_ADAPTER') {}
 
   static forOrganizationAdapter(): ImprintInternalAuthority {
     return new ImprintInternalAuthority('ORGANIZATION_ADAPTER');
   }
+
+  static forProcurementAdapter(): ImprintInternalAuthority {
+    return new ImprintInternalAuthority('PROCUREMENT_ADAPTER');
+  }
 }
+
+const INTERNAL_ADAPTER_KINDS = new Set(['ORGANIZATION_ADAPTER', 'PROCUREMENT_ADAPTER']);
 
 /**
  * Internal Restaurant Imprint claim service (ADR-0054 I-04 / I-05).
@@ -96,7 +103,10 @@ export class ImprintScope {
     tenantId: string,
     outletId: string,
   ): Promise<ImprintScope> {
-    if (!(authority instanceof ImprintInternalAuthority) || authority.kind !== 'ORGANIZATION_ADAPTER') {
+    if (
+      !(authority instanceof ImprintInternalAuthority) ||
+      !INTERNAL_ADAPTER_KINDS.has(authority.kind)
+    ) {
       throw new ImprintServiceError('IMPRINT_SCOPE_DENIED', message('IMPRINT_SCOPE_DENIED'));
     }
     if (!UUID.test(tenantId) || !UUID.test(outletId)) {

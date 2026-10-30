@@ -6,6 +6,10 @@ export {
   toImprintServiceError,
 } from './imprint-claim-service.js';
 export { ImprintOrganizationAdapter } from './imprint-organization-adapter.js';
+export {
+  ImprintGoodsReceiptAdapter,
+  pickLastPostedReceipt,
+} from './imprint-goods-receipt-adapter.js';
 export { ImprintPersistence } from './imprint-persistence.js';
 export {
   imprintPayloadFingerprint,
