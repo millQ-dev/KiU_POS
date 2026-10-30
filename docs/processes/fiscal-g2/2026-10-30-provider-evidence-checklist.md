@@ -22,4 +22,4 @@ Questions to ask, still unsent, remain in `docs/processes/fiscal-g2/2026-10-29/P
 
 Local synthetic work may use `executeSandboxFiscalAttempt`. That path does not call these vendors and does not satisfy `FiscalCheckoutGate`.
 
-`FiscalService.reconcileDocument` still calls `idempotentRetry` when a document is `PENDING_ISSUE`. The sandbox recovery policy is not wired into that service method. Wiring it is a later change and still requires the idempotency row above before any live retry.
+`FiscalService.reconcileDocument` calls `idempotentRetry` only when the adapter sets `verifiedSameKeyRetry`. Neither Viettel nor MISA has that capability. A timeout or an unknown result reconciles the same document and stays unresolved. The idempotency row above is still required before any live retry.
