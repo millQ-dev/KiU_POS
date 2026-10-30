@@ -114,7 +114,7 @@ These five requirements stay **binding where they match the accepted principles*
 
 ## Registered typed fact paths (initial v0.1, intent)
 
-Only paths with an available Origin source contract are populated in Stage 1; all others are registered as `UNKNOWN`. Final naming is aligned to Origin conventions at contract time (I-03) without changing invariants.
+Only paths with an available Origin source contract are populated in Stage 1; all others are registered as `UNKNOWN`. I-03 registers exactly the seven paths below in `packages/contracts`. A dotted path outside that registry is rejected at ingest. Persistence still checks syntax only, so earlier rows stay readable. `operations.active_terminal_refs` has no value schema and resolves to `UNKNOWN`.
 
 | Path | Owner source | Stage 1 |
 | --- | --- | --- |
