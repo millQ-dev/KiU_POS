@@ -1,0 +1,68 @@
+.pos-merchant-discount {
+  margin-top: var(--space-3, 0.75rem);
+  padding-top: var(--space-3, 0.75rem);
+  border-top: 1px solid var(--color-border, #d8d8d8);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.pos-merchant-discount__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.pos-merchant-discount__hint,
+.pos-merchant-discount__result {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.pos-merchant-discount__result {
+  color: var(--color-ok, #0a7a32);
+}
+
+.pos-merchant-discount__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.pos-merchant-discount__row label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  flex: 1 1 7rem;
+}
+
+.pos-merchant-discount__row input,
+.pos-merchant-discount__row select,
+.pos-merchant-discount__reason {
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+}
+
+.pos-merchant-discount__reason {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.pos-merchant-discount__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.pos-merchant-discount__actions button {
+  font: inherit;
+  padding: 0.4rem 0.75rem;
+}
+
+.pos-merchant-discount__alert {
+  margin: 0;
+  color: var(--color-danger, #a11);
+  font-size: 0.85rem;
+}
