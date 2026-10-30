@@ -281,6 +281,45 @@ export class ImprintPersistence {
     }
   }
 
+  async readParticipatingClaims(
+    tenantId: string,
+    outletId: string,
+  ): Promise<
+    Array<{
+      claimId: string;
+      factPath: string;
+      origin: string;
+      canonicalValue: string;
+    }>
+  > {
+    const result = await this.pool.query<{
+      claim_id: string;
+      fact_path: string;
+      origin: string;
+      canonical_value: string;
+    }>(
+      `SELECT c.claim_id, c.fact_path, c.origin, c.canonical_value
+       FROM imprint_claim c
+       WHERE c.tenant_id = $1 AND c.outlet_id = $2 AND c.claim_effect = 'ASSERTION'
+         AND c.canonical_value IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM imprint_claim newer WHERE newer.supersedes_claim_id = c.claim_id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM imprint_claim gone
+           WHERE gone.invalidates_claim_id = c.claim_id AND gone.claim_effect = 'INVALIDATION'
+         )
+       ORDER BY c.claim_id`,
+      [tenantId, outletId],
+    );
+    return result.rows.map((row) => ({
+      claimId: row.claim_id,
+      factPath: row.fact_path,
+      origin: row.origin,
+      canonicalValue: row.canonical_value,
+    }));
+  }
+
   async participatingClaimIds(tenantId: string, outletId: string): Promise<string[]> {
     const result = await this.pool.query<{ claim_id: string }>(
       `SELECT c.claim_id
