@@ -263,4 +263,41 @@ export const posApi = {
   ): Promise<import('./types.js').SettlementProjection> {
     return request('POST', `/api/v1/settlements/${settlementGroupId}/abort`, payload ?? {});
   },
+
+  /** ADR-0051 ApplyOrderMerchantDiscount — narrow command; may return APPROVAL_REQUIRED. */
+  applyMerchantDiscount(
+    orderId: string,
+    payload: {
+      terminalId: string;
+      idempotencyKey: string;
+      mode: 'FIXED_MINOR' | 'PERCENT';
+      amountMinor?: string;
+      percent?: string;
+      reason: string;
+      approvalRequestId?: string;
+      deviceId?: string;
+    },
+  ): Promise<{
+    status: 'applied' | 'duplicate';
+    orderId: string;
+    mode: 'FIXED_MINOR' | 'PERCENT';
+    discountMinor: string;
+    percentBasisPoints: number | null;
+    eligibleBasisMinor: string;
+    reason: string;
+    approvalRequestId: string | null;
+    certainty: 'FINAL';
+    netMerchandiseSalesMinor: string;
+  }> {
+    return request('POST', `/api/v1/orders/${orderId}/apply-merchant-discount`, payload);
+  },
+
+  createApprovalRequest(payload: {
+    outletId: string;
+    terminalId: string;
+    operationType: string;
+    operationFingerprint: Record<string, unknown>;
+  }): Promise<{ approvalRequestId: string; expiresAt: string }> {
+    return request('POST', '/api/v1/identity/approval-requests', payload);
+  },
 };

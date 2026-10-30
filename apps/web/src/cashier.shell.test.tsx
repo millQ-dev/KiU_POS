@@ -49,6 +49,8 @@ vi.mock('./api/client.js', () => ({
     issueFiscalDocument: vi.fn(),
     reconcileFiscalDocument: vi.fn(),
     advanceCheckout: vi.fn(),
+    applyMerchantDiscount: vi.fn(),
+    createApprovalRequest: vi.fn(),
   },
 }));
 

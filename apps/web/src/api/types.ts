@@ -119,7 +119,18 @@ export type CommercialStatus = {
   /** Authoritative Σ rounded line gross when accepted (C1.1). */
   merchandiseGrossMinor?: string | null;
   commercialGrossPolicy?: string | null;
-  roundingProvenance?: unknown;
+  roundingProvenance?: {
+    orderProvenance?: {
+      merchantDiscount?: {
+        discountMinor?: string;
+        netMerchandiseSalesMinor?: string;
+        reason?: string;
+        mode?: string;
+      };
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  } | null;
   lines: Array<{
     orderLineId: string;
     resolvedUnitPriceMinor: string | null;

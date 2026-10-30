@@ -24,7 +24,7 @@ Combined C0 Golden Path verified with disposable fiscal test adapter; production
 | Fiscal G2 | **OPEN.** ADR-0053 sandbox accept does not close G2-01 through G2-18 and does not authorize production issuance. #152 adds local sandbox binding and intent recovery. That path does not call a provider and does not satisfy `FiscalCheckoutGate`. |
 | QR / card collection | **Not implemented.** An honesty screen is not collection. |
 | Offline sync | **Not implemented.** ADR-0018 is Accepted. There is no POS sync runtime. |
-| Cashier merchant discount UI | **Missing.** `POST /api/v1/orders/:orderId/apply-merchant-discount` exists. No cashier screen calls it. |
+| Cashier merchant discount UI | **Present (UI).** CashierShell/OrderBasket hosts `MerchantDiscountPanel` against ADR-0051 apply + ApprovalRequest. FIXED_MINOR / PERCENT, mandatory reason, manager approval when the cashier lacks `orders.merchant_discount.approve`, server totals from the apply response, durable idempotency for lost responses, locked after settlement opens. No new permissions or money rules. |
 
 The eleven KIU-MOD invariants, as that audit recorded them:
 

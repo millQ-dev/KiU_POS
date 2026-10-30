@@ -6,6 +6,7 @@ import type {
   SettlementProjection,
 } from '../api/types.js';
 import { CommercialStatusPanel } from './CommercialStatus.js';
+import { MerchantDiscountPanel } from './MerchantDiscountPanel.js';
 import { OrderLineEditor } from './OrderLineEditor.js';
 import { SettlementCheckoutPanel } from './SettlementCheckout.js';
 import './OrderBasket.css';
@@ -45,6 +46,8 @@ type Props = {
     | undefined;
   onCancelOrder: () => void;
   onNewOrder: () => void;
+  /** Reload commercial after merchant discount apply (authoritative server totals). */
+  onMerchantDiscountApplied?: () => void | Promise<void>;
 };
 
 function formatQty(line: OrderLine): string {
@@ -78,6 +81,7 @@ export function OrderBasketPanel({
   onOrderCompleted,
   onCancelOrder,
   onNewOrder,
+  onMerchantDiscountApplied,
 }: Props) {
   const selected = order?.lines.find((l) => l.orderLineId === selectedLineId) ?? null;
   const commercialAccepted = commercial?.commercialState === 'ACCEPTED';
@@ -166,6 +170,21 @@ export function OrderBasketPanel({
         onRefreshPrices={onRefreshPrices}
         onAcceptCurrentPrices={onAcceptCurrentPrices}
       />
+
+      {order && (
+        <MerchantDiscountPanel
+          orderId={order.orderId}
+          outletId={outletId ?? order.outletId}
+          terminalId={terminalId ?? null}
+          commercial={commercial}
+          settlementLive={!!settlement}
+          editable={editable}
+          busy={mutationBusy || settlementBusy || loading || refreshingPrices || acceptingCommercial}
+          onApplied={async () => {
+            if (onMerchantDiscountApplied) await onMerchantDiscountApplied();
+          }}
+        />
+      )}
 
       <SettlementCheckoutPanel
         settlement={settlement}

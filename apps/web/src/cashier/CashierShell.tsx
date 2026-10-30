@@ -810,6 +810,9 @@ export function CashierShell({
             onSettlementRefresh={onSettlementRefresh}
             onOrderCompleted={onOrderCompleted}
             onCancelOrder={onCancelOrder}
+            onMerchantDiscountApplied={async () => {
+              if (order) await reloadCommercial(order.orderId);
+            }}
             onNewOrder={() => {
               if (recoveryRef.current || inFlightRef.current) return;
               orderIdRef.current = null;
