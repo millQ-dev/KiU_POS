@@ -1,7 +1,7 @@
 # MillQ Current State
 
 **Checkpoint:** POS v1 status correction — module readiness is not product GO  
-**Tip:** Cursor Origin `main` @ `add2cecd969605a6659b2671c4ac0da2f642788a` (#152)  
+**Tip:** Cursor Origin `main` @ `95e5cdf862634b76c47bc459cd9edbd5d047cb70` (#156)  
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)  
 **GitHub backup (sole):** `https://github.com/millQ-dev/KiU_POS.git`  
   (`millQ-dev/MillQ` = legacy rename redirect to the same repository ID)  
@@ -12,13 +12,13 @@ Open Origin pull requests are not part of this tip. An unmerged test is not veri
 
 ## Product readiness on this tip
 
-A merged module and its tests are not a combined C0 Golden Path, and they are not POS v1 GO.
+Combined C0 Golden Path verified with disposable fiscal test adapter; production POSV1_NO_GO remains.
 
 | Item | State |
 | --- | --- |
 | POS v1 | **POSV1_NO_GO** |
 | Track P exit | **Incomplete.** Counter cash and the QR-unavailable honesty UI stay verified or declared deferred. Post-pay void stays declared deferred. QR collection and card collection are not implemented. |
-| Combined C0 Golden Path | **UNVERIFIED.** Tableless counter cash is tested (DEMO-29 and the cash12 browser path). Modifier price, frozen Effective Recipe, allergy capture, merchant discount, cash, the fiscal gate, and one GoodsIssue are not one tested sale on this tip. |
+| Combined C0 Golden Path | **Verified with disposable fiscal test adapter** (#154). Depot disposable PostgreSQL runs `c0-combined-golden-path.acceptance.test.ts` on a fresh `millq_ci_pos_*` database. `TEST_ACCEPTED` is not production fiscal success. Production **POSV1_NO_GO** remains. |
 | KIU-MOD backend invariants | **VERIFIED 11/11** according to the KIU-MOD post-merge audit `MOD-POSTMERGE-OPERABILITY` on `017e4d3` (#150). #152 does not change modifier, order, or allergen sources, so that module verdict still applies on this tip. It is not the combined Golden Path. That audit did not re-run Postgres acceptance. |
 | R1.1 Floor/Table | **HOLD.** The entry gate stays closed. `037` is already the modifier migration. See `docs/processes/next01/R1.1-IMPLEMENTATION-PROPOSAL.md`. |
 | Fiscal G2 | **OPEN.** ADR-0053 sandbox accept does not close G2-01 through G2-18 and does not authorize production issuance. #152 adds local sandbox binding and intent recovery. That path does not call a provider and does not satisfy `FiscalCheckoutGate`. |
@@ -67,13 +67,13 @@ That audit reported no accepted-scope backend defect. It also recorded that ther
 | NEXT-01 Track P | **Exit incomplete.** Counter cash verified. QR honesty declared deferred. Modifier backend is module-verified. Cashier discount UI is missing. QR/card collect is not implemented. |
 | NEXT-02 | **MERGED** #124 — QR/card unavailable honesty + sale success polish. Honesty does not flip POSV1_GO. |
 | NEXT-03 | Prep closed by PO ACCEPT 2026-10-28 (historical `NEXT03_*`). M1–M8 and D1–D6 stay accepted. |
-| NEXT-04 verticals | **MERGED** on this tip, not in progress: modifier domain #127, modifier UI #129, merchant discount #130, allergen M6 #131, per-unit price #138, Effective Recipe #139, M4/M5/M7/T8 #143, discount HALF_UP #144, cash12 allergy answer #145. **POSV1_NO_GO** remains. |
+| NEXT-04 verticals | **MERGED** on this tip, not in progress: modifier domain #127, modifier UI #129, merchant discount #130, allergen M6 #131, per-unit price #138, Effective Recipe #139, M4/M5/M7/T8 #143, discount HALF_UP #144, cash12 allergy answer #145, combined golden path #154. **POSV1_NO_GO** remains. |
 | ADR-0049 Modifier / Effective Recipe v1 | **ACCEPTED** 2026-10-28. Semantics unchanged by this correction. |
 | ADR-0050 Order-local allergen M6 | **ACCEPTED** 2026-10-28. Semantics unchanged by this correction. |
 | ADR-0051 ApplyOrderMerchantDiscount | **ACCEPTED** 2026-10-28. Semantics unchanged by this correction. |
 | ADR-0053 Fiscal sandbox | **ACCEPTED WITH CHANGES** 2026-10-29. Sandbox boundary only. G2 stays open. |
 | ADR-0054 Restaurant Imprint | **ACCEPTED** 2026-10-29. Persistence and adapters through #150. Not a POS v1 GO. |
-| C0 Cafe Operability | Counter/prepay cafe cash path proven via DEMO-29. Combined modifier + allergy + discount + cash + fiscal + complete remains unverified. |
+| C0 Cafe Operability | Counter/prepay cafe cash path proven via DEMO-29. Combined C0 Golden Path verified with disposable fiscal test adapter; production POSV1_NO_GO remains. |
 
 ## TAX1.1 (canonical closed)
 
@@ -118,7 +118,7 @@ That audit reported no accepted-scope backend defect. It also recorded that ther
 
 ## Next
 
-1. Track P stays incomplete until the cashier merchant-discount screen exists and the combined C0 Golden Path is actually tested, or until a recorded decision defers those items. This file does not assign that work.
+1. Track P stays incomplete until the cashier merchant-discount screen exists, or until a recorded decision defers that item. Combined C0 Golden Path verified with disposable fiscal test adapter; production POSV1_NO_GO remains. This file does not assign the remaining work.
 2. R1.1 Floor/Table stays HOLD. The written entry gate is still closed. Do not start Floor runtime, and do not reserve a migration number, until that gate is opened on purpose.
 3. Obey MWR arming order (A after PR open; B after Bugbot+AI review on HEAD; C after PO ACCEPT)
 4. No VietQR payout / G2 claim / DeviceIdentity / fabricated paid QR; no prod deploy / persistent migrate without separate PO GO

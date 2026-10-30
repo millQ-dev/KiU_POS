@@ -190,21 +190,27 @@ jobs:
           RUN_SUFFIX="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
           MIGRATE_DB="millq_migrate_runner_${RUN_SUFFIX}"
           POS_DB="millq_ci_pos_${RUN_SUFFIX}"
+          GOLDEN_DB="millq_ci_pos_c0golden_${RUN_SUFFIX}"
           GR_DB="millq_ci_gr_${RUN_SUFFIX}"
           psql_ci -c "CREATE DATABASE \"${MIGRATE_DB}\" OWNER millq_ci;"
           psql_ci -c "CREATE DATABASE \"${POS_DB}\" OWNER millq_ci;"
+          psql_ci -c "CREATE DATABASE \"${GOLDEN_DB}\" OWNER millq_ci;"
           psql_ci -c "CREATE DATABASE \"${GR_DB}\" OWNER millq_ci;"
           MIGRATE_URL="postgresql://millq_ci:millq_ci_local_only@127.0.0.1:5432/${MIGRATE_DB}"
           POS_URL="postgresql://millq_ci:millq_ci_local_only@127.0.0.1:5432/${POS_DB}"
+          GOLDEN_URL="postgresql://millq_ci:millq_ci_local_only@127.0.0.1:5432/${GOLDEN_DB}"
           GR_URL="postgresql://millq_ci:millq_ci_local_only@127.0.0.1:5432/${GR_DB}"
           echo "migrate_db=${MIGRATE_DB}" >> "$GITHUB_OUTPUT"
           echo "pos_db=${POS_DB}" >> "$GITHUB_OUTPUT"
+          echo "golden_db=${GOLDEN_DB}" >> "$GITHUB_OUTPUT"
           echo "gr_db=${GR_DB}" >> "$GITHUB_OUTPUT"
           echo "migrate_url=${MIGRATE_URL}" >> "$GITHUB_OUTPUT"
           echo "pos_url=${POS_URL}" >> "$GITHUB_OUTPUT"
+          echo "golden_url=${GOLDEN_URL}" >> "$GITHUB_OUTPUT"
           echo "gr_url=${GR_URL}" >> "$GITHUB_OUTPUT"
           node scripts/ci/assert-disposable-database-url.mjs "$MIGRATE_URL"
           node scripts/ci/assert-disposable-database-url.mjs "$POS_URL"
+          node scripts/ci/assert-disposable-database-url.mjs "$GOLDEN_URL"
           node scripts/ci/assert-disposable-database-url.mjs "$GR_URL"
       - name: Migrate POS disposable database
         run: |
@@ -406,6 +412,40 @@ jobs:
             exit "$VITEST_EC"
           fi
           node scripts/ci/assert-vitest-no-skips.mjs "$REPORT" --min-passed=8 --label=cash12-close
+      - name: Migrate C0 golden path disposable database
+        run: |
+          set -euo pipefail
+          GOLDEN_DB="${{ steps.dbs.outputs.golden_db }}"
+          export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${GOLDEN_DB}"
+          node scripts/ci/assert-disposable-database-url.mjs "$DATABASE_URL"
+          node -e 'const u=process.env.DATABASE_URL||""; const n=u.split("/").pop()?.split("?")[0]||""; if(!n.startsWith("millq_ci_pos_")) process.exit(1); console.log("golden_db_name="+n);'
+          pnpm --filter @millq/api run migrate
+      - name: C0 combined Golden Path acceptance (fail-closed)
+        run: |
+          set -euo pipefail
+          # Fresh millq_ci_pos_* only. Do not export MILLQ_ALLOW_FISCAL_TEST_ADAPTER.
+          # The scenario opts into the disposable test adapter itself.
+          # TEST_ACCEPTED is not a production fiscal success.
+          unset MILLQ_ALLOW_FISCAL_TEST_ADAPTER
+          GOLDEN_DB="${{ steps.dbs.outputs.golden_db }}"
+          export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${GOLDEN_DB}"
+          node scripts/ci/assert-disposable-database-url.mjs "$DATABASE_URL"
+          node -e 'const u=process.env.DATABASE_URL||""; const n=u.split("/").pop()?.split("?")[0]||""; if(!n.startsWith("millq_ci_pos_c0golden_")) process.exit(1); console.log("golden_db_name="+n);'
+          REPORT=/tmp/vitest-c0-golden-path.json
+          set +e
+          pnpm --filter @millq/api exec vitest run \
+            src/scenarios/c0-combined-golden-path.acceptance.test.ts \
+            --reporter=verbose \
+            --reporter=json \
+            --outputFile="$REPORT"
+          VITEST_EC=$?
+          set -e
+          node scripts/ci/print-vitest-summary.mjs "$REPORT" || true
+          if [[ "$VITEST_EC" -ne 0 ]]; then
+            echo "vitest exited with code ${VITEST_EC}" >&2
+            exit "$VITEST_EC"
+          fi
+          node scripts/ci/assert-vitest-no-skips.mjs "$REPORT" --min-passed=1 --label=c0-golden-path
       - name: Migrate runner acceptance (fail-closed)
         env:
           DATABASE_URL: ${{ steps.dbs.outputs.migrate_url }}
