@@ -147,6 +147,35 @@ describe('restaurant imprint fact path registry', () => {
         }),
       ),
     ).toBe('IMPRINT_ORIGIN_REJECTED');
+    expect(
+      codeOf(
+        brandAssertion({
+          factPath: FactPath.OutletLegalEntityRef,
+          provenance: {
+            sourceModule: 'organization',
+            sourceEntityType: 'LegalEntity',
+            sourceEntityId: OUTLET,
+            sourceRevision: 'rev-1',
+          },
+          value: { legalEntityId: BRAND },
+        }),
+      ),
+    ).toBe('IMPRINT_ORIGIN_REJECTED');
+    expect(
+      codeOf(
+        brandAssertion({
+          factPath: FactPath.LastPostedReceiptRef,
+          sensitivityClass: ImprintSensitivity.InternalReference,
+          provenance: {
+            sourceModule: 'procurement',
+            sourceEntityType: 'GoodsReceipt',
+            sourceEntityId: OUTLET,
+            sourceRevision: 'rev-1',
+          },
+          value: { goodsReceiptId: BRAND, postingStatus: 'POSTED' },
+        }),
+      ),
+    ).toBe('IMPRINT_ORIGIN_REJECTED');
   });
 
   it('rejects a sensitivity class that disagrees with the registry', () => {
