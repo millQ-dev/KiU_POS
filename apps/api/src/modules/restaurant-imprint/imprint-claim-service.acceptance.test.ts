@@ -233,6 +233,23 @@ describeImprint('restaurant imprint claim service (disposable PG)', () => {
   it('excludes an invalidated claim from the current resolution', async () => {
     const local = await freshScope();
     const claim = await service.appendAssertion(local, identity(local, 'Alone', 'svc-invalidate'));
+    await expect(
+      service.invalidateAssertion(local, {
+        tenantId: local.tenantId,
+        outletId: local.outletId,
+        factPath: FactPath.OutletBrandRef,
+        invalidatesClaimId: claim.claimId,
+        origin: ImprintClaimOrigin.Observed,
+        sensitivityClass: ImprintSensitivity.PublicReference,
+        provenance: {
+          sourceModule: 'organization',
+          sourceEntityType: 'Brand',
+          sourceEntityId: brandA,
+          sourceRevision: 'svc-wrong-path',
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'IMPRINT_LIFECYCLE_REJECTED' });
+    expect((await service.readClaim(local, claim.claimId))?.active).toBe(true);
     await service.invalidateAssertion(local, {
       tenantId: local.tenantId,
       outletId: local.outletId,

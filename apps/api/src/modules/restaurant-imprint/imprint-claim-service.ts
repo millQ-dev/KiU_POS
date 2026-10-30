@@ -86,7 +86,14 @@ export class ImprintClaimService {
   async appendAssertion(scope: ImprintScope, input: unknown): Promise<AppendOutcome> {
     const parsed = parseAssertion(input);
     assertPayloadScope(scope, parsed.tenantId, parsed.outletId);
-    if (parsed.supersedesClaimId) await this.requireLiveTarget(scope, parsed.supersedesClaimId);
+    if (parsed.supersedesClaimId) {
+      await this.requireMatchingTarget(
+        scope,
+        parsed.supersedesClaimId,
+        parsed.factPath,
+        parsed.provenance.sourceModule,
+      );
+    }
     return this.write(() => this.persistence.appendAssertion(toAssertionInput(parsed)));
   }
 
@@ -107,7 +114,12 @@ export class ImprintClaimService {
   ): Promise<{ claimId: string; outcome: 'INSERTED' | 'DUPLICATE' }> {
     const parsed = parseInvalidation(input);
     assertPayloadScope(scope, parsed.tenantId, parsed.outletId);
-    await this.requireLiveTarget(scope, parsed.invalidatesClaimId);
+    await this.requireMatchingTarget(
+      scope,
+      parsed.invalidatesClaimId,
+      parsed.factPath,
+      parsed.provenance.sourceModule,
+    );
     return this.write(() =>
       this.persistence.invalidateAssertion({
         tenantId: scope.tenantId,
@@ -183,12 +195,17 @@ export class ImprintClaimService {
     }
   }
 
-  private async requireLiveTarget(scope: ImprintScope, claimId: string): Promise<void> {
+  private async requireMatchingTarget(
+    scope: ImprintScope,
+    claimId: string,
+    factPath: string,
+    sourceModule: string,
+  ): Promise<void> {
     const claim = await this.persistence.readClaim(scope.tenantId, scope.outletId, claimId);
-    if (!claim || claim.claimEffect !== 'ASSERTION') {
+    if (!claim || claim.claimEffect !== 'ASSERTION' || claim.factPath !== factPath || claim.sourceModule !== sourceModule) {
       throw new ImprintServiceError(
         'IMPRINT_LIFECYCLE_REJECTED',
-        message('IMPRINT_LIFECYCLE_REJECTED')
+        message('IMPRINT_LIFECYCLE_REJECTED'),
       );
     }
   }

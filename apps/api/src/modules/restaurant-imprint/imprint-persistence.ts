@@ -23,6 +23,8 @@ export type StoredClaim = {
   claimId: string;
   tenantId: string;
   outletId: string;
+  factPath: string;
+  sourceModule: string;
   canonicalValue: string | null;
   payloadFingerprint: string;
   claimEffect: 'ASSERTION' | 'INVALIDATION';
@@ -542,11 +544,14 @@ export class ImprintPersistence {
       claim_id: string;
       tenant_id: string;
       outlet_id: string;
+      fact_path: string;
+      source_module: string;
       canonical_value: string | null;
       payload_fingerprint: string;
       claim_effect: 'ASSERTION' | 'INVALIDATION';
     }>(
-      `SELECT claim_id, tenant_id, outlet_id, canonical_value, payload_fingerprint, claim_effect
+      `SELECT claim_id, tenant_id, outlet_id, fact_path, source_module,
+              canonical_value, payload_fingerprint, claim_effect
        FROM imprint_claim
        WHERE claim_id = $1 AND tenant_id = $2 AND outlet_id = $3`,
       [claimId, tenantId, outletId],
@@ -557,6 +562,8 @@ export class ImprintPersistence {
       claimId: row.claim_id,
       tenantId: row.tenant_id,
       outletId: row.outlet_id,
+      factPath: row.fact_path,
+      sourceModule: row.source_module,
       canonicalValue: row.canonical_value,
       payloadFingerprint: row.payload_fingerprint,
       claimEffect: row.claim_effect,
