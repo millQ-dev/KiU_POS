@@ -224,7 +224,7 @@ describeImprint('restaurant imprint organization adapter (disposable PG)', () =>
     expect(await store.countClaims(otherTenantId, otherOutletId)).toBe(0);
   });
 
-  it('repeats deterministically and supersedes when the outlet name changes', async () => {
+  it('repeats deterministically and can revert to an earlier source value', async () => {
     const outletId = await createOutlet('Before');
     const first = await adapter.syncOutlet(tenantId, outletId);
     const second = await adapter.syncOutlet(tenantId, outletId);
@@ -245,10 +245,20 @@ describeImprint('restaurant imprint organization adapter (disposable PG)', () =>
       tenantId,
       outletId,
     );
-    const identity = await service.resolveField(scope, FactPath.OutletIdentity);
-    expect(identity.canonicalValue).toContain('After');
-    expect(identity.canonicalValue).not.toContain('Before');
-    expect(await store.countClaims(tenantId, outletId)).toBeGreaterThan(1);
+    expect((await service.resolveField(scope, FactPath.OutletIdentity)).canonicalValue).toContain(
+      'After',
+    );
+
+    await pool.query(`UPDATE outlet SET name = 'Before' WHERE outlet_id = $1 AND tenant_id = $2`, [
+      outletId,
+      tenantId,
+    ]);
+    const fourth = await adapter.syncOutlet(tenantId, outletId);
+    expect(fourth.outcomes.some((row) => row.outcome === 'INSERTED')).toBe(true);
+    const reverted = await service.resolveField(scope, FactPath.OutletIdentity);
+    expect(reverted.canonicalValue).toContain('Before');
+    expect(reverted.canonicalValue).not.toContain('After');
+    expect(await store.countClaims(tenantId, outletId)).toBeGreaterThan(2);
   });
 
   it('denies another tenant and does not invent a truncated oversize name', async () => {

@@ -224,18 +224,21 @@ export class ImprintOrganizationAdapter {
     ) {
       return null;
     }
+    // Bind the content fingerprint to the live claim so a later revert does not
+    // collide with an earlier superseded source_revision identity.
+    const sourceRevision = `${draft.sourceRevision}:${current.claimId ?? 'genesis'}`;
     const body: Record<string, unknown> & { factPath: string; revision: string } = {
       tenantId: scope.tenantId,
       outletId: scope.outletId,
       factPath: draft.factPath,
-      revision: draft.sourceRevision,
+      revision: sourceRevision,
       origin: draft.origin,
       sensitivityClass: draft.sensitivityClass,
       provenance: {
         sourceModule: 'organization',
         sourceEntityType: draft.sourceEntityType,
         sourceEntityId: draft.sourceEntityId,
-        sourceRevision: draft.sourceRevision,
+        sourceRevision,
       },
       value: draft.value,
     };
