@@ -5,6 +5,10 @@
   min-height: 100%;
 }
 
+.pos-shell__workarea {
+  display: contents;
+}
+
 .pos-shell__header {
   height: var(--pos-header-h);
   display: flex;
