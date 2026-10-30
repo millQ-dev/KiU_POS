@@ -1,5 +1,11 @@
 export { ImprintPersistenceError, ImprintServiceError } from './errors.js';
-export { ImprintClaimService, ImprintScope, toImprintServiceError } from './imprint-claim-service.js';
+export {
+  ImprintClaimService,
+  ImprintInternalAuthority,
+  ImprintScope,
+  toImprintServiceError,
+} from './imprint-claim-service.js';
+export { ImprintOrganizationAdapter } from './imprint-organization-adapter.js';
 export { ImprintPersistence } from './imprint-persistence.js';
 export {
   imprintPayloadFingerprint,

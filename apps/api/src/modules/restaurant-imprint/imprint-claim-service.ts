@@ -43,16 +43,33 @@ function message(code: string): string {
 }
 
 /**
- * Internal Restaurant Imprint claim service (ADR-0054 I-04).
- * Tenant identity comes from an authenticated principal. The outlet id is a selector.
+ * Sealed server authority for internal Imprint source adapters (ADR-0054 R2).
+ * It is not a user, grant, or OfficeSession. Request JSON cannot construct it.
+ * Exact grant names remain deferred to I-07 and are not invented here.
+ */
+export class ImprintInternalAuthority {
+  private constructor(readonly kind: 'ORGANIZATION_ADAPTER') {}
+
+  static forOrganizationAdapter(): ImprintInternalAuthority {
+    return new ImprintInternalAuthority('ORGANIZATION_ADAPTER');
+  }
+}
+
+/**
+ * Internal Restaurant Imprint claim service (ADR-0054 I-04 / I-05).
  * Claim payloads are validated by the I-03 registry before I-02 persistence.
  */
 export class ImprintScope {
   private constructor(
     readonly tenantId: string,
     readonly outletId: string,
+    readonly authority: 'PRINCIPAL' | 'INTERNAL',
   ) {}
 
+  /**
+   * Principal-bound scope for future HTTP. Outlet membership is required.
+   * AccessGrant keys for Imprint read remain a deferred I-07 decision.
+   */
   static async open(
     pool: pg.Pool,
     principal: AuthenticatedPrincipal,
@@ -65,14 +82,38 @@ export class ImprintScope {
     ) {
       throw new ImprintServiceError('IMPRINT_SCOPE_DENIED', message('IMPRINT_SCOPE_DENIED'));
     }
-    const found = await pool.query<{ tenant_id: string }>(
-      `SELECT tenant_id FROM outlet WHERE outlet_id = $1 AND tenant_id = $2`,
-      [outletId, principal.tenantId],
-    );
-    if (!found.rows[0]) {
+    await assertOutletTenant(pool, principal.tenantId, outletId);
+    return new ImprintScope(principal.tenantId, outletId, 'PRINCIPAL');
+  }
+
+  /**
+   * Server-only ingest scope for source adapters. Default-deny without a sealed authority
+   * and without a matching organization outlet row. Outlet membership is not a grant.
+   */
+  static async openInternal(
+    pool: pg.Pool,
+    authority: ImprintInternalAuthority,
+    tenantId: string,
+    outletId: string,
+  ): Promise<ImprintScope> {
+    if (!(authority instanceof ImprintInternalAuthority) || authority.kind !== 'ORGANIZATION_ADAPTER') {
       throw new ImprintServiceError('IMPRINT_SCOPE_DENIED', message('IMPRINT_SCOPE_DENIED'));
     }
-    return new ImprintScope(principal.tenantId, outletId);
+    if (!UUID.test(tenantId) || !UUID.test(outletId)) {
+      throw new ImprintServiceError('IMPRINT_SCOPE_DENIED', message('IMPRINT_SCOPE_DENIED'));
+    }
+    await assertOutletTenant(pool, tenantId, outletId);
+    return new ImprintScope(tenantId, outletId, 'INTERNAL');
+  }
+}
+
+async function assertOutletTenant(pool: pg.Pool, tenantId: string, outletId: string): Promise<void> {
+  const found = await pool.query<{ tenant_id: string }>(
+    `SELECT tenant_id FROM outlet WHERE outlet_id = $1 AND tenant_id = $2`,
+    [outletId, tenantId],
+  );
+  if (!found.rows[0]) {
+    throw new ImprintServiceError('IMPRINT_SCOPE_DENIED', message('IMPRINT_SCOPE_DENIED'));
   }
 }
 
@@ -136,6 +177,16 @@ export class ImprintClaimService {
     input: unknown,
   ): Promise<{ outcomes: AppendOutcome[]; watermark: string }> {
     const parsed = parseCheckpoint(scope, input);
+    for (const assertion of parsed.assertions) {
+      if (assertion.supersedesClaimId) {
+        await this.requireMatchingTarget(
+          scope,
+          assertion.supersedesClaimId,
+          assertion.factPath,
+          assertion.sourceModule,
+        );
+      }
+    }
     return this.write(() =>
       this.persistence.commitCheckpoint({
         tenantId: scope.tenantId,
@@ -157,6 +208,10 @@ export class ImprintClaimService {
     if (!claim) return null;
     const active = await this.persistence.participatingClaimIds(scope.tenantId, scope.outletId);
     return { ...claim, active: active.includes(claim.claimId) };
+  }
+
+  async latestAssertionClaimId(scope: ImprintScope, factPath: string): Promise<string | null> {
+    return this.persistence.latestAssertionClaimId(scope.tenantId, scope.outletId, factPath);
   }
 
   async resolveField(scope: ImprintScope, factPath: string): Promise<ImprintResolvedField> {
@@ -202,12 +257,39 @@ export class ImprintClaimService {
     sourceModule: string,
   ): Promise<void> {
     const claim = await this.persistence.readClaim(scope.tenantId, scope.outletId, claimId);
-    if (!claim || claim.claimEffect !== 'ASSERTION' || claim.factPath !== factPath || claim.sourceModule !== sourceModule) {
+    if (
+      !claim ||
+      claim.claimEffect !== 'ASSERTION' ||
+      claim.factPath !== factPath ||
+      claim.sourceModule !== sourceModule
+    ) {
       throw new ImprintServiceError(
         'IMPRINT_LIFECYCLE_REJECTED',
         message('IMPRINT_LIFECYCLE_REJECTED'),
       );
     }
+    const active = await this.persistence.participatingClaimIds(scope.tenantId, scope.outletId);
+    if (!active.includes(claimId)) {
+      throw new ImprintServiceError(
+        'IMPRINT_LIFECYCLE_REJECTED',
+        message('IMPRINT_LIFECYCLE_REJECTED'),
+      );
+    }
+  }
+
+  async recordSourceFailure(
+    scope: ImprintScope,
+    input: { sourceModule: string; errorCode: string; freshness: 'STALE' | 'DEGRADED' },
+  ): Promise<void> {
+    await this.write(() =>
+      this.persistence.recordSourceFailure({
+        tenantId: scope.tenantId,
+        outletId: scope.outletId,
+        sourceModule: input.sourceModule,
+        errorCode: input.errorCode,
+        freshness: input.freshness,
+      }),
+    );
   }
 
   private async write<T>(work: () => Promise<T>): Promise<T> {
