@@ -12,7 +12,7 @@ Verified directly against Origin `main` `83a6cf48343eb9cf44625948122201f73af8948
 
 - Gate 0 SHA `42957b6` is an ancestor of current `main`. Concurrent work since that SHA includes allergens M6 (ADR-0050, PR #131), merchant discount v1 (ADR-0051, PR #130), fiscal G2 docs (#133), fiscal sandbox ADR (#137), modifier per-unit price (#138), and the fiscal ADR-0053 accept record (#140). None of that work creates an Imprint module.
 - **No `restaurant-imprint` runtime exists** on `main`. This ADR does not collide with existing code.
-- **Migration head on `main` at this verification is `039_order_allergen_context_m6.sql`.** Open Origin PR **#139** already contains `040_modifier_replace_yield.sql` and owns that number until it merges or drops the file. This ADR does **not** take `040` and does **not** preallocate a migration number. The I-02 number is read from Origin `main` when that slice starts.
+- **I-02 migration number, read when this slice started:** Origin `main` `54af9c0242a133dc50a252bb84ce686085ac2b24` already contained `040_modifier_replace_yield.sql` from merged PR #139. This slice adds `041_restaurant_imprint_foundation.sql`. It does not reuse `040` and does not preallocate a later number. Applying it to a persistent production database still needs a separate PO GO.
 - **ADR-0053 is not free.** On this `main` it is Accepted WITH CHANGES: `docs/decisions/ADR-0053-fiscal-sandbox-adapter-boundary.md` (KIU-FISCAL, PR #137, accept record #140). This Imprint document is **ADR-0054** and does not change ADR-0053. ADR-0052 remains the Modifier v1 contract and is unrelated.
 - Live HTTP prefix is **`/api/v1`**; there is **no `/api/office`** router and **no `OfficeSession`** type. Any Imprint read endpoint must follow `/api/v1`.
 - Identity enforcement is server-side via `identity_access_grant` + `assertPermission` (`apps/api/src/modules/identity/`), **no RLS**. This ADR does not add `OfficeSession`, Vault, or Egress.
@@ -147,7 +147,7 @@ Derived costs are never stored as a generic `product.cost`; they link to the own
 
 - Ownership of broad network/brand facts and the initial source event delivery channel.
 - Exact grant names and whether `identity_access_grant` can carry the Imprint read/provenance grants safely (gates **only** I-07, per §11).
-- The I-02 migration number is read from Origin `main` when that slice starts. `040` is owned by open PR #139 and is not an Imprint number.
+- I-02 selected `041_restaurant_imprint_foundation.sql` after PR #139 merged `040`. Later slices read the next free number from Origin `main` again.
 - Exact `/api/v1` sub-path and pagination/ETag conventions at I-07.
 - `operations.active_terminal_refs` read contract (otherwise stays `UNKNOWN`).
 
@@ -155,7 +155,7 @@ ADR approval does **not** authorize a production database migration.
 
 ## Implementation slices (gated; for reference only — no code in this ADR)
 
-Order: **I-01 (this ADR) → this ACCEPT WITH CLARIFICATIONS → separate Level B PRs**. The first implementation slice chooses its migration number from Origin `main` at that time. It does not use `040` while PR #139 owns that file. Later slices stay I-03 typed contracts, I-04 claim service, I-05 Organization adapter, I-06 narrow GoodsReceipt adapter, I-07 `/api/v1` read only when grants can be enforced, I-08 replay on a disposable tenant, I-09 AC-01…AC-16. Each slice is its own Origin `feature/` PR, Level B, with Bugbot and a separate-context review on that HEAD, then merge-when-ready and Depot CI. No GitHub PR. No direct `main` push. No production migration in those PRs.
+Order: **I-01 (this ADR) → this ACCEPT WITH CLARIFICATIONS → separate Level B PRs**. The first implementation slice chooses its migration number from Origin `main` at that time. I-02 uses `041_restaurant_imprint_foundation.sql` because merged PR #139 already took `040`. Later slices stay I-03 typed contracts, I-04 claim service, I-05 Organization adapter, I-06 narrow GoodsReceipt adapter, I-07 `/api/v1` read only when grants can be enforced, I-08 replay on a disposable tenant, I-09 AC-01…AC-16. Each slice is its own Origin `feature/` PR, Level B, with Bugbot and a separate-context review on that HEAD, then merge-when-ready and Depot CI. No GitHub PR. No direct `main` push. No production migration in those PRs.
 
 ## PO ACCEPT WITH CLARIFICATIONS (2026-10-29)
 
