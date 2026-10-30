@@ -112,11 +112,15 @@ export function assertMinimizedText(value: string, label: string, max: number): 
   }
 }
 
+/**
+ * Syntax gate for rows already stored by I-02. Membership in the closed
+ * FactPath registry is enforced by `@millq/contracts` at ingest.
+ */
 export function assertFactPath(factPath: string): void {
   if (!FACT_PATH.test(factPath) || factPath.length > 160) {
     throw new ImprintPersistenceError(
       'IMPRINT_PATH_REJECTED',
-      'fact path must be a registered dotted identifier',
+      'fact path must be a dotted identifier',
     );
   }
 }
