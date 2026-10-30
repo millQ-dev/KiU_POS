@@ -82,6 +82,7 @@ export class ImprintGoodsReceiptAdapter {
     outcomes: AppendOutcome[];
     watermark: string | null;
     degraded: boolean;
+    degradationCode: 'IMPRINT_SOURCE_READ_FAILED' | 'IMPRINT_SOURCE_SCHEMA_LIMIT' | null;
     invalidated: boolean;
   }> {
     const scope = await ImprintScope.openInternal(this.pool, this.authority, tenantId, outletId);
@@ -101,7 +102,13 @@ export class ImprintGoodsReceiptAdapter {
         errorCode: 'IMPRINT_SOURCE_READ_FAILED',
         freshness: 'STALE',
       });
-      return { outcomes: [], watermark: null, degraded: true, invalidated: false };
+      return {
+        outcomes: [],
+        watermark: null,
+        degraded: true,
+        degradationCode: 'IMPRINT_SOURCE_READ_FAILED',
+        invalidated: false,
+      };
     }
 
     const current = await this.claims.resolveField(scope, FactPath.LastPostedReceiptRef);
@@ -138,7 +145,13 @@ export class ImprintGoodsReceiptAdapter {
         watermark,
         assertions: [],
       });
-      return { outcomes: [], watermark, degraded: false, invalidated };
+      return {
+        outcomes: [],
+        watermark,
+        degraded: false,
+        degradationCode: null,
+        invalidated,
+      };
     }
 
     const value = {
@@ -154,7 +167,13 @@ export class ImprintGoodsReceiptAdapter {
         errorCode: 'IMPRINT_SOURCE_SCHEMA_LIMIT',
         freshness: 'DEGRADED',
       });
-      return { outcomes: [], watermark: null, degraded: true, invalidated: false };
+      return {
+        outcomes: [],
+        watermark: null,
+        degraded: true,
+        degradationCode: 'IMPRINT_SOURCE_SCHEMA_LIMIT',
+        invalidated: false,
+      };
     }
 
     if (
@@ -162,7 +181,13 @@ export class ImprintGoodsReceiptAdapter {
       current.canonicalValue === canonical &&
       current.claimId
     ) {
-      return { outcomes: [], watermark: null, degraded: false, invalidated: false };
+      return {
+        outcomes: [],
+        watermark: null,
+        degraded: false,
+        degradationCode: null,
+        invalidated: false,
+      };
     }
 
     const contentHash = contentRevision(
@@ -209,6 +234,7 @@ export class ImprintGoodsReceiptAdapter {
       outcomes: result.outcomes,
       watermark: result.watermark,
       degraded: false,
+      degradationCode: null,
       invalidated: false,
     };
   }

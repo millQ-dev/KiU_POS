@@ -49,7 +49,9 @@ function message(code: string): string {
  * Organization and Procurement adapters each use a distinct sealed kind.
  */
 export class ImprintInternalAuthority {
-  private constructor(readonly kind: 'ORGANIZATION_ADAPTER' | 'PROCUREMENT_ADAPTER') {}
+  private constructor(
+    readonly kind: 'ORGANIZATION_ADAPTER' | 'PROCUREMENT_ADAPTER' | 'SNAPSHOT_REBUILD',
+  ) {}
 
   static forOrganizationAdapter(): ImprintInternalAuthority {
     return new ImprintInternalAuthority('ORGANIZATION_ADAPTER');
@@ -58,9 +60,18 @@ export class ImprintInternalAuthority {
   static forProcurementAdapter(): ImprintInternalAuthority {
     return new ImprintInternalAuthority('PROCUREMENT_ADAPTER');
   }
+
+  /** Server-only snapshot rebuild / disposable replay (ADR-0054 I-08). */
+  static forSnapshotRebuild(): ImprintInternalAuthority {
+    return new ImprintInternalAuthority('SNAPSHOT_REBUILD');
+  }
 }
 
-const INTERNAL_ADAPTER_KINDS = new Set(['ORGANIZATION_ADAPTER', 'PROCUREMENT_ADAPTER']);
+const INTERNAL_ADAPTER_KINDS = new Set([
+  'ORGANIZATION_ADAPTER',
+  'PROCUREMENT_ADAPTER',
+  'SNAPSHOT_REBUILD',
+]);
 
 /**
  * Internal Restaurant Imprint claim service (ADR-0054 I-04 / I-05).
