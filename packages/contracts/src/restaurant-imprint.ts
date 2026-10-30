@@ -398,6 +398,39 @@ function readSensitivity(
   return entry.sensitivityClass;
 }
 
+function assertValueMatchesSource(
+  factPath: RegisteredFactPath,
+  scope: { tenantId: string; outletId: string },
+  provenance: ImprintProvenance,
+  value: ImprintPathValue,
+): void {
+  if (factPath === FactPath.OutletIdentity) {
+    const identity = value as z.infer<typeof identityValueSchema>;
+    if (identity.outletId !== scope.outletId || provenance.sourceEntityId !== scope.outletId) {
+      reject('IMPRINT_VALUE_REJECTED', 'outlet identity must name the scoped outlet');
+    }
+    return;
+  }
+  const referencedId = referencedEntityId(factPath, value);
+  if (referencedId != null && provenance.sourceEntityId !== referencedId) {
+    reject('IMPRINT_ORIGIN_REJECTED', 'provenance must name the referenced source entity');
+  }
+  if (referencedId == null && provenance.sourceEntityId !== scope.outletId) {
+    reject('IMPRINT_ORIGIN_REJECTED', 'a set fact must cite the scoped outlet');
+  }
+}
+
+function referencedEntityId(factPath: RegisteredFactPath, value: ImprintPathValue): string | null {
+  if (factPath === FactPath.OutletBrandRef) return (value as z.infer<typeof brandRefValueSchema>).brandId;
+  if (factPath === FactPath.OutletLegalEntityRef) {
+    return (value as z.infer<typeof legalEntityRefValueSchema>).legalEntityId;
+  }
+  if (factPath === FactPath.LastPostedReceiptRef) {
+    return (value as z.infer<typeof receiptRefValueSchema>).goodsReceiptId;
+  }
+  return null;
+}
+
 function readVerification(input: Record<string, unknown>): typeof ImprintVerificationState.Unverified {
   if (
     input.verificationState != null &&
@@ -447,8 +480,10 @@ export function parseImprintAssertion(input: unknown): ImprintAssertion {
     reject('IMPRINT_VALUE_REJECTED', 'retention class does not match the registry');
   }
   const provenance = readProvenance(record, entry);
+  const scope = readScope(record);
   const canonicalValue = canonicalImprintValue(factPath, record.value);
   const value = decodeImprintValue(factPath, canonicalValue);
+  assertValueMatchesSource(factPath, scope, provenance, value);
   const supersedes = record.supersedesClaimId == null
     ? null
     : uuidSchema.safeParse(record.supersedesClaimId);
@@ -457,7 +492,7 @@ export function parseImprintAssertion(input: unknown): ImprintAssertion {
   }
   return {
     effect: 'ASSERTION',
-    ...readScope(record),
+    ...scope,
     factPath,
     origin,
     sensitivityClass,

@@ -122,6 +122,33 @@ describe('restaurant imprint fact path registry', () => {
     expect(codeOf(input)).toBe('IMPRINT_PROVENANCE_REJECTED');
   });
 
+  it('rejects an identity value for a different outlet', () => {
+    expect(
+      codeOf(
+        brandAssertion({
+          factPath: FactPath.OutletIdentity,
+          provenance: {
+            sourceModule: 'organization',
+            sourceEntityType: 'Outlet',
+            sourceEntityId: OUTLET,
+            sourceRevision: 'rev-1',
+          },
+          value: { outletId: BRAND, name: 'Cafe' },
+        }),
+      ),
+    ).toBe('IMPRINT_VALUE_REJECTED');
+  });
+
+  it('rejects provenance that names a different source entity', () => {
+    expect(
+      codeOf(
+        brandAssertion({
+          provenance: { ...provenance, sourceEntityId: OUTLET },
+        }),
+      ),
+    ).toBe('IMPRINT_ORIGIN_REJECTED');
+  });
+
   it('rejects a sensitivity class that disagrees with the registry', () => {
     expect(
       codeOf(brandAssertion({ sensitivityClass: ImprintSensitivity.InternalReference })),
