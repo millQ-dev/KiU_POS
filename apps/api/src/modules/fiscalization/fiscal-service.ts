@@ -8,6 +8,7 @@ import type { Pool, PoolClient } from 'pg';
 import { DomainValidationError, NotFoundError } from '../orders/errors.js';
 import type { FiscalCheckoutGate, FiscalCheckoutGateStatus } from '../settlement/settlement-ports.js';
 import {
+  invokeFiscalRecovery,
   unavailableFiscalProviderAdapter,
   type FiscalProviderAdapter,
 } from './fiscal-provider-adapter.js';
@@ -581,25 +582,20 @@ export class FiscalService {
       );
     }
 
-    const result =
-      drow.status === 'PENDING_ISSUE'
-        ? await this.adapter.idempotentRetry({
-            fiscalDocumentId,
-            legalEntityId: drow.legal_entity_id,
-            settlementGroupId: drow.settlement_group_id,
-            orderId: drow.order_id,
-            paymentCollectionEventId: drow.payment_collection_event_id,
-            collectionBusinessTime: drow.collection_business_time.toISOString(),
-            taxOrderSnapshotId: drow.tax_order_snapshot_id,
-            taxSemanticFingerprint: drow.tax_semantic_fingerprint,
-            documentAmountMinor: drow.document_amount_minor,
-            currencyCode: drow.currency_code,
-            issueIdempotencyKey: doc.issueIdempotencyKey,
-          })
-        : await this.adapter.reconcileTimeoutAfterSuccess({
-            fiscalDocumentId,
-            issueIdempotencyKey: doc.issueIdempotencyKey,
-          });
+    const recovery = await invokeFiscalRecovery(this.adapter, drow.status, {
+      fiscalDocumentId,
+      legalEntityId: drow.legal_entity_id,
+      settlementGroupId: drow.settlement_group_id,
+      orderId: drow.order_id,
+      paymentCollectionEventId: drow.payment_collection_event_id,
+      collectionBusinessTime: drow.collection_business_time.toISOString(),
+      taxOrderSnapshotId: drow.tax_order_snapshot_id,
+      taxSemanticFingerprint: drow.tax_semantic_fingerprint,
+      documentAmountMinor: drow.document_amount_minor,
+      currencyCode: drow.currency_code,
+      issueIdempotencyKey: doc.issueIdempotencyKey,
+    });
+    const result = recovery.result;
 
     const client = await this.pool.connect();
     try {
@@ -621,8 +617,7 @@ export class FiscalService {
       const attemptN = await nextAttemptNumber(client, sub.rows[0].fiscal_submission_id);
       const attemptId = randomUUID();
       const meta = { rows: [{ tenant_id: drow.tenant_id, legal_entity_id: drow.legal_entity_id }] };
-      const operation =
-        drow.status === 'PENDING_ISSUE' ? 'IDEMPOTENT_RETRY' : 'RECONCILE_TIMEOUT';
+      const operation = recovery.operation;
       await client.query(
         `INSERT INTO fiscal_provider_attempt (
            fiscal_provider_attempt_id, fiscal_submission_id, fiscal_document_id,

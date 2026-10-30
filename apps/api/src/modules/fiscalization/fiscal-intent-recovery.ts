@@ -1,9 +1,9 @@
 /**
  * One fiscal intent across timeout, crash, and retry (ADR-0053 clarification 5 and 7).
  *
- * FiscalService.reconcileDocument still calls idempotentRetry while the document
- * is PENDING_ISSUE. This policy is the sandbox rule and is not yet wired into that
- * service path. Default contract is UNVERIFIED, so issue is not repeated.
+ * FiscalService.reconcileDocument calls idempotentRetry only when the adapter
+ * sets verifiedSameKeyRetry. The method name is not that capability. Default is
+ * reconcile the same document and leave an unverified outcome unresolved.
  */
 
 import type { SandboxProviderCode } from './sandbox-provider-binding.js';

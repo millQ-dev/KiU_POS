@@ -55,6 +55,11 @@ export type FiscalAdapterResult = {
  */
 export type FiscalProviderAdapter = {
   readonly adapterIdentity: string;
+  /**
+   * Written provider contract that the same issue key will not create a second invoice.
+   * The presence of idempotentRetry is not this capability. Absent means do not call it.
+   */
+  readonly verifiedSameKeyRetry?: true;
   issue(input: FiscalAdapterIssueInput): Promise<FiscalAdapterResult>;
   queryStatus(input: {
     fiscalDocumentId: string;
@@ -72,6 +77,49 @@ export type FiscalProviderAdapter = {
     issueIdempotencyKey: string;
   }): Promise<FiscalAdapterResult>;
 };
+
+/**
+ * PENDING_ISSUE may repeat issue only when verifiedSameKeyRetry is exactly true.
+ * Timeout-after-success and every unverified adapter reconcile instead.
+ */
+export function selectFiscalRecoveryOperation(input: {
+  documentStatus: string;
+  verifiedSameKeyRetry: boolean;
+}): 'NONE' | 'IDEMPOTENT_RETRY' | 'RECONCILE_TIMEOUT' {
+  if (input.documentStatus === 'SATISFIED') return 'NONE';
+  if (input.documentStatus === 'PENDING_ISSUE' && input.verifiedSameKeyRetry) {
+    return 'IDEMPOTENT_RETRY';
+  }
+  return 'RECONCILE_TIMEOUT';
+}
+
+/**
+ * Calls idempotentRetry only when selectFiscalRecoveryOperation says so.
+ * Otherwise asks the same document id for status. Does not allocate a new document.
+ */
+export async function invokeFiscalRecovery(
+  adapter: FiscalProviderAdapter,
+  documentStatus: string,
+  issue: FiscalAdapterIssueInput,
+): Promise<{
+  operation: 'IDEMPOTENT_RETRY' | 'RECONCILE_TIMEOUT';
+  result: FiscalAdapterResult;
+}> {
+  const selected = selectFiscalRecoveryOperation({
+    documentStatus,
+    verifiedSameKeyRetry: adapter.verifiedSameKeyRetry === true,
+  });
+  if (selected === 'IDEMPOTENT_RETRY') {
+    return { operation: selected, result: await adapter.idempotentRetry(issue) };
+  }
+  return {
+    operation: 'RECONCILE_TIMEOUT',
+    result: await adapter.reconcileTimeoutAfterSuccess({
+      fiscalDocumentId: issue.fiscalDocumentId,
+      issueIdempotencyKey: issue.issueIdempotencyKey,
+    }),
+  };
+}
 
 /** Production default until a provider adapter is configured — fail closed, never fake SATISFIED. */
 export function unavailableFiscalProviderAdapter(): FiscalProviderAdapter {
