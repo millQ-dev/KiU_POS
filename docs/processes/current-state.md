@@ -1,7 +1,7 @@
 # MillQ Current State
 
 **Checkpoint:** POS v1 status correction — module readiness is not product GO  
-**Tip:** Cursor Origin `main` @ `017e4d30a23d742da637ac933e2cf8745d2b9fdc` (#150)  
+**Tip:** Cursor Origin `main` @ `add2cecd969605a6659b2671c4ac0da2f642788a` (#152)  
 **Canonical host:** Cursor Origin (`https://origin.cursor.com/millqdev/MillQ.git`)  
 **GitHub backup (sole):** `https://github.com/millQ-dev/KiU_POS.git`  
   (`millQ-dev/MillQ` = legacy rename redirect to the same repository ID)  
@@ -19,9 +19,9 @@ A merged module and its tests are not a combined C0 Golden Path, and they are no
 | POS v1 | **POSV1_NO_GO** |
 | Track P exit | **Incomplete.** Counter cash and the QR-unavailable honesty UI stay verified or declared deferred. Post-pay void stays declared deferred. QR collection and card collection are not implemented. |
 | Combined C0 Golden Path | **UNVERIFIED.** Tableless counter cash is tested (DEMO-29 and the cash12 browser path). Modifier price, frozen Effective Recipe, allergy capture, merchant discount, cash, the fiscal gate, and one GoodsIssue are not one tested sale on this tip. |
-| KIU-MOD backend invariants | **VERIFIED 11/11** according to the KIU-MOD post-merge audit `MOD-POSTMERGE-OPERABILITY` on this same SHA. That is module evidence. It is not the combined Golden Path. That audit did not re-run Postgres acceptance. |
+| KIU-MOD backend invariants | **VERIFIED 11/11** according to the KIU-MOD post-merge audit `MOD-POSTMERGE-OPERABILITY` on `017e4d3` (#150). #152 does not change modifier, order, or allergen sources, so that module verdict still applies on this tip. It is not the combined Golden Path. That audit did not re-run Postgres acceptance. |
 | R1.1 Floor/Table | **HOLD.** The entry gate stays closed. `037` is already the modifier migration. See `docs/processes/next01/R1.1-IMPLEMENTATION-PROPOSAL.md`. |
-| Fiscal G2 | **OPEN.** ADR-0053 sandbox accept does not close G2-01 through G2-18 and does not authorize production issuance. |
+| Fiscal G2 | **OPEN.** ADR-0053 sandbox accept does not close G2-01 through G2-18 and does not authorize production issuance. #152 adds local sandbox binding and intent recovery. That path does not call a provider and does not satisfy `FiscalCheckoutGate`. |
 | QR / card collection | **Not implemented.** An honesty screen is not collection. |
 | Offline sync | **Not implemented.** ADR-0018 is Accepted. There is no POS sync runtime. |
 | Cashier merchant discount UI | **Missing.** `POST /api/v1/orders/:orderId/apply-merchant-discount` exists. No cashier screen calls it. |
