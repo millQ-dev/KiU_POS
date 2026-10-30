@@ -146,16 +146,16 @@ Derived costs are never stored as a generic `product.cost`; they link to the own
 ## Known UNKNOWN / open items (resolve with a delta before dependent code if Origin contradicts)
 
 - Ownership of broad network/brand facts and the initial source event delivery channel.
-- Exact grant names and whether `identity_access_grant` can carry the Imprint read/provenance grants safely (gates **only** I-07, per §11).
-- I-02 selected `041_restaurant_imprint_foundation.sql` after PR #139 merged `040`. Later slices read the next free number from Origin `main` again.
-- Exact `/api/v1` sub-path and pagination/ETag conventions at I-07.
+- Exact grant names for I-07: **resolved** by PO ACCEPT 2026-10-30 (`imprint.read`, `imprint.provenance.read`, outlet-scoped only).
+- I-02 selected `041_restaurant_imprint_foundation.sql` after PR #139 merged `040`. I-07 registers keys in `042_imprint_read_permissions.sql`. Later slices read the next free number from Origin `main` again.
+- Exact `/api/v1` sub-path for I-07: **resolved** as `GET /api/v1/outlets/:outletId/imprint`. Pagination/ETag remain optional follow-ups.
 - `operations.active_terminal_refs` read contract (otherwise stays `UNKNOWN`).
 
 ADR approval does **not** authorize a production database migration.
 
 ## Implementation slices (gated; for reference only — no code in this ADR)
 
-Order: **I-01 (this ADR) → this ACCEPT WITH CLARIFICATIONS → separate Level B PRs**. The first implementation slice chooses its migration number from Origin `main` at that time. I-02 uses `041_restaurant_imprint_foundation.sql` because merged PR #139 already took `040`. I-03 registered the typed contracts. I-04 is the internal claim service: it validates those contracts before persistence and takes tenant identity from an authenticated principal plus outlet membership. It adds no route, grant, or migration. I-05 is the read-only Organization adapter: it uses a sealed internal ingest authority (not a fabricated user or grant key), refuses supersede/invalidate of inactive claims, and projects only accepted Organization FactPaths. Exact Imprint grant names remain deferred to I-07. I-06 is the read-only Procurement GoodsReceipt adapter for `procurement.last_posted_receipt_ref`: it uses a distinct sealed procurement ingest authority, selects the chronologically last primary POSTED/REVERSED receipt scoped by tenant + LegalEntity + warehouse with non-NULL matching `outlet_id` (order `business_date`, `business_order`, `posted_at`, then id), excludes DRAFT and reverse companion documents, supersedes on status change so REVERSED is never left presented as POSTED, and resolves missing evidence to UNKNOWN. Later slices stay I-07 `/api/v1` read only when grants can be enforced, I-08 replay on a disposable tenant, I-09 AC-01…AC-16. Each slice is its own Origin `feature/` PR, Level B, with Bugbot and a separate-context review on that HEAD, then merge-when-ready and Depot CI. No GitHub PR. No direct `main` push. No production migration in those PRs.
+Order: **I-01 (this ADR) → this ACCEPT WITH CLARIFICATIONS → separate Level B PRs**. The first implementation slice chooses its migration number from Origin `main` at that time. I-02 uses `041_restaurant_imprint_foundation.sql` because merged PR #139 already took `040`. I-03 registered the typed contracts. I-04 is the internal claim service: it validates those contracts before persistence and takes tenant identity from an authenticated principal plus outlet membership. It adds no route, grant, or migration. I-05 is the read-only Organization adapter: it uses a sealed internal ingest authority (not a fabricated user or grant key), refuses supersede/invalidate of inactive claims, and projects only accepted Organization FactPaths. Exact Imprint grant names remain deferred to I-07. I-06 is the read-only Procurement GoodsReceipt adapter for `procurement.last_posted_receipt_ref`: it uses a distinct sealed procurement ingest authority, selects the chronologically last primary POSTED/REVERSED receipt scoped by tenant + LegalEntity + warehouse with non-NULL matching `outlet_id` (order `business_date`, `business_order`, `posted_at`, then id), excludes DRAFT and reverse companion documents, supersedes on status change so REVERSED is never left presented as POSTED, and resolves missing evidence to UNKNOWN. I-07 is the read-only HTTP summary at `GET /api/v1/outlets/:outletId/imprint` under outlet-scoped `imprint.read` / optional `imprint.provenance.read` (PO ACCEPT 2026-10-30). Later slices stay I-08 replay on a disposable tenant, I-09 AC-01…AC-16. Each slice is its own Origin `feature/` PR, Level B, with Bugbot and a separate-context review on that HEAD, then merge-when-ready and Depot CI. No GitHub PR. No direct `main` push. No production migration in those PRs.
 
 ## PO ACCEPT WITH CLARIFICATIONS (2026-10-29)
 
@@ -186,8 +186,24 @@ Recorded from the Product Owner decision `IMPRINT-ADR0054-PO-DECISION` after rea
 These sentences stay in the file as later-slice intent. They are **not** accepted product rules:
 
 - A permanent Imprint migration number, including `040`.
-- Concrete permission-key strings such as `imprint.read`.
-- The v0.1 path table's “Populated” rows as a commitment to ship those adapters.
+- ~~Concrete permission-key strings such as `imprint.read`.~~ **Superseded** by PO ACCEPT I-07 (2026-10-30) below.
+- The v0.1 path table's “Populated” rows as a commitment to ship those adapters (I-05/I-06 already shipped the accepted paths separately).
 - A new `CostQuote` type. This ADR does not create one. No generic `product.cost` is stored. A link to a cost revision is allowed only when that read contract already exists; otherwise the value stays `UNKNOWN`.
 
 No clause above contradicts the seven principles. None is silently promoted to an accepted rule.
+
+## PO ACCEPT — I-07 authorization semantics (2026-10-30)
+
+Recorded from Product Owner decision `IMPRINT-I07-HTTP-READ` / `IMPRINT-I07-HTTP-AUTHZ-PREFLIGHT` ACCEPT. Implementation remains Level B under this decision. Production migrate/deploy still need a separate PO GO.
+
+Accepted for I-07:
+
+1. Register exact permission keys `imprint.read` and `imprint.provenance.read` (migration `042_imprint_read_permissions.sql` on Origin at implementation time).
+2. Both are default-deny and explicitly assigned. Neither is implied by `pos.operate`, procurement, cash, or any other existing permission.
+3. I-07 requires **exact outlet-scoped** authorization. Tenant-wide Imprint grants (`outlet_id IS NULL`) are **not** approved in this slice. Enforcement must match `identity_access_grant.outlet_id` to the requested outlet and must not rely on `assertPermission` alone (which would accept NULL-outlet grants).
+4. TERMINAL and MOBILE sessions only when valid, active, and explicitly authorized. Terminal-specific grants are not a broader outlet permission.
+5. `imprint.read` authorizes typed summary values for currently accepted registered FactPaths, including existing `INTERNAL_REFERENCE` values. It does not authorize provenance/history or future sensitive fields automatically.
+6. `imprint.provenance.read` is additional, not a replacement for `imprint.read`. Provenance stays minimized; no raw PII, secrets, attachments, or source-table dumps.
+7. HTTP: `GET /api/v1/outlets/:outletId/imprint`. Tenant identity is server-derived; `outletId` is a selector. Return explicit field states, revision, resolver/policy version, and freshness. Do not invent values when data is missing.
+8. Imprint read permissions do **not** authorize JEV/LLM processing or data egress.
+9. Use existing Identity only. No OfficeSession, RLS, new authorization actor, automatic grant issuance, or public self-service permission endpoint.

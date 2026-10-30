@@ -16,6 +16,7 @@ import { registerDevCashierBootstrapRoutes, registerPosRoutes } from './routes/p
 import { registerCompanyIdentityRoutes, registerIdentityRoutes } from './routes/identity.js';
 import { registerCashRoutes } from './routes/cash.js';
 import { registerAllergenRoutes } from './routes/allergens.js';
+import { registerImprintRoutes } from './routes/imprint.js';
 
 async function main() {
   const env = loadEnv();
@@ -83,6 +84,11 @@ async function main() {
     isProduction: env.NODE_ENV === 'production',
   });
   await registerAllergenRoutes(app, pool, {
+    pepper,
+    allowedOrigins,
+    isProduction: env.NODE_ENV === 'production',
+  });
+  await registerImprintRoutes(app, pool, {
     pepper,
     allowedOrigins,
     isProduction: env.NODE_ENV === 'production',

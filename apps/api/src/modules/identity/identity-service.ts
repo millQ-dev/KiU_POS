@@ -516,6 +516,67 @@ export class IdentityService {
   }
 
   /**
+   * ADR-0054 I-07 — require an exact outlet-scoped AccessGrant.
+   * Tenant-wide rows (outlet_id IS NULL) never authorize. Terminal-scoped rows
+   * authorize only when terminalId matches; they are not a broader outlet grant.
+   */
+  async hasOutletScopedPermission(
+    client: Pool | PoolClient,
+    tenantId: string,
+    userId: string,
+    permissionKey: string,
+    outletId: string,
+    terminalId: string | null = null,
+  ): Promise<boolean> {
+    if (!outletId) return false;
+    const res = await client.query(
+      `SELECT 1 FROM identity_access_grant
+       WHERE tenant_id = $1 AND user_id = $2 AND permission_key = $3
+         AND enabled AND revoked_at IS NULL
+         AND (expires_at IS NULL OR expires_at > NOW())
+         AND outlet_id = $4
+         AND (terminal_id IS NULL OR terminal_id = $5)
+       LIMIT 1`,
+      [tenantId, userId, permissionKey, outletId, terminalId],
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  async assertOutletScopedPermission(
+    principal: AuthenticatedPrincipal,
+    permissionKey: string,
+    outletId: string,
+    terminalId: string | null = null,
+  ): Promise<void> {
+    if (!outletId) {
+      await audit(this.pool, {
+        tenantId: principal.tenantId,
+        eventType: 'ACCESS_GRANT_DENIED',
+        actorUserId: principal.userId,
+        payload: { permissionKey, outletId: null, terminalId, reason: 'outlet_required' },
+      });
+      throw new IdentityDomainError('FORBIDDEN', 'Permission denied');
+    }
+    const ok = await this.hasOutletScopedPermission(
+      this.pool,
+      principal.tenantId,
+      principal.userId,
+      permissionKey,
+      outletId,
+      terminalId,
+    );
+    if (!ok) {
+      await audit(this.pool, {
+        tenantId: principal.tenantId,
+        eventType: 'ACCESS_GRANT_DENIED',
+        actorUserId: principal.userId,
+        payload: { permissionKey, outletId, terminalId, reason: 'outlet_scoped_required' },
+      });
+      throw new IdentityDomainError('FORBIDDEN', 'Permission denied');
+    }
+  }
+
+  /**
    * POS/financial authorize — identical semantics to assertPermission (ADR-0036).
    * When outletId is null, only tenant-wide grants (outlet_id IS NULL) authorize.
    */
