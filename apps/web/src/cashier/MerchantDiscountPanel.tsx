@@ -119,7 +119,18 @@ export function MerchantDiscountPanel({
     if (server) {
       holdLocalAppliedRef.current = false;
       lastSignatureRef.current = signature;
-      setApplied(server);
+      // Provenance omits netMerchandiseSalesMinor — keep apply-response net when discount matches.
+      setApplied((prev) => {
+        if (
+          prev &&
+          prev.discountMinor === server.discountMinor &&
+          server.netMerchandiseSalesMinor === '—' &&
+          prev.netMerchandiseSalesMinor !== '—'
+        ) {
+          return { ...server, netMerchandiseSalesMinor: prev.netMerchandiseSalesMinor };
+        }
+        return server;
+      });
       if (phase === 'uncertain' || phase === 'awaiting_approval' || phase === 'entry') {
         setPhase('applied');
         setApprovalId(null);

@@ -288,6 +288,68 @@ describe('MerchantDiscountPanel', () => {
     expect(screen.queryByTestId('merchant-discount-apply')).toBeNull();
   });
 
+  it('keeps apply-response net after commercial reload without net in provenance', async () => {
+    mockedApi.applyMerchantDiscount.mockResolvedValueOnce({
+      status: 'applied',
+      orderId,
+      mode: 'FIXED_MINOR',
+      discountMinor: '10000',
+      percentBasisPoints: null,
+      eligibleBasisMinor: '100000',
+      reason: 'Regular guest',
+      approvalRequestId: null,
+      certainty: 'FINAL',
+      netMerchandiseSalesMinor: '90000',
+    });
+    const onApplied = vi.fn();
+    const { rerender } = render(
+      <MerchantDiscountPanel
+        orderId={orderId}
+        outletId={outletId}
+        terminalId={terminalId}
+        commercial={acceptedCommercial()}
+        settlementLive={false}
+        editable
+        busy={false}
+        onApplied={onApplied}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('merchant-discount-amount'), {
+      target: { value: '10000' },
+    });
+    fireEvent.change(screen.getByTestId('merchant-discount-reason'), {
+      target: { value: 'Regular guest' },
+    });
+    fireEvent.click(screen.getByTestId('merchant-discount-apply'));
+    await waitFor(() => expect(screen.getByTestId('merchant-discount-result').textContent).toMatch(/90000/));
+
+    rerender(
+      <MerchantDiscountPanel
+        orderId={orderId}
+        outletId={outletId}
+        terminalId={terminalId}
+        commercial={acceptedCommercial({
+          roundingProvenance: {
+            orderProvenance: {
+              merchantDiscount: {
+                discountMinor: '10000',
+                reason: 'Regular guest',
+                mode: 'FIXED_MINOR',
+              },
+            },
+          },
+        })}
+        settlementLive={false}
+        editable
+        busy={false}
+        onApplied={onApplied}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('merchant-discount-result').textContent).toMatch(/90000/),
+    );
+  });
+
   it('clears stale applied UI when commercial re-accept drops merchantDiscount', async () => {
     const withDiscount = acceptedCommercial({
       roundingProvenance: {
