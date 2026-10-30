@@ -80,3 +80,26 @@ export {
   type Recommendation,
   type OperationalCommandRequest,
 } from './intelligence.js';
+
+export {
+  JEV_EVIDENCE_POLICY_VERSION,
+  EvidenceKind,
+  EvidenceStatus,
+  EvidenceFreshness,
+  EvidenceVerification,
+  EvidenceSensitivity,
+  JevContractError,
+  parseEvidenceItem,
+  buildEvidenceBundle,
+  prepareModelGatewayRequest,
+  type EvidenceKindName,
+  type EvidenceStatusName,
+  type EvidenceFreshnessName,
+  type EvidenceVerificationName,
+  type EvidenceSensitivityName,
+  type EvidenceProvenance,
+  type EvidenceItem,
+  type EvidenceBundle,
+  type ApprovedModelRegistryEntry,
+  type ModelGatewayRequest,
+} from './jev-evidence.js';
