@@ -322,6 +322,22 @@ export class ImprintPersistence {
     }));
   }
 
+  async latestAssertionClaimId(
+    tenantId: string,
+    outletId: string,
+    factPath: string,
+  ): Promise<string | null> {
+    const result = await this.pool.query<{ claim_id: string }>(
+      `SELECT claim_id
+       FROM imprint_claim
+       WHERE tenant_id = $1 AND outlet_id = $2 AND fact_path = $3 AND claim_effect = 'ASSERTION'
+       ORDER BY recorded_at DESC, claim_id DESC
+       LIMIT 1`,
+      [tenantId, outletId, factPath],
+    );
+    return result.rows[0]?.claim_id ?? null;
+  }
+
   async participatingClaimIds(tenantId: string, outletId: string): Promise<string[]> {
     const result = await this.pool.query<{ claim_id: string }>(
       `SELECT c.claim_id

@@ -224,9 +224,13 @@ export class ImprintOrganizationAdapter {
     ) {
       return null;
     }
-    // Bind the content fingerprint to the live claim so a later revert does not
-    // collide with an earlier superseded source_revision identity.
-    const sourceRevision = `${draft.sourceRevision}:${current.claimId ?? 'genesis'}`;
+    // Bind the content fingerprint to a claim anchor so reverts and post-invalidation
+    // restores do not collide with an earlier source_revision identity.
+    const anchor =
+      current.claimId ??
+      (await this.claims.latestAssertionClaimId(scope, draft.factPath)) ??
+      'genesis';
+    const sourceRevision = `${draft.sourceRevision}:${anchor}`;
     const body: Record<string, unknown> & { factPath: string; revision: string } = {
       tenantId: scope.tenantId,
       outletId: scope.outletId,

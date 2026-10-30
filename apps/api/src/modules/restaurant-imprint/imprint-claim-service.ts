@@ -210,6 +210,10 @@ export class ImprintClaimService {
     return { ...claim, active: active.includes(claim.claimId) };
   }
 
+  async latestAssertionClaimId(scope: ImprintScope, factPath: string): Promise<string | null> {
+    return this.persistence.latestAssertionClaimId(scope.tenantId, scope.outletId, factPath);
+  }
+
   async resolveField(scope: ImprintScope, factPath: string): Promise<ImprintResolvedField> {
     if (!isRegisteredFactPath(factPath) || !(factPath in FACT_PATH_REGISTRY)) {
       throw new ImprintServiceError(

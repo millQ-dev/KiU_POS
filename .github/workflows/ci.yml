@@ -236,7 +236,7 @@ jobs:
             echo "vitest exited with code ${VITEST_EC}" >&2
             exit "$VITEST_EC"
           fi
-          node scripts/ci/assert-vitest-no-skips.mjs "$REPORT" --min-passed=6 --label=imprint-i05
+          node scripts/ci/assert-vitest-no-skips.mjs "$REPORT" --min-passed=7 --label=imprint-i05
       - name: POS P0 actor acceptance (fail-closed)
         env:
           DATABASE_URL: ${{ steps.dbs.outputs.pos_url }}

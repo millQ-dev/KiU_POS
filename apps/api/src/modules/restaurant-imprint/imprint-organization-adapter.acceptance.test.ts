@@ -261,6 +261,40 @@ describeImprint('restaurant imprint organization adapter (disposable PG)', () =>
     expect(await store.countClaims(tenantId, outletId)).toBeGreaterThan(2);
   });
 
+  it('restores an identity after invalidation without colliding with genesis', async () => {
+    const outletId = await createOutlet('Restore');
+    await adapter.syncOutlet(tenantId, outletId);
+    const scope = await ImprintScope.openInternal(
+      pool,
+      ImprintInternalAuthority.forOrganizationAdapter(),
+      tenantId,
+      outletId,
+    );
+    const live = await service.resolveField(scope, FactPath.OutletIdentity);
+    expect(live.claimId).toBeTruthy();
+    await service.invalidateAssertion(scope, {
+      tenantId,
+      outletId,
+      factPath: FactPath.OutletIdentity,
+      invalidatesClaimId: live.claimId!,
+      origin: ImprintClaimOrigin.Observed,
+      provenance: {
+        sourceModule: 'organization',
+        sourceEntityType: 'Outlet',
+        sourceEntityId: outletId,
+        sourceRevision: 'restore-off',
+      },
+    });
+    expect((await service.resolveField(scope, FactPath.OutletIdentity)).fieldState).toBe(
+      ImprintFieldState.Unknown,
+    );
+    const restored = await adapter.syncOutlet(tenantId, outletId);
+    expect(restored.outcomes.some((row) => row.outcome === 'INSERTED')).toBe(true);
+    expect((await service.resolveField(scope, FactPath.OutletIdentity)).canonicalValue).toContain(
+      'Restore',
+    );
+  });
+
   it('denies another tenant and does not invent a truncated oversize name', async () => {
     const outletId = await createOutlet('Short');
     await expect(adapter.syncOutlet(otherTenantId, outletId)).rejects.toMatchObject({
