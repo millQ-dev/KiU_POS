@@ -278,16 +278,25 @@ describeImprint('restaurant imprint goods receipt adapter (disposable PG)', () =
     expect(field.canonicalValue).not.toContain(reverseDoc);
   });
 
-  it('excludes NULL-outlet warehouses and resolves missing evidence to UNKNOWN', async () => {
+  it('excludes NULL-outlet warehouses and sister outlets; missing evidence → UNKNOWN', async () => {
     const outletId = await createOutlet('Null WH');
+    const sisterId = await createOutlet('Sister');
     const orphan = await createWarehouse(null, 'Shared');
     const matched = await createWarehouse(outletId, 'Owned');
+    const sisterWh = await createWarehouse(sisterId, 'Sister WH');
     await insertReceipt({
       warehouseId: orphan,
       status: 'POSTED',
       businessDate: '2026-10-25',
       businessOrder: 5,
       postedAt: '2026-10-25T08:00:00.000Z',
+    });
+    const sisterReceipt = await insertReceipt({
+      warehouseId: sisterWh,
+      status: 'POSTED',
+      businessDate: '2026-10-27',
+      businessOrder: 9,
+      postedAt: '2026-10-27T08:00:00.000Z',
     });
     const empty = await adapter.syncOutlet(tenantId, outletId);
     expect(empty.outcomes).toEqual([]);
@@ -301,6 +310,19 @@ describeImprint('restaurant imprint goods receipt adapter (disposable PG)', () =
       fieldState: ImprintFieldState.Unknown,
       value: null,
     });
+    const sisterScope = await ImprintScope.openInternal(
+      pool,
+      ImprintInternalAuthority.forProcurementAdapter(),
+      tenantId,
+      sisterId,
+    );
+    await adapter.syncOutlet(tenantId, sisterId);
+    expect(
+      (await service.resolveField(sisterScope, FactPath.LastPostedReceiptRef)).canonicalValue,
+    ).toContain(sisterReceipt);
+    expect(await service.resolveField(scope, FactPath.LastPostedReceiptRef)).toMatchObject({
+      fieldState: ImprintFieldState.Unknown,
+    });
 
     const posted = await insertReceipt({
       warehouseId: matched,
@@ -313,6 +335,9 @@ describeImprint('restaurant imprint goods receipt adapter (disposable PG)', () =
     expect(
       (await service.resolveField(scope, FactPath.LastPostedReceiptRef)).canonicalValue,
     ).toContain(posted);
+    expect(
+      (await service.resolveField(scope, FactPath.LastPostedReceiptRef)).canonicalValue,
+    ).not.toContain(sisterReceipt);
 
     await pool.query(`DELETE FROM goods_receipt WHERE goods_receipt_id = $1`, [posted]);
     const cleared = await adapter.syncOutlet(tenantId, outletId);
@@ -382,7 +407,7 @@ describeImprint('restaurant imprint goods receipt adapter (disposable PG)', () =
     ).toBe(before);
   });
 
-  it('marks STALE on source read failure while retaining the last good claim', async () => {
+  it('retains the last good claim on source read failure and records a projection error', async () => {
     const outletId = await createOutlet('Stale');
     const warehouseId = await createWarehouse(outletId, 'WH');
     const receiptId = await insertReceipt({
@@ -417,6 +442,13 @@ describeImprint('restaurant imprint goods receipt adapter (disposable PG)', () =
       const after = await service.resolveField(scope, FactPath.LastPostedReceiptRef);
       expect(after.canonicalValue).toContain(receiptId);
       expect(after.fieldState).toBe(ImprintFieldState.Known);
+      const errors = await pool.query<{ error_code: string }>(
+        `SELECT error_code FROM imprint_projection_error
+         WHERE tenant_id = $1 AND outlet_id = $2 AND source_module = 'procurement'
+         ORDER BY recorded_at DESC LIMIT 1`,
+        [tenantId, outletId],
+      );
+      expect(errors.rows[0]?.error_code).toBe('IMPRINT_SOURCE_READ_FAILED');
     } finally {
       pool.query = originalQuery;
     }

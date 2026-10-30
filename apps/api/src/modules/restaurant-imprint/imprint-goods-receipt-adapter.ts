@@ -234,7 +234,7 @@ export class ImprintGoodsReceiptAdapter {
     }>(
       `SELECT gr.goods_receipt_id,
               gr.status,
-              gr.business_date,
+              gr.business_date::text AS business_date,
               gr.business_order,
               gr.posted_at,
               gr.warehouse_id
@@ -267,8 +267,14 @@ export class ImprintGoodsReceiptAdapter {
   }
 }
 
+/** Match Procurement: DATE calendar day, never UTC-shifted via toISOString. */
 function asIsoDate(value: Date | string): string {
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (value instanceof Date) {
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, '0');
+    const d = String(value.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
   return String(value).slice(0, 10);
 }
 
