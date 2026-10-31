@@ -1,0 +1,86 @@
+/* Shared presentation for the existing company, PIN and opening-cash flow. */
+:is(.company-id-screen, .pin-auth-screen, .opening-cash-screen) {
+  width: min(100% - 32px, 440px);
+  margin: clamp(24px, 8vh, 80px) auto;
+  padding: clamp(20px, 5vw, 32px);
+  border: 1px solid var(--pos-border);
+  border-radius: var(--pos-radius);
+  background: var(--pos-surface);
+  color: var(--pos-text);
+}
+
+:is(.company-id-screen, .pin-auth-screen, .opening-cash-screen) h1 {
+  margin: 0 0 var(--pos-space-2);
+  font-size: 1.5rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+:is(.company-id-screen, .pin-auth-screen, .opening-cash-screen) p {
+  margin: 0 0 var(--pos-space-5);
+  color: var(--pos-text-muted);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+:is(.company-id-screen, .pin-auth-screen, .opening-cash-screen) form {
+  display: grid;
+  gap: var(--pos-space-4);
+}
+
+:is(.company-id-screen, .pin-auth-screen, .opening-cash-screen) label {
+  display: grid;
+  gap: var(--pos-space-2);
+  margin-bottom: var(--pos-space-4);
+  font-weight: 600;
+}
+
+:is(.company-id-screen, .pin-auth-screen) form label {
+  margin-bottom: 0;
+}
+
+:is(.company-id-screen, .pin-auth-screen, .opening-cash-screen) :is(input, select, button) {
+  width: 100%;
+  min-height: var(--pos-touch);
+  padding: var(--pos-space-3) var(--pos-space-4);
+  border: 1px solid var(--pos-border);
+  border-radius: var(--pos-radius);
+  font: inherit;
+}
+
+:is(.company-id-screen, .pin-auth-screen, .opening-cash-screen) :is(input, select) {
+  background: var(--pos-bg);
+  color: var(--pos-text);
+}
+
+:is(.company-id-screen, .pin-auth-screen, .opening-cash-screen) input:focus-visible {
+  outline: 2px solid var(--pos-accent);
+  outline-offset: 2px;
+}
+
+:is(.company-id-screen, .pin-auth-screen, .opening-cash-screen) button {
+  background: var(--pos-accent);
+  border-color: var(--pos-accent);
+  color: #101820;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+:is(.pin-auth-screen, .opening-cash-screen) > button:last-child {
+  margin-top: var(--pos-space-3);
+  border-color: var(--pos-border);
+  background: transparent;
+  color: var(--pos-text);
+}
+
+:is(.company-id-screen, .pin-auth-screen, .opening-cash-screen) button:disabled {
+  background: var(--pos-surface-2);
+  border-color: var(--pos-border);
+  color: var(--pos-text-muted);
+  cursor: not-allowed;
+}
+
+:is(.company-id-screen, .pin-auth-screen, .opening-cash-screen) [role='alert'] {
+  margin: 0 0 var(--pos-space-4);
+  color: var(--pos-danger);
+}
