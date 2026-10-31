@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import type { CatalogModifierGroup, OrderLine } from '../api/types.js';
 import './ModifierConfigurationModal.css';
+import { useDialogFocus } from './useDialogFocus.js';
 
 type Props = {
   line: OrderLine;
@@ -28,6 +29,7 @@ function initialSelections(groups: CatalogModifierGroup[]): Record<string, strin
 
 export function ModifierConfigurationModal({ line, groups, busy, onConfirm, onCancel }: Props) {
   const titleId = useId();
+  const dialogRef = useDialogFocus(busy ? null : onCancel);
   const [byGroup, setByGroup] = useState<Record<string, string[]>>(() => initialSelections(groups));
   const [guestNote, setGuestNote] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +80,7 @@ export function ModifierConfigurationModal({ line, groups, busy, onConfirm, onCa
   };
 
   return (
-    <div className="pos-mod-modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+    <div ref={dialogRef} tabIndex={-1} className="pos-mod-modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
       <div className="pos-mod-modal__panel">
         <h3 id={titleId} className="pos-mod-modal__title">
           Configure — {line.catalogItemName}
