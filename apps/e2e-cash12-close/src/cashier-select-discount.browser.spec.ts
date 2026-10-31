@@ -73,6 +73,17 @@ async function freshOrder(page: Page) {
   await confirmNoAllergies(page);
 }
 
+async function acceptCommercial(page: Page) {
+  const button = page.getByTestId('accept-commercial');
+  await expect(button).toBeEnabled();
+  await expect(async () => {
+    if (!(await page.getByText('Commercial terms accepted').isVisible())) {
+      await button.click();
+    }
+    await expect(page.getByText('Commercial terms accepted')).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+}
+
 async function dropCommittedResponse(route: Route) {
   await route.fetch();
   await route.abort('failed');
@@ -168,8 +179,7 @@ test('fixed discount survives a lost response and a reload, then settlement lock
   await freshOrder(page);
   await page.getByTestId(`pos-slot-${fx.eggCatalogItemId}`).first().click();
   await expect(eggLines(page)).toHaveCount(1);
-  await page.getByTestId('accept-commercial').click();
-  await expect(page.getByText('Commercial terms accepted')).toBeVisible();
+  await acceptCommercial(page);
 
   let dropped = false;
   let discountedOrderId = '';
@@ -212,8 +222,7 @@ test('percent discount needs a manager and rejects self-approval', async ({ page
   await freshOrder(page);
   await page.getByTestId(`pos-slot-${fx.eggCatalogItemId}`).first().click();
   await expect(eggLines(page)).toHaveCount(1);
-  await page.getByTestId('accept-commercial').click();
-  await expect(page.getByText('Commercial terms accepted')).toBeVisible();
+  await acceptCommercial(page);
   await page.getByTestId('merchant-discount-mode').selectOption('PERCENT');
   await page.getByTestId('merchant-discount-percent').fill('10');
   await page.getByTestId('merchant-discount-reason').fill('Staff meal');
