@@ -61,3 +61,9 @@
   font-family: var(--pos-font-mono);
   color: var(--pos-text-muted);
 }
+
+.pos-line-editor__error {
+  margin: 0;
+  color: var(--pos-danger);
+  font-size: 0.85rem;
+}
