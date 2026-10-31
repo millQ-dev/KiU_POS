@@ -49,9 +49,13 @@ export function sessionFetch(path: string, init?: RequestInit): Promise<Response
 export async function fetchCurrentSession(): Promise<SessionUser | null> {
   const res = await sessionFetch('/api/v1/identity/session');
   if (res.status === 401) return null;
-  if (!res.ok) return null;
+  if (!res.ok) throw new Error('SESSION_UNAVAILABLE');
   const body = (await res.json()) as SessionUser & { sessionToken?: string; tenantId?: string };
-  if (body.sessionToken || body.tenantId) return null;
+  if (!body || body.sessionToken || body.tenantId || typeof body.userId !== 'string' ||
+      typeof body.displayName !== 'string' ||
+      (body.employeeId !== null && typeof body.employeeId !== 'string')) {
+    throw new Error('SESSION_INVALID_RESPONSE');
+  }
   return {
     userId: body.userId,
     employeeId: body.employeeId,
