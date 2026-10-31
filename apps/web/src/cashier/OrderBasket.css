@@ -125,3 +125,12 @@
   color: var(--pos-text-muted);
   line-height: 1.4;
 }
+
+/* Keep order lines inspectable when controls take more space than the viewport. */
+.pos-basket {
+  overflow-y: auto;
+}
+
+.pos-basket__lines {
+  flex: 1 0 110px;
+}
