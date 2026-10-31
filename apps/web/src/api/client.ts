@@ -286,8 +286,11 @@ export const posApi = {
     eligibleBasisMinor: string;
     reason: string;
     approvalRequestId: string | null;
+    approverUserId: string;
     certainty: 'FINAL';
     netMerchandiseSalesMinor: string;
+    semanticFingerprint: string;
+    lines: Array<{ orderLineId: string; lineNumber: number; allocatedOrderMerchantDiscountMinor: string; netMerchandiseSalesMinor: string }>;
   }> {
     return request('POST', `/api/v1/orders/${orderId}/apply-merchant-discount`, payload);
   },
