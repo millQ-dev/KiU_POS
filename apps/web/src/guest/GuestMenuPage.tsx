@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { GuestMenuDto } from './types.js';
 import './GuestMenuPage.css';
 
@@ -17,34 +17,38 @@ function formatPrice(amountMinor: string, currencyCode: string, exponent: number
 
 export function GuestMenuPage({ opaqueToken }: { opaqueToken: string }) {
   const [lang, setLang] = useState('en');
-  const [menu, setMenu] = useState<GuestMenuDto | null>(null);
+  const [menuResult, setMenuResult] = useState<{ token: string; menu: GuestMenuDto } | null>(null);
+  const menu = menuResult?.token === opaqueToken ? menuResult.menu : null;
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/v1/public/guest-menu/${encodeURIComponent(opaqueToken)}?lang=${lang}`);
-      if (!res.ok) {
-        setMenu(null);
-        setError('Menu unavailable');
-        return;
-      }
-      setMenu((await res.json()) as GuestMenuDto);
-    } catch {
-      setMenu(null);
-      setError('Menu unavailable');
-    } finally {
-      setLoading(false);
-    }
-  }, [opaqueToken, lang]);
+  const [retry, setRetry] = useState(0);
+  const requestGeneration = useRef(0);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    const generation = ++requestGeneration.current;
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+    void (async () => {
+      try {
+        const res = await fetch(`/api/v1/public/guest-menu/${encodeURIComponent(opaqueToken)}?lang=${lang}`, { signal: controller.signal });
+        if (!res.ok) throw new Error('Menu unavailable');
+        const result = (await res.json()) as GuestMenuDto;
+        if (requestGeneration.current === generation) setMenuResult({ token: opaqueToken, menu: result });
+      } catch {
+        if (requestGeneration.current === generation) setError('Menu unavailable');
+      } finally {
+        if (requestGeneration.current === generation) setLoading(false);
+      }
+    })();
+    return () => {
+      requestGeneration.current += 1;
+      controller.abort();
+    };
+  }, [opaqueToken, lang, retry]);
 
-  if (loading && !menu) {
+  if ((loading || (!error && menuResult?.token !== opaqueToken)) && !menu) {
     return (
       <main className="gm-page">
         <p className="gm-muted">Loading menu…</p>
@@ -55,7 +59,8 @@ export function GuestMenuPage({ opaqueToken }: { opaqueToken: string }) {
   if (error || !menu) {
     return (
       <main className="gm-page">
-        <p className="gm-error">{error ?? 'Menu unavailable'}</p>
+        <p className="gm-error" role="alert">{error ?? 'Menu unavailable'}</p>
+        <button type="button" onClick={() => setRetry((n) => n + 1)}>Try again</button>
       </main>
     );
   }
@@ -74,7 +79,12 @@ export function GuestMenuPage({ opaqueToken }: { opaqueToken: string }) {
               key={l.code}
               type="button"
               className={lang === l.code ? 'gm-lang gm-lang-active' : 'gm-lang'}
-              onClick={() => setLang(l.code)}
+              onClick={() => {
+                if (lang === l.code) return;
+                requestGeneration.current += 1;
+                setLoading(true);
+                setLang(l.code);
+              }}
             >
               {l.label}
             </button>
@@ -82,7 +92,7 @@ export function GuestMenuPage({ opaqueToken }: { opaqueToken: string }) {
         </div>
       </header>
 
-      {menu.categories.map((cat) => (
+      {loading ? <p className="gm-muted" role="status">Loading menu…</p> : menu.categories.map((cat) => (
         <section key={cat.publicCategoryRef} className="gm-section">
           <h2 className="gm-section-title">{cat.name}</h2>
           <ul className="gm-list">
