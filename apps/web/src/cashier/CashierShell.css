@@ -116,3 +116,35 @@
     border-bottom: 1px solid var(--pos-border);
   }
 }
+
+@media (max-width: 900px) {
+  .pos-shell__header {
+    flex-shrink: 0;
+  }
+
+  .pos-shell__body {
+    overflow-y: auto;
+  }
+
+  .pos-shell__body .pos-nav {
+    flex: 0 0 auto;
+    overflow-x: auto;
+  }
+
+  .pos-shell__body .pos-nav__list {
+    flex-direction: row;
+    width: max-content;
+  }
+
+  .pos-shell__body .pos-nav__btn {
+    white-space: nowrap;
+  }
+
+  .pos-shell__main {
+    flex: 0 0 clamp(300px, 45vh, 500px);
+  }
+
+  .pos-shell__body .pos-basket {
+    flex: 0 0 clamp(300px, 60vh, 600px);
+  }
+}
