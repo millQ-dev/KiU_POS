@@ -18,6 +18,7 @@ import {
   PERMISSION_CASH_SHIFT_CLOSE,
   PERMISSION_CASH_SHIFT_CLOSE_SHORTAGE,
   PERMISSION_CASH_SHIFT_OPEN,
+  PERMISSION_ORDERS_MERCHANT_DISCOUNT_APPROVE,
   PERMISSION_PAYMENTS_RECEIVE_CASH,
   PERMISSION_POS_OPERATE,
 } from '../modules/identity/index.js';
@@ -45,6 +46,7 @@ const PEPPER = resolvePinPepper(loadEnv());
 const MANAGER_PIN = '654321';
 const NO_RECEIVE_PIN = '111111';
 const EGG_PRICE_MINOR = '5000';
+const MEAT_PRICE_MINOR = '20000';
 const OPENING_MINOR = '100000';
 
 async function truncate(pool: pg.Pool) {
@@ -120,7 +122,7 @@ async function seedPosSurface(
   });
   await menu.setMenuDefinitionItems({
     menuDefinitionId: def.menuDefinitionId,
-    catalogItemIds: [fx.eggItemId],
+    catalogItemIds: [fx.eggItemId, fx.meatItemId],
   });
   const mpub = await menu.publishMenu({
     menuDefinitionId: def.menuDefinitionId,
@@ -146,6 +148,17 @@ async function seedPosSurface(
     effectiveFrom: '2020-01-01T00:00:00.000Z',
     idempotencyKey: `e2e-pe-${randomUUID()}`,
   });
+  await menu.activatePriceRule({
+    tenantId: fx.tenantId,
+    catalogItemId: fx.meatItemId,
+    scopeKind: 'OUTLET',
+    outletId: fx.outletId,
+    amountMinor: MEAT_PRICE_MINOR,
+    currencyCode: 'VND',
+    minorUnitExponent: 0,
+    effectiveFrom: '2020-01-01T00:00:00.000Z',
+    idempotencyKey: `e2e-pm-${randomUUID()}`,
+  });
 
   const ldef = await layout.createLayoutDefinition({
     tenantId: fx.tenantId,
@@ -160,6 +173,7 @@ async function seedPosSurface(
     layoutDefinitionId: ldef.layoutDefinitionId,
     slots: [
       { zone: 'PAGE', pageCode: 'main', catalogItemId: fx.eggItemId, position: 1 },
+      { zone: 'PAGE', pageCode: 'main', catalogItemId: fx.meatItemId, position: 2 },
       { zone: 'QUICK_ACCESS', catalogItemId: fx.eggItemId, position: 1 },
     ],
   });
@@ -227,7 +241,7 @@ async function main() {
       taxTreatment: 'STANDARD_RATE',
       rateDecimal: '0.08',
       taxableBaseRule: 'TB_CUSTOMER_PAYABLE_MERCHANDISE_SHARE',
-      catalogItemIds: [fx.eggItemId],
+      catalogItemIds: [fx.eggItemId, fx.meatItemId],
       inclusiveRounding: { roundingMode: 'HALF_UP', quantumMinor: '1' },
     });
     const fiscal = new FiscalService(pool);
@@ -332,6 +346,7 @@ async function main() {
         { permissionKey: PERMISSION_CASH_SHIFT_CLOSE, outletId: fx.outletId },
         { permissionKey: PERMISSION_CASH_SHIFT_CLOSE_SHORTAGE, outletId: fx.outletId },
         { permissionKey: PERMISSION_PAYMENTS_RECEIVE_CASH, outletId: fx.outletId },
+        { permissionKey: PERMISSION_ORDERS_MERCHANT_DISCOUNT_APPROVE, outletId: fx.outletId },
       ],
     });
     await identity.provisionUserWithPin({
@@ -357,7 +372,9 @@ async function main() {
       brandId: fx.brandId,
       terminalId,
       eggCatalogItemId: fx.eggItemId,
+      meatCatalogItemId: fx.meatItemId,
       eggPriceMinor: EGG_PRICE_MINOR,
+      meatPriceMinor: MEAT_PRICE_MINOR,
       tenderDefinitionId: tenders.tenderDefinitionId,
       disabledTenderDefinitionId: tenders.disabledTenderDefinitionId,
       companyCode: company.rows[0]!.company_code,

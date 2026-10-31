@@ -24,7 +24,7 @@ Combined C0 Golden Path verified with disposable fiscal test adapter; production
 | Fiscal G2 | **OPEN.** ADR-0053 sandbox accept does not close G2-01 through G2-18 and does not authorize production issuance. #152 adds local sandbox binding and intent recovery. That path does not call a provider and does not satisfy `FiscalCheckoutGate`. |
 | QR / card collection | **Not implemented.** An honesty screen is not collection. |
 | Offline sync | **Not implemented.** ADR-0018 is Accepted. There is no POS sync runtime. |
-| Cashier merchant discount UI | **Present (UI).** CashierShell/OrderBasket hosts `MerchantDiscountPanel` against ADR-0051 apply + ApprovalRequest. FIXED_MINOR / PERCENT, mandatory reason, manager approval when the cashier lacks `orders.merchant_discount.approve`, server totals from the apply response, durable idempotency for lost responses, locked after settlement opens. No new permissions or money rules. |
+| Cashier merchant discount UI | **Present (UI).** CashierShell/OrderBasket hosts `MerchantDiscountPanel` against ADR-0051 apply + ApprovalRequest. FIXED_MINOR / PERCENT, mandatory reason, manager approval when the cashier lacks `orders.merchant_discount.approve`, server totals from the apply response, durable idempotency for lost responses, locked after settlement opens. No new permissions or money rules. Disposable PostgreSQL Playwright coverage is `apps/e2e-cash12-close/src/cashier-select-discount.browser.spec.ts`. The Depot disposable PostgreSQL job runs that spec. The existing CASH1.2 browser file stays on the GitHub disposable job. The stack uses the disposable fiscal test adapter only. A full page reload still opens a new in-memory order; the original settlement payable is read back with an authenticated GET. |
 
 The eleven KIU-MOD invariants, as that audit recorded them:
 
@@ -119,7 +119,7 @@ That audit reported no accepted-scope backend defect. It also recorded that ther
 
 ## Next
 
-1. Track P stays incomplete until the cashier merchant-discount screen exists, or until a recorded decision defers that item. Combined C0 Golden Path verified with disposable fiscal test adapter; production POSV1_NO_GO remains. This file does not assign the remaining work.
+1. Track P stays incomplete. The cashier merchant-discount screen is present. QR collection, card collection, and post-pay void stay as recorded above. Combined C0 Golden Path verified with disposable fiscal test adapter; production POSV1_NO_GO remains. This file does not assign the remaining work.
 2. R1.1 Floor/Table stays HOLD. The written entry gate is still closed. Do not start Floor runtime, and do not reserve a migration number, until that gate is opened on purpose.
 3. Obey MWR arming order (A after PR open; B after Bugbot+AI review on HEAD; C after PO ACCEPT)
 4. No VietQR payout / G2 claim / DeviceIdentity / fabricated paid QR; no prod deploy / persistent migrate without separate PO GO
