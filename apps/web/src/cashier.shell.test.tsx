@@ -710,7 +710,7 @@ describe('CashierShell integration (mocked API)', () => {
     expect(mockedApi.openSettlement).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['tax-read-failed', 'checkout-tax-rejected'])(
+  it.each(['tax-read-failed', 'checkout-tax-rejected', 'payable-unavailable', 'idempotency-conflict'])(
     'does not leave the basket locked for a definite checkout rejection: %s',
     async (scenario) => {
       mockedApi.resolveSurface.mockResolvedValue(surfaceWith(activeCount()));
@@ -722,7 +722,11 @@ describe('CashierShell integration (mocked API)', () => {
       } else {
         mockedApi.acceptTaxSnapshot.mockResolvedValueOnce({ taxOrderSnapshotId: 'tax-test' } as never);
         mockedApi.openSettlement.mockRejectedValueOnce(
-          new ApiError(400, 'SETTLEMENT_TAX_SNAPSHOT_REQUIRED', 'Tax required'),
+          scenario === 'payable-unavailable'
+            ? new ApiError(400, 'SETTLEMENT_PAYABLE_UNAVAILABLE', 'Payable unavailable')
+            : scenario === 'idempotency-conflict'
+              ? new ApiError(409, 'IDEMPOTENCY_CONFLICT', 'Conflict')
+              : new ApiError(400, 'SETTLEMENT_TAX_SNAPSHOT_REQUIRED', 'Tax required'),
         );
       }
       render(<CashierShell context={ctx} />);
