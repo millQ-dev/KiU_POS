@@ -3,6 +3,7 @@ import type { ResolvedPosSlot } from '../api/types.js';
 import { formatMoneyDisplay } from '../money/formatMoneyDisplay.js';
 import { isValidWeightedQuantityString } from './quantityInput.js';
 import './QuantityEntryModal.css';
+import { useDialogFocus } from './useDialogFocus.js';
 
 type Props = {
   slot: ResolvedPosSlot;
@@ -13,6 +14,7 @@ type Props = {
 
 export function QuantityEntryModal({ slot, busy, onConfirm, onCancel }: Props) {
   const titleId = useId();
+  const dialogRef = useDialogFocus(busy ? null : onCancel);
   const [qty, setQty] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -31,7 +33,7 @@ export function QuantityEntryModal({ slot, busy, onConfirm, onCancel }: Props) {
   };
 
   return (
-    <div className="pos-qty-modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+    <div ref={dialogRef} tabIndex={-1} className="pos-qty-modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
       <div className="pos-qty-modal__panel">
         <h3 id={titleId} className="pos-qty-modal__title">
           Enter quantity — {slot.displayLabel}
@@ -44,7 +46,7 @@ export function QuantityEntryModal({ slot, busy, onConfirm, onCancel }: Props) {
           Quantity ({slot.baseUnit})
           <input
             className="pos-qty-modal__input"
-            autoFocus
+            data-dialog-initial-focus
             inputMode="decimal"
             value={qty}
             disabled={busy}
@@ -58,7 +60,6 @@ export function QuantityEntryModal({ slot, busy, onConfirm, onCancel }: Props) {
                 e.preventDefault();
                 submit();
               }
-              if (e.key === 'Escape') onCancel();
             }}
           />
         </label>

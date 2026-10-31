@@ -8,6 +8,7 @@ import {
 } from '../api/allergenApi.js';
 import type { OrderLine } from '../api/types.js';
 import './AllergenPanel.css';
+import { useDialogFocus } from './useDialogFocus.js';
 
 const CODE_PATTERN = /^[A-Z][A-Z0-9_]{1,31}$/;
 
@@ -61,6 +62,9 @@ export function AllergenPanel({ orderId, lines, editable, refreshKey, suggestedC
   const [codesInput, setCodesInput] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [changing, setChanging] = useState(false);
+  const needsPrompt = editable && (changing || (loaded && !state?.context));
+  const dialogVisible = needsPrompt && !(loadError && !state?.context);
+  const dialogRef = useDialogFocus(changing && !busy ? () => setChanging(false) : null, dialogVisible);
 
   useEffect(() => {
     activeOrderIdRef.current = orderId;
@@ -163,8 +167,6 @@ export function AllergenPanel({ orderId, lines, editable, refreshKey, suggestedC
     }
   };
 
-  const needsPrompt = editable && (changing || (loaded && !state?.context));
-
   if (loadError && !state?.context) {
     return (
       <div className="pos-allergen pos-allergen--error" role="alert" data-testid="allergen-load-error">
@@ -234,17 +236,31 @@ export function AllergenPanel({ orderId, lines, editable, refreshKey, suggestedC
       )}
 
       {needsPrompt && (
-        <div className="pos-allergen-modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+        <div ref={dialogRef} tabIndex={-1} className="pos-allergen-modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
           <div className="pos-allergen-modal__panel">
             <h3 id={titleId} className="pos-allergen-modal__title">
               Ask guests about allergies
             </h3>
-            <div className="pos-allergen-modal__choices" role="radiogroup" aria-label="Allergy answer">
-              {(Object.keys(CHOICE_LABEL) as AllergenCaptureChoice[]).map((c) => (
+            <div className="pos-allergen-modal__choices" role="radiogroup" aria-label="Allergy answer"
+              onKeyDown={(event) => {
+                const forward = event.key === 'ArrowRight' || event.key === 'ArrowDown';
+                const backward = event.key === 'ArrowLeft' || event.key === 'ArrowUp';
+                if (!forward && !backward) return;
+                const choices = Object.keys(CHOICE_LABEL) as AllergenCaptureChoice[];
+                const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]'));
+                const current = Math.max(0, buttons.indexOf(document.activeElement as HTMLButtonElement));
+                const next = (current + (forward ? 1 : -1) + choices.length) % choices.length;
+                event.preventDefault();
+                setChoice(choices[next]!);
+                setFormError(null);
+                buttons[next]?.focus();
+              }}>
+              {(Object.keys(CHOICE_LABEL) as AllergenCaptureChoice[]).map((c, index) => (
                 <button
                   key={c}
                   type="button"
                   role="radio"
+                  tabIndex={choice === c || (choice === null && index === 0) ? 0 : -1}
                   aria-checked={choice === c}
                   className={`pos-allergen__btn${choice === c ? ' pos-allergen__btn--on' : ''}`}
                   onClick={() => {
@@ -262,7 +278,6 @@ export function AllergenPanel({ orderId, lines, editable, refreshKey, suggestedC
                 <input
                   className="pos-allergen-modal__input"
                   value={codesInput}
-                  autoFocus
                   aria-label="Allergen codes"
                   placeholder="MILK, EGG"
                   onChange={(e) => {
