@@ -72,10 +72,11 @@ function mockFetchSequence(
 ): ReturnType<typeof vi.fn> {
   const fn = vi.fn();
   for (const r of responses) {
-    fn.mockResolvedValueOnce({
-      ok: r.status >= 200 && r.status < 300,
-      status: r.status,
-      json: async () => r.body,
+    fn.mockImplementationOnce(async (_url: string, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body ?? '{}')) as { closeIdempotencyKey?: string };
+      const body = r.body as Record<string, unknown>;
+      return { ok: r.status >= 200 && r.status < 300, status: r.status,
+        json: async () => body?.closeIdempotencyKey === 'k' ? { ...body, closeIdempotencyKey: request.closeIdempotencyKey } : body };
     });
   }
   return fn;
@@ -258,6 +259,45 @@ describe('ClosingCashScreen', () => {
     await waitFor(() => expect(screen.getByTestId('closing-cash-success')).toBeTruthy());
     expect(new Set(keys).size).toBe(1);
     expect(keys.length).toBe(2);
+  });
+
+  it.each(['wrong-key', 'incomplete', 'wrong-amount'])('does not accept %s closed response as confirmation', async (scenario) => {
+    global.fetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body ?? '{}')) as { closeIdempotencyKey: string };
+      const body = scenario === 'incomplete' ? { status: 'CLOSED', cashShiftId: shift.cashShiftId, closeIdempotencyKey: request.closeIdempotencyKey } :
+        closedBody({ closeIdempotencyKey: scenario === 'wrong-key' ? 'another-key' : request.closeIdempotencyKey,
+          actualAmountMinor: scenario === 'wrong-amount' ? '999' : '100000' });
+      return { ok: true, status: 200, json: async () => body };
+    }) as unknown as typeof fetch;
+    renderScreen();
+    enterCounted('100000');
+    fireEvent.click(screen.getByTestId('close-submit'));
+    await screen.findByTestId('close-unknown');
+    expect(screen.queryByTestId('closing-cash-success')).toBeNull();
+    expect((screen.getByTestId('close-actual-input') as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it('retains the identical close payload and remains locked after a failed retry', async () => {
+    const payloads: unknown[] = [];
+    global.fetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      payloads.push(JSON.parse(String(init?.body)));
+      if (payloads.length === 1) throw new TypeError('lost response');
+      return { ok: false, status: 403, json: async () => ({ error: 'FORBIDDEN' }) };
+    }) as unknown as typeof fetch;
+    const onCancel = vi.fn();
+    renderScreen({ onCancel });
+    enterCounted('90000');
+    fireEvent.change(screen.getByTestId('close-reason-input'), { target: { value: 'Counted twice' } });
+    fireEvent.click(screen.getByTestId('close-submit'));
+    await screen.findByTestId('close-unknown');
+    expect((screen.getByTestId('close-actual-input') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByTestId('close-reason-input') as HTMLTextAreaElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Back to cashier' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('close-submit'));
+    await waitFor(() => expect(payloads).toHaveLength(2));
+    expect(payloads[1]).toEqual(payloads[0]);
+    expect(screen.getByTestId('close-unknown')).toBeTruthy();
+    expect(onCancel).not.toHaveBeenCalled();
   });
 
   it('IDEMPOTENCY_CONFLICT does not recommend changing count or reason', async () => {
