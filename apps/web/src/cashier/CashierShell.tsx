@@ -134,7 +134,26 @@ function selectionDefinitelyRejected(err: unknown): boolean {
   ].includes(err.code));
 }
 
+function checkoutDefinitelyRejected(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  return err.status === 401 || err.status === 403 || (err.status === 409 && [
+    'SETTLEMENT_ABORT_FORBIDDEN',
+    'SETTLEMENT_STALE_VERSION',
+    'SETTLEMENT_ALREADY_OPEN',
+  ].includes(err.code)) || (err.status === 400 && [
+    'SETTLEMENT_COMMERCIAL_TERMS_NOT_CURRENT',
+    'SETTLEMENT_TAX_APPLICABILITY_UNDECIDED',
+    'SETTLEMENT_TAX_SNAPSHOT_REQUIRED',
+    'SETTLEMENT_TAX_SNAPSHOT_INVALID',
+  ].includes(err.code));
+}
+
 type SelectionRecovery = { orderId: string; phase: 'loading' | 'failed' | 'review' };
+type CheckoutRecovery = {
+  orderId: string;
+  phase: 'loading' | 'failed' | 'review';
+  cause: 'read' | 'mutation';
+};
 
 export function CashierShell({
   context,
@@ -170,23 +189,33 @@ export function CashierShell({
   const inFlightRef = useRef(false);
   const recoveryRef = useRef<SelectionRecovery | null>(null);
   const [recovery, setRecovery] = useState<SelectionRecovery | null>(null);
+  const checkoutRecoveryRef = useRef<CheckoutRecovery | null>(null);
+  const [checkoutRecovery, setCheckoutRecovery] = useState<CheckoutRecovery | null>(null);
   const orderIdRef = useRef<string | null>(null);
+  const settlementGenerationRef = useRef(0);
 
   const updateRecovery = (next: SelectionRecovery | null) => {
     recoveryRef.current = next;
     setRecovery(next);
   };
 
+  const updateCheckoutRecovery = useCallback((next: CheckoutRecovery | null) => {
+    checkoutRecoveryRef.current = next;
+    setCheckoutRecovery(next);
+  }, []);
+
   useEffect(() => () => {
     orderIdRef.current = null;
     recoveryRef.current = null;
+    checkoutRecoveryRef.current = null;
+    settlementGenerationRef.current += 1;
   }, []);
 
   const liveSettlement =
     settlement && (settlement.state === 'COLLECTING' || settlement.state === 'SATISFIED')
       ? settlement
       : null;
-  const editable = order?.status === 'OPEN' && !liveSettlement && !recovery;
+  const editable = order?.status === 'OPEN' && !liveSettlement && !recovery && !checkoutRecovery && !orderLoading;
 
   const applyOrder = useCallback((next: OrderBasket, preferLineId?: string | null) => {
     orderIdRef.current = next.orderId;
@@ -209,13 +238,22 @@ export function CashierShell({
   }, []);
 
   const reloadSettlement = useCallback(async (orderId: string) => {
+    const generation = ++settlementGenerationRef.current;
     try {
       const res = await posApi.getLiveSettlement(orderId);
+      if (!res || res.orderId !== orderId || !('settlement' in res) ||
+          (res.settlement !== null && !isSettlementFor(res.settlement, orderId))) {
+        throw new Error('Invalid settlement response');
+      }
+      if (orderIdRef.current !== orderId || settlementGenerationRef.current !== generation) return;
       setSettlement(res.settlement);
+      return res.settlement;
     } catch {
-      setSettlement(null);
+      if (orderIdRef.current === orderId && settlementGenerationRef.current === generation) {
+        updateCheckoutRecovery({ orderId, phase: 'failed', cause: 'read' });
+      }
     }
-  }, []);
+  }, [updateCheckoutRecovery]);
 
   const reloadAuthoritativeOrder = useCallback(
     async (orderId: string, preferLineId?: string | null) => {
@@ -291,8 +329,9 @@ export function CashierShell({
   }, [surface, selectedPageId]);
 
   const withMutationGuard = async (fn: () => Promise<void>) => {
-    if (inFlightRef.current || recoveryRef.current) return;
+    if (inFlightRef.current || recoveryRef.current || checkoutRecoveryRef.current) return;
     inFlightRef.current = true;
+    settlementGenerationRef.current += 1;
     setMutationBusy(true);
     setFeedback(null);
     try {
@@ -301,6 +340,43 @@ export function CashierShell({
       inFlightRef.current = false;
       setMutationBusy(false);
     }
+  };
+
+  const reconcileCheckout = async (orderId: string) => {
+    if (orderIdRef.current !== orderId || checkoutRecoveryRef.current?.phase === 'loading') return;
+    const cause = checkoutRecoveryRef.current?.cause;
+    if (!cause) return;
+    const generation = ++settlementGenerationRef.current;
+    updateCheckoutRecovery({ orderId, phase: 'loading', cause });
+    try {
+      const [next, status, live] = await Promise.all([
+        posApi.getOrder(orderId),
+        posApi.getCommercialStatus(orderId),
+        posApi.getLiveSettlement(orderId),
+      ]);
+      if (!isOrderFor(next, orderId) || !isCommercialFor(status, orderId) ||
+          !live || live.orderId !== orderId || !('settlement' in live) ||
+          (live.settlement !== null && !isSettlementFor(live.settlement, orderId))) {
+        throw new Error('Invalid checkout recovery response');
+      }
+      if (orderIdRef.current !== orderId || settlementGenerationRef.current !== generation ||
+          checkoutRecoveryRef.current?.orderId !== orderId) return;
+      applyOrder(next, null);
+      setCommercial(status);
+      setSettlement(live.settlement);
+      updateCheckoutRecovery(cause === 'read' ? null : { orderId, phase: 'review', cause });
+    } catch {
+      if (orderIdRef.current === orderId && settlementGenerationRef.current === generation &&
+          checkoutRecoveryRef.current?.orderId === orderId) {
+        updateCheckoutRecovery({ orderId, phase: 'failed', cause });
+      }
+    }
+  };
+
+  const startCheckoutRecovery = async (orderId: string, err: unknown, cause: 'read' | 'mutation') => {
+    updateCheckoutRecovery({ orderId, phase: 'failed', cause });
+    setFeedback(err instanceof ApiError ? feedbackForApiError(err) : 'Checkout response was not confirmed.');
+    await reconcileCheckout(orderId);
   };
 
   const reconcileSelection = async (orderId: string) => {
@@ -374,7 +450,7 @@ export function CashierShell({
   };
 
   const onSelectSlot = async (slot: ResolvedPosSlot) => {
-    if (recoveryRef.current || inFlightRef.current) return;
+    if (recoveryRef.current || checkoutRecoveryRef.current || inFlightRef.current) return;
     if (!order || order.status !== 'OPEN') {
       setFeedback('Open an order first');
       return;
@@ -562,6 +638,7 @@ export function CashierShell({
     if (!order || !editable) return;
     void withMutationGuard(async () => {
       setSettlementBusy(true);
+      let checkoutRequested = false;
       try {
         // ADR-0037: attempt Tax snapshot before OpenSettlement. When tax_required=FALSE and
         // no TaxPolicy exists, accept may fail — OpenSettlement remains the fail-closed gate.
@@ -579,13 +656,17 @@ export function CashierShell({
             throw taxErr;
           }
         }
+        checkoutRequested = true;
         const next = await posApi.openSettlement(order.orderId, {
           idempotencyKey: `open-settlement:${order.orderId}:${commercialKey}`,
         });
+        if (!isSettlementFor(next, order.orderId)) throw new Error('Invalid checkout response');
         setSettlement(next);
         setFeedback('Checkout opened — Customer Payable frozen');
       } catch (err) {
-        await handleMutationError(err, order.orderId);
+        await startCheckoutRecovery(
+          order.orderId, err, !checkoutRequested || checkoutDefinitelyRejected(err) ? 'read' : 'mutation',
+        );
       } finally {
         setSettlementBusy(false);
       }
@@ -600,11 +681,12 @@ export function CashierShell({
         const next = await posApi.abortSettlement(liveSettlement.settlementGroupId, {
           expectedVersion: liveSettlement.version,
         });
+        if (!isSettlementFor(next, order.orderId)) throw new Error('Invalid checkout response');
         setSettlement(next.state === 'ABORTED' ? null : next);
         setFeedback('Checkout aborted — order editable again');
         await reloadCommercial(order.orderId);
       } catch (err) {
-        await handleMutationError(err, order.orderId);
+        await startCheckoutRecovery(order.orderId, err, checkoutDefinitelyRejected(err) ? 'read' : 'mutation');
       } finally {
         setSettlementBusy(false);
       }
@@ -612,17 +694,12 @@ export function CashierShell({
   };
 
   const onSettlementRefresh = async () => {
-    if (!order) return;
-    try {
-      const res = await posApi.getLiveSettlement(order.orderId);
-      setSettlement(res.settlement);
-      if (res.settlement?.state === 'SATISFIED') {
-        setFeedback(
-          'Settlement SATISFIED — cash collection recorded. Issue fiscal evidence before CompleteOrder.',
-        );
-      }
-    } catch (err) {
-      await handleMutationError(err, order.orderId);
+    if (!order || recoveryRef.current || checkoutRecoveryRef.current || inFlightRef.current) return;
+    const next = await reloadSettlement(order.orderId);
+    if (next?.state === 'SATISFIED') {
+      setFeedback(
+        'Settlement SATISFIED — cash collection recorded. Issue fiscal evidence before CompleteOrder.',
+      );
     }
   };
 
@@ -667,12 +744,12 @@ export function CashierShell({
             type="button"
             className="pos-shell__btn"
             onClick={() => void loadSurface()}
-            disabled={surfaceLoading || !!recovery}
+            disabled={surfaceLoading || !!recovery || !!checkoutRecovery}
           >
             Refresh surface
           </button>
           {!production && onChangeContext ? (
-            <button type="button" className="pos-shell__btn" disabled={!!recovery} onClick={onChangeContext}>
+            <button type="button" className="pos-shell__btn" disabled={!!recovery || !!checkoutRecovery} onClick={onChangeContext}>
               Change context
             </button>
           ) : null}
@@ -681,14 +758,14 @@ export function CashierShell({
               type="button"
               className="pos-shell__btn"
               data-testid="open-close-cash-shift"
-              disabled={!!recovery}
+              disabled={!!recovery || !!checkoutRecovery}
               onClick={onCloseCashShift}
             >
               Close cash shift
             </button>
           ) : null}
           {production && onSignOut ? (
-            <button type="button" className="pos-shell__btn" disabled={!!recovery} onClick={onSignOut}>
+            <button type="button" className="pos-shell__btn" disabled={!!recovery || !!checkoutRecovery} onClick={onSignOut}>
               Sign out
             </button>
           ) : null}
@@ -730,7 +807,31 @@ export function CashierShell({
         </div>
       )}
 
-      <fieldset disabled={!!recovery} className="pos-shell__workarea">
+      {checkoutRecovery && (
+        <div className="pos-shell__feedback" role="alert" aria-live="polite">
+          {checkoutRecovery.phase === 'loading' && 'Checking the server order and checkout…'}
+          {checkoutRecovery.phase === 'failed' && (
+            <>
+              Checkout state could not be confirmed. The basket is locked; retry the check.
+              <button type="button" className="pos-shell__btn" onClick={() => void reconcileCheckout(checkoutRecovery.orderId)}>
+                Retry checkout check
+              </button>
+            </>
+          )}
+          {checkoutRecovery.phase === 'review' && (
+            <>
+              Server order and checkout were read, but the original request may still be processing.
+              The basket remains locked because this check cannot confirm its final outcome.
+              Contact a manager if the outcome cannot be confirmed.
+              <button type="button" className="pos-shell__btn" onClick={() => void reconcileCheckout(checkoutRecovery.orderId)}>
+                Check checkout again
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      <fieldset disabled={!!recovery || !!checkoutRecovery || orderLoading} className="pos-shell__workarea">
 
       {!editable && order && order.status === 'OPEN' && liveSettlement && (
         <div className="pos-shell__feedback" role="status">
@@ -814,7 +915,7 @@ export function CashierShell({
               if (order) await reloadCommercial(order.orderId);
             }}
             onNewOrder={() => {
-              if (recoveryRef.current || inFlightRef.current) return;
+              if (recoveryRef.current || checkoutRecoveryRef.current || inFlightRef.current) return;
               orderIdRef.current = null;
               setOrder(null);
               setSettlement(null);
