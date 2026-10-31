@@ -148,9 +148,11 @@ try {
   await waitHttp(webUrl);
 
   console.log('run playwright…');
+  const playwrightArgs = ['exec', 'playwright', 'test'];
+  if (process.env.E2E_PLAYWRIGHT_GREP) playwrightArgs.push('--grep', process.env.E2E_PLAYWRIGHT_GREP);
   await run(
     'pnpm',
-    ['exec', 'playwright', 'test'],
+    playwrightArgs,
     {
       DATABASE_URL,
       E2E_BASE_URL: webUrl,
