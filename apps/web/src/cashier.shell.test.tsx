@@ -159,6 +159,22 @@ const eggLine: OrderLine = {
 
 const orderWithEgg: OrderBasket = { ...emptyOrder, lines: [eggLine] };
 
+const collectingSettlement = {
+  orderId: emptyOrder.orderId,
+  settlementGroupId: 'settlement-1',
+  state: 'COLLECTING' as const,
+  currencyCode: 'VND',
+  merchandiseGrossMinor: '10000',
+  customerPayableMinor: '10000',
+  allocatedAmountMinor: '0',
+  outstandingAmountMinor: '10000',
+  version: 1,
+  checks: [{
+    settlementCheckId: 'check-1', checkNumber: 1, state: 'OPEN',
+    customerPayableMinor: '10000', allocatedAmountMinor: '0', outstandingAmountMinor: '10000',
+  }],
+};
+
 const needsReacceptance: CommercialStatus = {
   orderId: emptyOrder.orderId,
   orderStatus: 'OPEN',
@@ -571,6 +587,159 @@ describe('CashierShell integration (mocked API)', () => {
     expect(await screen.findByText(/2 ea/)).toBeTruthy();
     expect(mockedApi.selectCountTap).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps checkout mutations locked after a lost open response and failed or malformed reads', async () => {
+    mockedApi.resolveSurface.mockResolvedValue(surfaceWith(activeCount()));
+    mockedApi.openOrder.mockResolvedValue(orderWithEgg);
+    mockedApi.getOrder.mockResolvedValue(orderWithEgg);
+    mockedApi.getCommercialStatus.mockResolvedValue(acceptedCommercial);
+    mockedApi.acceptTaxSnapshot.mockResolvedValue({ taxOrderSnapshotId: 'tax-test' } as never);
+    mockedApi.openSettlement.mockRejectedValue(new TypeError('response lost'));
+    mockedApi.getLiveSettlement
+      .mockResolvedValueOnce({ orderId: emptyOrder.orderId, settlement: null })
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValueOnce({ orderId: emptyOrder.orderId } as never)
+      .mockResolvedValueOnce({ orderId: emptyOrder.orderId, settlement: null });
+
+    render(<CashierShell context={ctx} />);
+    const tile = await screen.findByRole('button', { name: /Eggs,/i });
+    await waitFor(() => expect(screen.getByTestId('open-checkout').closest('fieldset')?.disabled).toBe(false));
+    fireEvent.click(screen.getByTestId('open-checkout'));
+    expect(await screen.findByText(/Checkout state could not be confirmed/i)).toBeTruthy();
+    expect(tile.closest('fieldset')?.disabled).toBe(true);
+    fireEvent.click(tile);
+    fireEvent.click(screen.getByRole('button', { name: /New order/i }));
+    expect(mockedApi.selectCountTap).not.toHaveBeenCalled();
+    expect(mockedApi.openOrder).toHaveBeenCalledTimes(1);
+    expect(mockedApi.openSettlement).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: /Retry checkout check/i }));
+    expect(await screen.findByText(/Checkout state could not be confirmed/i)).toBeTruthy();
+    expect(tile.closest('fieldset')?.disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: /Retry checkout check/i }));
+    expect(await screen.findByText(/original request may still be processing/i)).toBeTruthy();
+    expect(tile.closest('fieldset')?.disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: /I checked the checkout/i })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Check checkout again/i }));
+    await screen.findByText(/original request may still be processing/i);
+    expect(tile.closest('fieldset')?.disabled).toBe(true);
+    expect(mockedApi.openSettlement).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not interpret an initial failed settlement read as an absent settlement', async () => {
+    mockedApi.resolveSurface.mockResolvedValue(surfaceWith(activeCount()));
+    mockedApi.openOrder.mockResolvedValue(orderWithEgg);
+    mockedApi.getOrder.mockResolvedValue(orderWithEgg);
+    mockedApi.getLiveSettlement
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValueOnce({ orderId: 'another-order', settlement: null })
+      .mockResolvedValueOnce({ orderId: emptyOrder.orderId, settlement: null });
+
+    render(<CashierShell context={ctx} />);
+    const tile = await screen.findByRole('button', { name: /Eggs,/i });
+    expect(await screen.findByText(/Checkout state could not be confirmed/i)).toBeTruthy();
+    expect(tile.closest('fieldset')?.disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: /Retry checkout check/i }));
+    expect(await screen.findByText(/Checkout state could not be confirmed/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Retry checkout check/i }));
+    await waitFor(() => expect(tile.closest('fieldset')?.disabled).toBe(false));
+    expect(mockedApi.openOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a lost abort locked even when the next read still shows the prior active settlement', async () => {
+    mockedApi.resolveSurface.mockResolvedValue(surfaceWith(activeCount()));
+    mockedApi.openOrder.mockResolvedValue(orderWithEgg);
+    mockedApi.getOrder.mockResolvedValue(orderWithEgg);
+    mockedApi.getCommercialStatus.mockResolvedValue(acceptedCommercial);
+    mockedApi.abortSettlement.mockRejectedValue(new TypeError('response lost'));
+    mockedApi.getLiveSettlement
+      .mockResolvedValueOnce({ orderId: emptyOrder.orderId, settlement: collectingSettlement })
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValueOnce({ orderId: emptyOrder.orderId, settlement: collectingSettlement });
+
+    render(<CashierShell context={ctx} />);
+    const abort = await screen.findByTestId('abort-checkout');
+    await waitFor(() => expect(abort.closest('fieldset')?.disabled).toBe(false));
+    fireEvent.click(abort);
+    expect(await screen.findByText(/Checkout state could not be confirmed/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Retry checkout check/i }));
+    expect(await screen.findByText(/original request may still be processing/i)).toBeTruthy();
+    expect(abort.closest('fieldset')?.disabled).toBe(true);
+    fireEvent.click(abort);
+    expect(mockedApi.abortSettlement).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: /I checked the checkout/i })).toBeNull();
+  });
+
+  it('shows a confirmed 409 abort rejection and retains the live settlement without an unknown lock', async () => {
+    mockedApi.resolveSurface.mockResolvedValue(surfaceWith(activeCount()));
+    mockedApi.openOrder.mockResolvedValue(orderWithEgg);
+    mockedApi.getOrder.mockResolvedValue(orderWithEgg);
+    mockedApi.getCommercialStatus.mockResolvedValue(acceptedCommercial);
+    mockedApi.getLiveSettlement.mockResolvedValue({ orderId: emptyOrder.orderId, settlement: collectingSettlement });
+    mockedApi.abortSettlement.mockRejectedValue(new ApiError(409, 'SETTLEMENT_ABORT_FORBIDDEN', 'Payment exists'));
+    render(<CashierShell context={ctx} />);
+    const abort = await screen.findByTestId('abort-checkout');
+    await waitFor(() => expect(abort.closest('fieldset')?.disabled).toBe(false));
+    fireEvent.click(abort);
+    expect(await screen.findByText(/SETTLEMENT_ABORT_FORBIDDEN/i)).toBeTruthy();
+    await waitFor(() => expect(mockedApi.getOrder).toHaveBeenCalledTimes(1));
+    expect(abort.closest('fieldset')?.disabled).toBe(false);
+    expect(screen.queryByText(/Checkout state could not be confirmed/i)).toBeNull();
+    expect(screen.getByTestId('settlement-state').textContent).toMatch(/COLLECTING/);
+  });
+
+  it('keeps controls locked if reading the order fails after an already-open checkout rejection', async () => {
+    mockedApi.resolveSurface.mockResolvedValue(surfaceWith(activeCount()));
+    mockedApi.openOrder.mockResolvedValue(orderWithEgg);
+    mockedApi.getCommercialStatus.mockResolvedValue(acceptedCommercial);
+    mockedApi.acceptTaxSnapshot.mockResolvedValue({ taxOrderSnapshotId: 'tax-test' } as never);
+    mockedApi.openSettlement.mockRejectedValue(new ApiError(409, 'SETTLEMENT_ALREADY_OPEN', 'Already open'));
+    mockedApi.getOrder.mockRejectedValueOnce(new TypeError('offline')).mockResolvedValueOnce(orderWithEgg);
+    mockedApi.getLiveSettlement
+      .mockResolvedValueOnce({ orderId: emptyOrder.orderId, settlement: null })
+      .mockResolvedValue({ orderId: emptyOrder.orderId, settlement: collectingSettlement });
+    render(<CashierShell context={ctx} />);
+    const checkout = await screen.findByTestId('open-checkout');
+    await waitFor(() => expect(checkout.closest('fieldset')?.disabled).toBe(false));
+    fireEvent.click(checkout);
+    expect(await screen.findByText(/Checkout state could not be confirmed/i)).toBeTruthy();
+    expect(checkout.closest('fieldset')?.disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: /Retry checkout check/i }));
+    await waitFor(() => expect(screen.getByTestId('settlement-state').textContent).toMatch(/COLLECTING/));
+    expect(screen.queryByText(/Checkout state could not be confirmed/i)).toBeNull();
+    expect(mockedApi.openSettlement).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['tax-read-failed', 'checkout-tax-rejected', 'payable-unavailable', 'idempotency-conflict'])(
+    'does not leave the basket locked for a definite checkout rejection: %s',
+    async (scenario) => {
+      mockedApi.resolveSurface.mockResolvedValue(surfaceWith(activeCount()));
+      mockedApi.openOrder.mockResolvedValue(orderWithEgg);
+      mockedApi.getOrder.mockResolvedValue(orderWithEgg);
+      mockedApi.getCommercialStatus.mockResolvedValue(acceptedCommercial);
+      if (scenario === 'tax-read-failed') {
+        mockedApi.acceptTaxSnapshot.mockRejectedValueOnce(new TypeError('network'));
+      } else {
+        mockedApi.acceptTaxSnapshot.mockResolvedValueOnce({ taxOrderSnapshotId: 'tax-test' } as never);
+        mockedApi.openSettlement.mockRejectedValueOnce(
+          scenario === 'payable-unavailable'
+            ? new ApiError(400, 'SETTLEMENT_PAYABLE_UNAVAILABLE', 'Payable unavailable')
+            : scenario === 'idempotency-conflict'
+              ? new ApiError(409, 'IDEMPOTENCY_CONFLICT', 'Conflict')
+              : new ApiError(400, 'SETTLEMENT_TAX_SNAPSHOT_REQUIRED', 'Tax required'),
+        );
+      }
+      render(<CashierShell context={ctx} />);
+      const checkout = await screen.findByTestId('open-checkout');
+      await waitFor(() => expect(checkout.closest('fieldset')?.disabled).toBe(false));
+      fireEvent.click(checkout);
+      await waitFor(() => expect(mockedApi.getOrder).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(checkout.closest('fieldset')?.disabled).toBe(false));
+      expect(screen.queryByText(/Checkout state could not be confirmed/i)).toBeNull();
+      if (scenario === 'tax-read-failed') expect(mockedApi.openSettlement).not.toHaveBeenCalled();
+      else expect(mockedApi.openSettlement).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('reconciles a weighted selection after a lost response without reopening or resubmitting its modal', async () => {
     const milk = activeCount({ displayLabel: 'Milk', dimension: 'VOLUME', quantityEntry: 'DEFERRED_WEIGHTED', baseUnit: 'L' });
