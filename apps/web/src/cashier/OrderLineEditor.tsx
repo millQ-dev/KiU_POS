@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { OrderLine } from '../api/types.js';
 import {
   bumpCountQuantity,
@@ -18,19 +18,23 @@ type Props = {
 export function OrderLineEditor({ line, busy, editable, onUpdateQuantity, onRemove }: Props) {
   const isCount = line.dimension === 'COUNT';
   const [draft, setDraft] = useState(line.quantity);
+  const [error, setError] = useState<string | null>(null);
+  const errorId = useId();
 
   useEffect(() => {
     setDraft(line.quantity);
+    setError(null);
   }, [line.quantity, line.orderLineId]);
 
   const applyDraft = () => {
     const next = draft.trim();
-    if (next === line.quantity) return;
-    if (isCount) {
-      if (!isValidCountQuantityString(next)) return;
-    } else if (!isValidWeightedQuantityString(next)) {
+    if (next === line.quantity) { setError(null); return; }
+    const valid = isCount ? isValidCountQuantityString(next) : isValidWeightedQuantityString(next);
+    if (!valid) {
+      setError(isCount ? 'Enter a whole number greater than zero.' : `Enter a quantity greater than zero in ${line.unit}, using a decimal point.`);
       return;
     }
+    setError(null);
     onUpdateQuantity(next);
   };
 
@@ -80,7 +84,9 @@ export function OrderLineEditor({ line, busy, editable, onUpdateQuantity, onRemo
             aria-label="COUNT quantity"
             disabled={busy}
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            aria-invalid={!!error}
+            aria-describedby={error ? errorId : undefined}
+            onChange={(e) => { setDraft(e.target.value); setError(null); }}
             onBlur={applyDraft}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
@@ -107,7 +113,9 @@ export function OrderLineEditor({ line, busy, editable, onUpdateQuantity, onRemo
             aria-label={`${line.dimension} quantity`}
             disabled={busy}
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            aria-invalid={!!error}
+            aria-describedby={error ? errorId : undefined}
+            onChange={(e) => { setDraft(e.target.value); setError(null); }}
             onBlur={applyDraft}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
@@ -127,6 +135,7 @@ export function OrderLineEditor({ line, busy, editable, onUpdateQuantity, onRemo
           </button>
         </div>
       )}
+      {error && <p id={errorId} className="pos-line-editor__error" role="alert">{error}</p>}
       <button
         type="button"
         className="pos-line-editor__remove"
