@@ -66,7 +66,7 @@ function guestTokenFromPath(): string | null {
   return m?.[1] ?? null;
 }
 
-type SessionPhase = 'idle' | 'resolving' | 'ready';
+type SessionPhase = 'idle' | 'resolving' | 'ready' | 'error';
 
 /**
  * CASHIER-1 production front door:
@@ -113,11 +113,17 @@ export function App() {
     const gen = ++bootstrapGen.current;
     setSessionPhase('resolving');
     void (async () => {
-      const user = await fetchCurrentSession();
-      if (bootstrapGen.current !== gen) return;
-      setAuthUser(user);
-      setSessionPhase('ready');
+      try {
+        const user = await fetchCurrentSession();
+        if (bootstrapGen.current !== gen) return;
+        setAuthUser(user);
+        setSessionPhase('ready');
+      } catch {
+        if (bootstrapGen.current !== gen) return;
+        setSessionPhase('error');
+      }
     })();
+    return () => { if (bootstrapGen.current === gen) bootstrapGen.current += 1; };
   }, [realm, sessionEpoch, preferDev, guestToken]);
 
   const enterShell = useCallback(
@@ -217,6 +223,16 @@ export function App() {
       <main className="session-resolving">
         <h1>{realm.displayName}</h1>
         <p role="status">Checking session…</p>
+      </main>
+    );
+  }
+
+  if (sessionPhase === 'error') {
+    return (
+      <main className="session-resolving">
+        <h1>{realm.displayName}</h1>
+        <p role="alert">Could not check the session. Check the connection and try again.</p>
+        <button type="button" onClick={() => setSessionEpoch((n) => n + 1)}>Retry session check</button>
       </main>
     );
   }
