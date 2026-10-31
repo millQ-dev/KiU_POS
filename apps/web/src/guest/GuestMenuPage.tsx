@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { GuestMenuDto } from './types.js';
+import { formatMoneyDisplay } from '../money/formatMoneyDisplay.js';
 import './GuestMenuPage.css';
 
 const LOCALES = [
@@ -8,15 +9,23 @@ const LOCALES = [
   { code: 'ru', label: 'RU' },
 ] as const;
 
-function formatPrice(amountMinor: string, currencyCode: string, exponent: number): string {
-  const n = Number(amountMinor);
-  if (!Number.isFinite(n)) return '—';
-  const major = exponent === 0 ? String(n) : (n / 10 ** exponent).toFixed(exponent);
-  return `${major} ${currencyCode}`;
+type Locale = typeof LOCALES[number]['code'];
+const COPY: Record<Locale, { loading: string; unavailable: string; retry: string; language: string; table: string; soldOut: string; empty: string }> = {
+  en: { loading: 'Loading menu…', unavailable: 'Menu unavailable', retry: 'Try again', language: 'Language', table: 'Table', soldOut: 'Unavailable', empty: 'No items are available to show.' },
+  ru: { loading: 'Загружаем меню…', unavailable: 'Меню недоступно', retry: 'Повторить', language: 'Язык', table: 'Стол', soldOut: 'Недоступно', empty: 'В меню пока нет блюд.' },
+  vi: { loading: 'Đang tải thực đơn…', unavailable: 'Không thể tải thực đơn', retry: 'Thử lại', language: 'Ngôn ngữ', table: 'Bàn', soldOut: 'Tạm hết', empty: 'Chưa có món để hiển thị.' },
+};
+
+function GuestPhoto({ src }: { src: string | null }) {
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  return src && failedSource !== src
+    ? <img className="gm-photo" src={src} alt="" loading="lazy" onError={() => setFailedSource(src)} />
+    : <div className="gm-photo gm-photo-placeholder" aria-hidden="true" />;
 }
 
 export function GuestMenuPage({ opaqueToken }: { opaqueToken: string }) {
-  const [lang, setLang] = useState('en');
+  const [lang, setLang] = useState<Locale>('en');
+  const copy = COPY[lang];
   const [menuResult, setMenuResult] = useState<{ token: string; menu: GuestMenuDto } | null>(null);
   const menu = menuResult?.token === opaqueToken ? menuResult.menu : null;
   const [error, setError] = useState<string | null>(null);
@@ -48,51 +57,53 @@ export function GuestMenuPage({ opaqueToken }: { opaqueToken: string }) {
     };
   }, [opaqueToken, lang, retry]);
 
+  const languages = (
+    <div className="gm-langs" role="group" aria-label={copy.language}>
+      {LOCALES.map((l) => <button key={l.code} type="button" aria-pressed={lang === l.code}
+        className={lang === l.code ? 'gm-lang gm-lang-active' : 'gm-lang'} onClick={() => {
+          if (lang === l.code) return;
+          requestGeneration.current += 1;
+          setError(null);
+          setLoading(true);
+          setLang(l.code);
+        }}>{l.label}</button>)}
+    </div>
+  );
+
   if ((loading || (!error && menuResult?.token !== opaqueToken)) && !menu) {
     return (
-      <main className="gm-page">
-        <p className="gm-muted">Loading menu…</p>
+      <main className="gm-page" lang={lang}>
+        {languages}
+        <p className="gm-muted" role="status">{copy.loading}</p>
       </main>
     );
   }
 
   if (error || !menu) {
     return (
-      <main className="gm-page">
-        <p className="gm-error" role="alert">{error ?? 'Menu unavailable'}</p>
-        <button type="button" onClick={() => setRetry((n) => n + 1)}>Try again</button>
+      <main className="gm-page" lang={lang}>
+        {languages}
+        <p className="gm-error" role="alert">{copy.unavailable}</p>
+        <button type="button" onClick={() => setRetry((n) => n + 1)}>{copy.retry}</button>
       </main>
     );
   }
 
+  const visibleItems = new Set(menu.items.map((item) => item.publicItemRef));
+  const hasVisibleItems = menu.categories.some((category) => category.itemRefs.some((ref) => visibleItems.has(ref)));
+
   return (
-    <main className="gm-page">
+    <main className="gm-page" lang={lang}>
       <header className="gm-header">
         <div>
           <p className="gm-brand">{menu.brand.name}</p>
           <h1 className="gm-outlet">{menu.outlet.name}</h1>
-          {menu.tableLabel ? <p className="gm-table">Table {menu.tableLabel}</p> : null}
+          {menu.tableLabel ? <p className="gm-table">{copy.table} {menu.tableLabel}</p> : null}
         </div>
-        <div className="gm-langs" role="group" aria-label="Language">
-          {LOCALES.map((l) => (
-            <button
-              key={l.code}
-              type="button"
-              className={lang === l.code ? 'gm-lang gm-lang-active' : 'gm-lang'}
-              onClick={() => {
-                if (lang === l.code) return;
-                requestGeneration.current += 1;
-                setLoading(true);
-                setLang(l.code);
-              }}
-            >
-              {l.label}
-            </button>
-          ))}
-        </div>
+        {languages}
       </header>
 
-      {loading ? <p className="gm-muted" role="status">Loading menu…</p> : menu.categories.map((cat) => (
+      {loading ? <p className="gm-muted" role="status">{copy.loading}</p> : !hasVisibleItems ? <p className="gm-muted" role="status">{copy.empty}</p> : menu.categories.map((cat) => (
         <section key={cat.publicCategoryRef} className="gm-section">
           <h2 className="gm-section-title">{cat.name}</h2>
           <ul className="gm-list">
@@ -105,26 +116,18 @@ export function GuestMenuPage({ opaqueToken }: { opaqueToken: string }) {
                   key={item.publicItemRef}
                   className={unavailable ? 'gm-card gm-card-unavailable' : 'gm-card'}
                 >
-                  {item.imageUrl ? (
-                    <img className="gm-photo" src={item.imageUrl} alt="" loading="lazy" />
-                  ) : (
-                    <div className="gm-photo gm-photo-placeholder" aria-hidden />
-                  )}
+                  <GuestPhoto src={item.imageUrl} />
                   <div className="gm-card-body">
                     <div className="gm-card-top">
                       <h3 className="gm-dish">{item.name}</h3>
                       <p className="gm-price">
                         {item.price.status === 'AVAILABLE'
-                          ? formatPrice(
-                              item.price.amountMinor,
-                              item.price.currencyCode,
-                              item.price.minorUnitExponent,
-                            )
+                          ? formatMoneyDisplay(item.price)
                           : '—'}
                       </p>
                     </div>
                     {item.description ? <p className="gm-desc">{item.description}</p> : null}
-                    {unavailable ? <p className="gm-badge">Unavailable</p> : null}
+                    {unavailable ? <p className="gm-badge">{copy.soldOut}</p> : null}
                   </div>
                 </li>
               );

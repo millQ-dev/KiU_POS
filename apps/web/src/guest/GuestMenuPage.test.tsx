@@ -4,7 +4,8 @@ import { GuestMenuPage } from './GuestMenuPage.js';
 
 function menu(name: string) {
   return { brand: { name: 'Brand' }, outlet: { name: 'Outlet' }, tableLabel: null,
-    categories: [{ publicCategoryRef: 'cat', name, itemRefs: [] }], items: [] };
+    categories: [{ publicCategoryRef: 'cat', name, itemRefs: ['item'] }],
+    items: [{ publicItemRef: 'item', name: 'Dish', description: null, imageUrl: null, availability: 'AVAILABLE', price: { status: 'UNAVAILABLE' } }] };
 }
 function response(name: string) {
   return new Response(JSON.stringify(menu(name)), { status: 200 });
@@ -57,4 +58,36 @@ it('does not display a previous token menu or a stale response after the token c
   await act(async () => { resolveOld(response('Stale menu')); });
   expect(screen.queryByText('Stale menu')).toBeNull();
   expect(screen.getByText('New menu')).toBeTruthy();
+});
+
+it('localizes error and recovery controls and allows language change while unavailable', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')));
+  render(<GuestMenuPage opaqueToken="t" />);
+  await screen.findByText('Menu unavailable');
+  fireEvent.click(screen.getByRole('button', { name: 'VI' }));
+  await screen.findByText('Không thể tải thực đơn');
+  expect(screen.getByRole('button', { name: 'Thử lại' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'VI' }).getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(screen.getByRole('button', { name: 'RU' }));
+  await screen.findByText('Меню недоступно');
+  expect(screen.getByRole('button', { name: 'Повторить' })).toBeTruthy();
+});
+
+it('shows an empty state for the server category with no item references', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...menu('Dishes'), categories: [{ publicCategoryRef: 'cat', name: 'Dishes', itemRefs: [] }], items: [] }), { status: 200 })));
+  render(<GuestMenuPage opaqueToken="t" />);
+  expect(await screen.findByText('No items are available to show.')).toBeTruthy();
+});
+
+it('falls back for a broken image and formats large server prices without precision loss', async () => {
+  const data = { ...menu('Dishes'), categories: [{ publicCategoryRef: 'cat', name: 'Dishes', itemRefs: ['item'] }],
+    items: [{ publicItemRef: 'item', name: 'Dish', description: null, imageUrl: '/broken.png', availability: 'AVAILABLE',
+      price: { status: 'AVAILABLE', amountMinor: '9007199254740993', currencyCode: 'VND', minorUnitExponent: 0 } }] };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(data), { status: 200 })));
+  const view = render(<GuestMenuPage opaqueToken="t" />);
+  await screen.findByText('9007199254740993 VND');
+  const photo = view.container.querySelector('img')!;
+  fireEvent.error(photo);
+  expect(view.container.querySelector('img')).toBeNull();
+  expect(view.container.querySelector('.gm-photo-placeholder')).toBeTruthy();
 });
