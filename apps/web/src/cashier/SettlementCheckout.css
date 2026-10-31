@@ -1,7 +1,7 @@
 .pos-settlement {
-  margin-top: var(--spacing-3, 0.75rem);
-  padding-top: var(--spacing-3, 0.75rem);
-  border-top: 1px solid var(--color-border, #ddd);
+  margin-top: var(--pos-space-3);
+  padding-top: var(--pos-space-3);
+  border-top: 1px solid var(--pos-border);
 }
 
 .pos-settlement__title {
@@ -14,7 +14,7 @@
 .pos-settlement__zero {
   margin: 0 0 0.5rem;
   font-size: 0.85rem;
-  color: var(--color-muted, #555);
+  color: var(--pos-text-muted);
 }
 
 .pos-settlement__facts {
@@ -25,7 +25,7 @@
 
 .pos-settlement__facts dt {
   font-size: 0.75rem;
-  color: var(--color-muted, #666);
+  color: var(--pos-text-muted);
 }
 
 .pos-settlement__facts dd {
@@ -57,7 +57,7 @@
 .pos-settlement__success {
   margin: 0.75rem 0;
   padding: 0.65rem 0;
-  border-top: 1px dashed var(--color-border, #ccc);
+  border-top: 1px dashed var(--pos-border);
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
@@ -67,7 +67,7 @@
   margin: 0;
   padding-left: 1.1rem;
   font-size: 0.85rem;
-  color: var(--color-muted, #555);
+  color: var(--pos-text-muted);
 }
 
 .pos-settlement__method-list [aria-disabled='true'] {
@@ -75,7 +75,7 @@
 }
 
 .pos-settlement__success--journey {
-  border-top: 2px solid var(--color-border, #ccc);
+  border-top: 2px solid var(--pos-border);
 }
 
 .pos-settlement__receive-title {
@@ -108,5 +108,5 @@
 .pos-settlement__fiscal {
   margin: 0.5rem 0;
   font-size: 0.8rem;
-  color: var(--color-muted, #666);
+  color: var(--pos-text-muted);
 }
