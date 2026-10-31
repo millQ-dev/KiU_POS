@@ -216,6 +216,24 @@ export function MerchantDiscountPanel({
         ...(approvalRequestId ? { approvalRequestId } : {}),
       };
       const result = await posApi.applyMerchantDiscount(orderId, body);
+      // HTTP success alone does not prove the command returned its final DTO.
+      // Keep the attempt uncertain if a proxy or malformed response cannot be trusted.
+      if (!result || (result.status !== 'applied' && result.status !== 'duplicate') ||
+          result.orderId !== orderId || result.mode !== mode || result.reason !== reason.trim() ||
+          result.certainty !== 'FINAL' || typeof result.discountMinor !== 'string' ||
+          !/^\d+$/.test(result.discountMinor) || typeof result.netMerchandiseSalesMinor !== 'string' ||
+          !/^\d+$/.test(result.netMerchandiseSalesMinor) ||
+          (result.percentBasisPoints !== null && !Number.isInteger(result.percentBasisPoints)) ||
+          typeof result.eligibleBasisMinor !== 'string' || !/^\d+$/.test(result.eligibleBasisMinor) ||
+          (result.approvalRequestId !== null && typeof result.approvalRequestId !== 'string') ||
+          typeof result.approverUserId !== 'string' || typeof result.semanticFingerprint !== 'string' ||
+          !Array.isArray(result.lines) || result.lines.some((line) => !line ||
+            typeof line.orderLineId !== 'string' || !Number.isInteger(line.lineNumber) ||
+            typeof line.allocatedOrderMerchantDiscountMinor !== 'string' ||
+            !/^\d+$/.test(line.allocatedOrderMerchantDiscountMinor) ||
+            typeof line.netMerchandiseSalesMinor !== 'string' || !/^\d+$/.test(line.netMerchandiseSalesMinor))) {
+        throw new Error('INVALID_DISCOUNT_RESPONSE');
+      }
       const view: MerchantDiscountAppliedView = {
         status: result.status,
         discountMinor: result.discountMinor,
