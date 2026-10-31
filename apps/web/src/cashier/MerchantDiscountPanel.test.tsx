@@ -69,6 +69,7 @@ describe('MerchantDiscountPanel', () => {
       eligibleBasisMinor: '100000',
       reason: 'Regular guest',
       approvalRequestId: null,
+      approverUserId: 'manager', semanticFingerprint: 'fingerprint', lines: [],
       certainty: 'FINAL',
       netMerchandiseSalesMinor: '90000',
     });
@@ -104,6 +105,24 @@ describe('MerchantDiscountPanel', () => {
     expect(screen.getByTestId('merchant-discount-result').textContent).toMatch(/10000/);
   });
 
+  it.each([
+    { error: 'INVALID_JSON' },
+    { status: 'applied', orderId, mode: 'FIXED_MINOR', reason: 'test', certainty: 'FINAL', discountMinor: '100', netMerchandiseSalesMinor: '900' },
+    { status: 'applied', orderId: 'another-order', mode: 'FIXED_MINOR', reason: 'test', certainty: 'FINAL', discountMinor: '100', netMerchandiseSalesMinor: '900' },
+  ])('keeps an invalid or unrelated success response uncertain', async (response) => {
+    mockedApi.applyMerchantDiscount.mockResolvedValueOnce(response as never);
+    const onApplied = vi.fn();
+    render(<MerchantDiscountPanel orderId={orderId} outletId={outletId} terminalId={terminalId}
+      commercial={acceptedCommercial()} settlementLive={false} editable busy={false} onApplied={onApplied} />);
+    fireEvent.change(screen.getByTestId('merchant-discount-amount'), { target: { value: '100' } });
+    fireEvent.change(screen.getByTestId('merchant-discount-reason'), { target: { value: 'test' } });
+    fireEvent.click(screen.getByTestId('merchant-discount-apply'));
+    await screen.findByRole('heading', { name: 'Discount outcome uncertain' });
+    expect(onApplied).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('merchant-discount-result')).toBeNull();
+    expect(mockedApi.applyMerchantDiscount).toHaveBeenCalledTimes(1);
+  });
+
   it('requests ApprovalRequest when cashier lacks direct grant, then applies with id', async () => {
     mockedApi.applyMerchantDiscount
       .mockRejectedValueOnce(
@@ -118,6 +137,7 @@ describe('MerchantDiscountPanel', () => {
         eligibleBasisMinor: '100000',
         reason: 'promo',
         approvalRequestId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        approverUserId: 'manager', semanticFingerprint: 'fingerprint', lines: [],
         certainty: 'FINAL',
         netMerchandiseSalesMinor: '90000',
       });
@@ -229,6 +249,7 @@ describe('MerchantDiscountPanel', () => {
         eligibleBasisMinor: '100000',
         reason: 'comp',
         approvalRequestId: null,
+        approverUserId: 'manager', semanticFingerprint: 'fingerprint', lines: [],
         certainty: 'FINAL',
         netMerchandiseSalesMinor: '95000',
       });
@@ -298,6 +319,7 @@ describe('MerchantDiscountPanel', () => {
       eligibleBasisMinor: '100000',
       reason: 'Regular guest',
       approvalRequestId: null,
+      approverUserId: 'manager', semanticFingerprint: 'fingerprint', lines: [],
       certainty: 'FINAL',
       netMerchandiseSalesMinor: '90000',
     });
