@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   sessionFetch,
   type ClosedCashShift,
@@ -75,6 +75,8 @@ export function ClosingCashScreen({
   const [phase, setPhase] = useState<Phase>('count');
   const [closed, setClosed] = useState<ClosedCashShift | null>(null);
   const [unknownHint, setUnknownHint] = useState<string | null>(null);
+  const pendingPayload = useRef<Record<string, unknown> | null>(null);
+  const sending = useRef(false);
 
   const closeIdempotencyKey = useMemo(
     () => loadOrCreateIdempotencyKey(shift.cashShiftId),
@@ -84,22 +86,25 @@ export function ClosingCashScreen({
   const countReady = /^[0-9]+$/.test(actualMinor);
 
   async function submitClose() {
-    if (busy || !countReady) return;
+    if (sending.current || busy || !countReady) return;
+    const wasUnknown = phase === 'unknown';
+    sending.current = true;
     setBusy(true);
     setError(null);
     setErrorCode(null);
     setUnknownHint(null);
     try {
-      const payload: Record<string, unknown> = {
+      const payload: Record<string, unknown> = pendingPayload.current ?? {
         cashShiftId: shift.cashShiftId,
         closeIdempotencyKey,
         actualAmountMinor: actualMinor,
         currencyCode: shift.currencyCode,
         minorUnitExponent: shift.minorUnitExponent,
       };
-      if (needReason || reasonText.trim().length > 0) {
+      if (!pendingPayload.current && (needReason || reasonText.trim().length > 0)) {
         payload.reasonText = reasonText.trim();
       }
+      pendingPayload.current = payload;
       const res = await sessionFetch('/api/v1/cash/shifts/close', {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -113,14 +118,30 @@ export function ClosingCashScreen({
         return;
       }
 
-      if (res.ok && body.status === 'CLOSED') {
+      const expectedActual = String(payload.actualAmountMinor);
+      const actualMatches = typeof body?.actualAmountMinor === 'string' && /^\d+$/.test(body.actualAmountMinor) &&
+        /^\d+$/.test(expectedActual) && BigInt(body.actualAmountMinor) === BigInt(expectedActual);
+      if (res.ok && body.status === 'CLOSED' && body.cashShiftId === shift.cashShiftId &&
+          body.terminalId === shift.terminalId && body.closeIdempotencyKey === closeIdempotencyKey &&
+          body.currencyCode === shift.currencyCode && body.minorUnitExponent === shift.minorUnitExponent && actualMatches &&
+          typeof body.expectedAmountMinor === 'string' && /^\d+$/.test(body.expectedAmountMinor) &&
+          typeof body.differenceMinor === 'string' && /^-?\d+$/.test(body.differenceMinor) &&
+          ['BALANCED', 'SURPLUS', 'SHORTAGE'].includes(body.varianceKind ?? '') &&
+          typeof body.closedAt === 'string' && typeof body.closedByUserId === 'string') {
         clearIdempotencyKey(shift.cashShiftId);
+        pendingPayload.current = null;
         setClosed(body);
         setPhase('success');
         return;
       }
 
       const code = body.error ?? `HTTP_${res.status}`;
+      if (wasUnknown || res.ok || res.status >= 500 || res.status === 0) {
+        setPhase('unknown');
+        setUnknownHint('The close outcome is still unconfirmed. Retry the same request or seek assistance');
+        return;
+      }
+      pendingPayload.current = null;
       setErrorCode(code);
       if (code === 'REASON_REQUIRED') {
         setNeedReason(true);
@@ -159,6 +180,7 @@ export function ClosingCashScreen({
       setPhase('unknown');
       setUnknownHint('Network or timeout — do not assume success. Retry uses the same idempotency key and the same count/reason.');
     } finally {
+      sending.current = false;
       setBusy(false);
     }
   }
@@ -224,7 +246,7 @@ export function ClosingCashScreen({
           placeholder="Enter counted amount"
           value={actualMinor}
           onChange={(ev) => setActualMinor(ev.target.value.replace(/\D/g, '').slice(0, 18))}
-          disabled={busy}
+          disabled={busy || phase === 'unknown'}
         />
       </label>
       <label>
@@ -235,7 +257,7 @@ export function ClosingCashScreen({
           rows={3}
           value={reasonText}
           onChange={(ev) => setReasonText(ev.target.value.slice(0, 2000))}
-          disabled={busy}
+          disabled={busy || phase === 'unknown'}
           required={needReason}
         />
       </label>
@@ -262,7 +284,7 @@ export function ClosingCashScreen({
       >
         {busy ? 'Closing…' : phase === 'unknown' ? 'Retry close' : 'Confirm close'}
       </button>
-      <button type="button" disabled={busy} onClick={onCancel}>
+      <button type="button" disabled={busy || phase === 'unknown'} onClick={onCancel}>
         Back to cashier
       </button>
     </main>
