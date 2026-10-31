@@ -39,6 +39,30 @@ const groups: CatalogModifierGroup[] = [
 ];
 
 describe('ModifierConfigurationModal', () => {
+  it('uses a valid default for a required group when ask-every-time is off', () => {
+    const onConfirm = vi.fn();
+    const requiredGroups = [{ ...groups[0]!, required: true, askEveryTime: false, minSelect: 1 }];
+    render(<ModifierConfigurationModal line={line} groups={requiredGroups} busy={false}
+      onCancel={() => undefined} onConfirm={onConfirm} />);
+    expect((screen.getByLabelText(/Oat/) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Save modifiers' }));
+    expect(onConfirm).toHaveBeenCalledWith({ selections: [{
+      modifierGroupId: requiredGroups[0]!.modifierGroupId,
+      modifierOptionId: requiredGroups[0]!.options[0]!.modifierOptionId,
+    }], guestNote: null });
+  });
+
+  it('rejects a required group without an available default', () => {
+    const onConfirm = vi.fn();
+    const requiredGroups = [{ ...groups[0]!, required: true, askEveryTime: false, minSelect: 1,
+      options: groups[0]!.options.map((option) => ({ ...option, isDefault: false })) }];
+    render(<ModifierConfigurationModal line={line} groups={requiredGroups} busy={false}
+      onCancel={() => undefined} onConfirm={onConfirm} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save modifiers' }));
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toBeTruthy();
+  });
+
   it('requires explicit ask-every-time selection before confirm', () => {
     const onConfirm = vi.fn();
     render(

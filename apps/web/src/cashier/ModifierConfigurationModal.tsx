@@ -16,7 +16,7 @@ type Props = {
 function initialSelections(groups: CatalogModifierGroup[]): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   for (const g of groups) {
-    if (g.askEveryTime || g.required) {
+    if (g.askEveryTime) {
       out[g.modifierGroupId] = [];
       continue;
     }
@@ -39,7 +39,7 @@ export function ModifierConfigurationModal({ line, groups, busy, onConfirm, onCa
   }, [line.orderLineId, groups]);
 
   const needsExplicit = useMemo(
-    () => groups.some((g) => g.required || g.askEveryTime),
+    () => groups.some((g) => g.askEveryTime),
     [groups],
   );
 
@@ -85,8 +85,8 @@ export function ModifierConfigurationModal({ line, groups, busy, onConfirm, onCa
         </h3>
         <p className="pos-mod-modal__meta">
           {needsExplicit
-            ? 'Required or ask-every-time groups need an explicit choice before accept.'
-            : 'Optional modifiers — defaults applied when empty.'}
+            ? 'Ask-every-time groups need an explicit choice before accept.'
+            : 'Defaults are preselected where available. Check required groups before saving.'}
         </p>
         {groups.map((g) => (
           <fieldset key={g.modifierGroupId} className="pos-mod-modal__group">
