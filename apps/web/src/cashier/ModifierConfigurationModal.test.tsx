@@ -39,6 +39,19 @@ const groups: CatalogModifierGroup[] = [
 ];
 
 describe('ModifierConfigurationModal', () => {
+  it('shows positive and negative price adjustments without changing their values', () => {
+    const options = [
+      { ...groups[0]!.options[0]!, modifierOptionId: 'positive', name: 'Positive', priceAdjustmentMinor: '9007199254740993' },
+      { ...groups[0]!.options[0]!, modifierOptionId: 'negative', name: 'Negative', priceAdjustmentMinor: '-1000' },
+      { ...groups[0]!.options[0]!, modifierOptionId: 'zero', name: 'Zero', priceAdjustmentMinor: '0' },
+    ];
+    render(<ModifierConfigurationModal line={line} groups={[{ ...groups[0]!, options }]} busy={false}
+      onCancel={() => undefined} onConfirm={() => undefined} />);
+    expect(screen.getByText('Positive (+9007199254740993)')).toBeTruthy();
+    expect(screen.getByText('Negative (-1000)')).toBeTruthy();
+    expect(screen.getByText('Zero')).toBeTruthy();
+  });
+
   it('uses a valid default for a required group when ask-every-time is off', () => {
     const onConfirm = vi.fn();
     const requiredGroups = [{ ...groups[0]!, required: true, askEveryTime: false, minSelect: 1 }];
