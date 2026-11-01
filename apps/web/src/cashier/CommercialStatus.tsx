@@ -115,7 +115,7 @@ export function CommercialStatusPanel({
         </ul>
       )}
       <p className="pos-commercial__note">
-        Refresh shows the current unit prices. To update the order total, calculate and accept
+        Refresh shows the current unit prices. To update the merchandise gross, calculate and accept
         the current prices.
       </p>
     </section>
