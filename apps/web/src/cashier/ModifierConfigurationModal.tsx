@@ -115,7 +115,7 @@ export function ModifierConfigurationModal({ line, groups, busy, onConfirm, onCa
                     <span>
                       {o.name}
                       {o.priceAdjustmentMinor !== '0'
-                        ? ` (+${o.priceAdjustmentMinor})`
+                        ? ` (${o.priceAdjustmentMinor.startsWith('-') ? '' : '+'}${o.priceAdjustmentMinor})`
                         : ''}
                     </span>
                   </label>
