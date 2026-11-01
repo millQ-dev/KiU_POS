@@ -115,8 +115,8 @@ export function CommercialStatusPanel({
         </ul>
       )}
       <p className="pos-commercial__note">
-        Refresh resolves unit prices only. Calculate &amp; accept uses RoundingPolicy (no frontend
-        arithmetic).
+        Refresh shows the current unit prices. To update the order total, calculate and accept
+        the current prices.
       </p>
     </section>
   );
